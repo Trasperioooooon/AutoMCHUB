@@ -93,6 +93,29 @@ let CORES = {};
 const coreName = id => (CORES[id] && CORES[id].name) || id;
 const coreKind = id => (CORES[id] && CORES[id].kind) || "game";
 
+/* 每种核心一种"材料色"，用于体素方块图标 */
+const CORE_COLORS = {
+  vanilla: "#7ec850", paper: "#e8e4d8", purpur: "#b57edc", leaves: "#57c25e",
+  folia: "#35c4b5", fabric: "#c7b88a", neoforge: "#e8863c", forge: "#5a6b8c",
+  mohist: "#c0693a", banner: "#d9a441", velocity: "#4fd8e0", waterfall: "#4f9be0",
+};
+const cubeOf = id => `<div class="cube" style="--c:${CORE_COLORS[id] || "#8fa08e"}"><i></i></div>`;
+const eyebrow = t => `<div class="eyebrow">${esc(t)}</div>`;
+
+/* 快捷键：1-4 切换物品栏页签；T 或 / 聚焦控制台输入（MC 聊天习惯） */
+document.addEventListener("keydown", e => {
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+  const t = e.target;
+  const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT");
+  if (typing) return;
+  if (["1", "2", "3", "4"].includes(e.key)) {
+    location.hash = ["#/instances", "#/create", "#/tunnels", "#/settings"][+e.key - 1];
+  } else if (e.key === "/" || e.key === "t" || e.key === "T") {
+    const cmd = $("#cmd-in");
+    if (cmd) { e.preventDefault(); cmd.focus(); }
+  }
+});
+
 /* Minecraft § 色码表 */
 const MC_COLORS = { 0:"#000000",1:"#0000AA",2:"#00AA00",3:"#00AAAA",4:"#AA0000",5:"#AA00AA",6:"#FFAA00",7:"#AAAAAA",8:"#555555",9:"#5555FF",a:"#55FF55",b:"#55FFFF",c:"#FF5555",d:"#FF55FF",e:"#FFFF55",f:"#FFFFFF" };
 
@@ -173,37 +196,43 @@ window.addEventListener("hashchange", navigate);
 
 /* ---------- 视图：实例列表 ---------- */
 async function renderInstances() {
-  Main().innerHTML = `<h1>我的服务器</h1><div class="sub">双击卡片进入控制台 · 数据目录内每个实例独立存放</div><div id="inst-cards">加载中…</div>`;
+  Main().innerHTML = eyebrow("SERVER LIST") + `<h1>我的服务器</h1><div class="sub">双击卡片进入控制台 · 按 2 快速新建 · 每个实例独立存放</div><div id="inst-cards">加载中…</div>`;
   const draw = async () => {
     let list;
     try { list = await api("/api/instances"); } catch (e) { $("#inst-cards").innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
     if (!list.length) {
-      $("#inst-cards").innerHTML = `<div class="empty"><div class="big">🎮</div>还没有服务器<br><br><a class="btn primary" href="#/create">＋ 创建第一个服务器</a></div>`;
+      $("#inst-cards").innerHTML = `<div class="empty"><div class="big">⛏</div>这里空空如也<br>去合成你的第一台服务器吧<br><br><a class="btn primary" href="#/create">⚒ 去合成（按 2）</a></div>`;
       return;
     }
     $("#inst-cards").innerHTML = `<div class="cards">` + list.map(i => `
-      <div class="card" data-name="${esc(i.name)}">
+      <div class="card st-${i.status}" data-name="${esc(i.name)}">
         <div class="inst-head">
-          <span class="dot ${i.status}"></span>
+          ${cubeOf(i.core)}
           <span class="inst-name grow">${esc(i.name)}</span>
+          <span class="dot ${i.status}"></span>
         </div>
         <div class="badges">
           <span class="badge core">${coreName(i.core)}</span>
           <span class="badge">${i.kind === "proxy" ? "v" : "MC "}${esc(i.mc)}</span>
           <span class="badge">Java ${i.javaMajor}</span>
           ${i.kind === "proxy" ? `<span class="badge">代理端</span>` : `<span class="badge">端口 ${i.port}</span>`}
-          <span class="badge">${(i.xmxMb / 1024).toFixed(1)}G 内存</span>
+          <span class="badge">${(i.xmxMb / 1024).toFixed(1)}G</span>
         </div>
-        <div class="inst-meta">${esc(i.motd || "")}</div>
+        <div class="inst-meta" data-motd="${esc(i.motd || "")}"></div>
         <div class="inst-actions">
           ${i.status === "stopped"
             ? `<button class="btn sm primary" data-act="start">▶ 启动</button>`
             : `<button class="btn sm" data-act="stop">■ 停止</button>`}
           <a class="btn sm" href="#/inst/${encodeURIComponent(i.name)}">控制台 / 设置</a>
-          <button class="btn sm" data-act="opendir">📁</button>
+          <button class="btn sm" data-act="opendir" title="打开目录">📁</button>
           <button class="btn sm danger" data-act="del">删除</button>
         </div>
+        <div class="dur"><i></i></div>
       </div>`).join("") + `</div>`;
+    // MOTD 按 § 色码彩色渲染（与游戏内服务器列表一致）
+    $("#inst-cards").querySelectorAll(".inst-meta").forEach(el => {
+      if (el.dataset.motd) renderMotd(el, el.dataset.motd);
+    });
     $("#inst-cards").querySelectorAll("[data-act]").forEach(b => b.onclick = async ev => {
       ev.stopPropagation();
       const name = b.closest(".card").dataset.name;
@@ -236,10 +265,10 @@ const wiz = { step: 0, core: null, mc: null, build: null, snapshots: false };
 
 async function renderCreate() {
   wiz.step = 0; wiz.core = null; wiz.mc = null; wiz.build = null;
-  Main().innerHTML = `<h1>新建服务器</h1><div class="sub">选择创建方式</div>
+  Main().innerHTML = eyebrow("CRAFTING") + `<h1>合成新服务器</h1><div class="sub">两种配方</div>
     <div class="core-grid" style="max-width:720px">
-      <div class="core-card" id="mode-new"><div class="cn">🛠 全新创建</div><div class="cd">选择核心与版本，从零搭建服务器</div></div>
-      <div class="core-card" id="mode-import"><div class="cn">📦 导入整合包</div><div class="cd">Modrinth (.mrpack) / CurseForge (zip) 整合包一键开服</div></div>
+      <div class="core-card" id="mode-new"><div><div class="cn">⚒ 全新合成</div><div class="cd">选择核心与版本，从零搭建服务器</div></div></div>
+      <div class="core-card" id="mode-import"><div><div class="cn">📦 导入整合包</div><div class="cd">Modrinth (.mrpack) / CurseForge (zip) 整合包一键开服</div></div></div>
     </div>`;
   $("#mode-new").onclick = () => drawWizard();
   $("#mode-import").onclick = () => drawImport();
@@ -250,7 +279,7 @@ async function drawImport() {
   const app = await api("/api/app").catch(() => ({ ramMb: 8192, config: {} }));
   const maxMem = Math.max(2048, Math.min(16384, app.ramMb - 2048));
   const defMem = Math.min(6144, maxMem);
-  Main().innerHTML = `<h1>导入整合包</h1>
+  Main().innerHTML = eyebrow("IMPORT PACK") + `<h1>导入整合包</h1>
     <div class="sub">支持 Modrinth (.mrpack) 与 CurseForge (zip)。核心、MC 版本与加载器将从整合包自动识别。</div>
     <div class="form-grid">
       <label class="field full"><span>整合包文件</span><input type="file" id="im-file" accept=".mrpack,.zip"></label>
@@ -270,7 +299,7 @@ async function drawImport() {
     </div>
     <div class="wizard-foot">
       <button class="btn" onclick="location.hash='#/create'">← 返回</button>
-      <button class="btn primary" id="im-go">🚀 导入并部署</button>
+      <button class="btn primary" id="im-go">⚒ 导入并部署</button>
     </div>`;
   $("#im-mem").oninput = () => $("#im-mem-val").textContent = ($("#im-mem").value / 1024).toFixed(1) + " GB";
   $("#im-go").onclick = async () => {
@@ -299,7 +328,7 @@ async function drawImport() {
 
 function wizardShell(inner) {
   const names = ["选择核心", "选择版本", "核心构建", "基本设置"];
-  Main().innerHTML = `<h1>新建服务器</h1><div class="sub">四步创建：核心 → MC 版本 → 构建 → 设置</div>
+  Main().innerHTML = eyebrow("CRAFTING") + `<h1>合成新服务器</h1><div class="sub">四步配方：核心 → 版本 → 构建 → 设置</div>
     <div class="steps">${names.map((n, i) =>
       `<span class="step-pill ${i === wiz.step ? "cur" : i < wiz.step ? "done" : ""}">${i + 1}. ${n}</span>`).join("")}</div>
     <div id="wiz-body">${inner}</div>`;
@@ -314,8 +343,9 @@ async function drawWizard() {
     cores.forEach(c => CORES[c.id] = c);
     $("#core-grid").innerHTML = cores.map(c => `
       <div class="core-card ${wiz.core === c.id ? "sel" : ""}" data-id="${c.id}">
-        <div class="cn">${esc(c.name)} <span class="badge core">${esc(c.tag)}</span></div>
-        <div class="cd">${esc(c.desc)}</div>
+        ${cubeOf(c.id)}
+        <div><div class="cn">${esc(c.name)} <span class="badge core">${esc(c.tag)}</span></div>
+        <div class="cd">${esc(c.desc)}</div></div>
       </div>`).join("");
     $("#core-grid").querySelectorAll(".core-card").forEach(c => c.onclick = () => {
       wiz.core = c.dataset.id;
@@ -411,7 +441,7 @@ async function drawWizard() {
       </div>`}
       <div class="wizard-foot">
         <button class="btn" id="wback">← 上一步</button>
-        <button class="btn primary" id="wcreate">🚀 创建并自动部署</button>
+        <button class="btn primary" id="wcreate">⚒ 开始部署</button>
       </div>`);
     $("#wback").onclick = () => { wiz.step = wiz.core === "vanilla" ? 1 : 2; drawWizard(); };
     $("#f-mem").oninput = () => $("#mem-val").textContent = ($("#f-mem").value / 1024).toFixed(1) + " GB";
@@ -440,9 +470,9 @@ async function drawWizard() {
 
 /* ---------- 视图：创建任务进度 ---------- */
 async function renderTaskPage(taskId) {
-  Main().innerHTML = `<h1>正在部署服务器</h1><div class="sub">自动下载 Java 与服务端核心，全程无需手动配置</div>
+  Main().innerHTML = eyebrow("DEPLOYING") + `<h1>正在部署服务器</h1><div class="sub">自动下载 Java 与服务端核心，全程无需手动配置</div>
     <div id="task-box">加载中…</div>`;
-  const icons = { pending: "○", running: "◌", done: "✔", error: "✖" };
+  const icons = { pending: "·", running: ">", done: "OK", error: "X" };
   const draw = async () => {
     let t;
     try { t = await api(`/api/tasks/${taskId}`); } catch (e) { $("#task-box").innerHTML = `<div class="err-box">${esc(e.message)}</div>`; clearInterval(pollTimer); return; }
@@ -476,8 +506,9 @@ async function renderDetail(name, tab = "console") {
   try { list = await api("/api/instances"); } catch (e) { Main().innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
   const info = list.find(i => i.name === name);
   if (!info) { Main().innerHTML = `<div class="err-box">实例不存在</div>`; return; }
-  Main().innerHTML = `
+  Main().innerHTML = eyebrow(`${String(info.core).toUpperCase()} · ${info.mc}`) + `
     <div class="detail-head">
+      ${cubeOf(info.core)}
       <span class="dot ${info.status}" id="d-dot"></span>
       <h1 style="margin:0">${esc(name)}</h1>
       <span class="badge core">${coreName(info.core)}</span>
@@ -885,7 +916,7 @@ async function renderDetail(name, tab = "console") {
 async function renderTunnels() {
   let insts = [];
   try { insts = await api("/api/instances"); } catch {}
-  Main().innerHTML = `<h1>联机穿透</h1>
+  Main().innerHTML = eyebrow("MULTIPLAYER") + `<h1>联机穿透</h1>
     <div class="sub">把本地服务器映射到公网，异地朋友直接连。基于 <b>OpenFrp OPENAPI</b>，并支持 SakuraFrp 与自建 frps。</div>
     <div id="tun-list">加载中…</div>
     <h3 style="margin:26px 0 8px">＋ 添加隧道</h3>
@@ -1015,7 +1046,7 @@ async function renderSettings() {
   ];
   let javas = { portable: [], scanned: [] };
   try { javas = await api("/api/javas"); } catch {}
-  Main().innerHTML = `<h1>全局设置</h1><div class="sub">数据目录：${esc(info.base)}</div>
+  Main().innerHTML = eyebrow("OPTIONS") + `<h1>全局设置</h1><div class="sub">数据目录：${esc(info.base)}</div>
     <h3 style="margin-bottom:10px">下载源</h3>
     <div class="radio-cards" id="src-cards">${opts.map(o => `
       <div class="radio-card ${src === o.v ? "sel" : ""}" data-v="${o.v}">
@@ -1133,7 +1164,7 @@ async function renderSettings() {
   try {
     const info = await api("/api/app");
     $("#app-ver").textContent = info.version;
-    $("#side-status").textContent = `内存 ${(info.ramMb / 1024).toFixed(0)} GB · 下载源: ${{ auto: "自动", mirror: "镜像", official: "官方" }[info.config.source] || "自动"}`;
+    $("#hud-status").textContent = `内存 ${(info.ramMb / 1024).toFixed(0)} GB · 下载源 ${{ auto: "自动", mirror: "镜像", official: "官方" }[info.config.source] || "自动"}`;
     const cores = await api("/api/cores").catch(() => []);
     cores.forEach(c => CORES[c.id] = c);
   } catch (e) {
