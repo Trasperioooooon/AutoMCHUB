@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AutoMCHUB · MC 一键开服</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='2' width='28' height='28' rx='6' fill='%233ec96b'/%3E%3Crect x='8' y='8' width='7' height='7' fill='%23173420'/%3E%3Crect x='17' y='8' width='7' height='7' fill='%23173420'/%3E%3Crect x='11' y='17' width='10' height='4' fill='%23173420'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="logo">
+      <svg viewBox="0 0 32 32" width="34" height="34"><rect x="2" y="2" width="28" height="28" rx="6" fill="#3ec96b"/><rect x="8" y="8" width="7" height="7" fill="#173420"/><rect x="17" y="8" width="7" height="7" fill="#173420"/><rect x="11" y="17" width="10" height="4" fill="#173420"/></svg>
+      <div>
+        <div class="logo-name">AutoMCHUB</div>
+        <div class="logo-sub">MC 一键开服</div>
+      </div>
+    </div>
+    <nav>
+      <a href="#/instances" data-nav="instances"><span class="ni">🗂</span>我的服务器</a>
+      <a href="#/create" data-nav="create" class="accent"><span class="ni">＋</span>新建服务器</a>
+      <a href="#/tunnels" data-nav="tunnels"><span class="ni">🌐</span>联机穿透</a>
+      <a href="#/settings" data-nav="settings"><span class="ni">⚙</span>全局设置</a>
+    </nav>
+    <div class="side-foot">
+      <div id="side-status"></div>
+      <div class="ver">v<span id="app-ver">…</span> · 局域网开服工具</div>
+    </div>
+  </aside>
+  <main id="main"></main>
+</div>
+<div id="toasts"></div>
+<div id="modal-root"></div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,232 @@
+// Package inst 管理服务器实例：创建流水线、配置读写、进程启停与控制台。
+package inst
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"automchub/internal/app"
+	"automchub/internal/mcsrc"
+	"automchub/internal/tasks"
+)
+
+type Settings struct {
+	Name            string     `json:"name"`
+	Core            mcsrc.Core `json:"core"`
+	MC              string     `json:"mc"`
+	Build           string     `json:"build"`
+	JavaMajor       int        `json:"javaMajor"`
+	JavaPath        string     `json:"javaPath"`
+	XmxMB           int        `json:"xmxMb"`
+	XmsMB           int        `json:"xmsMb"`
+	LaunchTarget    string     `json:"launchTarget"` // "jar:<文件>" 或 "args:<win_args.txt 相对路径>"
+	ExtraJVM        []string   `json:"extraJvm,omitempty"`
+	ConsoleEncoding string     `json:"consoleEncoding,omitempty"` // auto | utf-8 | gbk
+	Policies        Policies   `json:"policies"`
+	CreatedAt       time.Time  `json:"createdAt"`
+}
+
+type Instance struct {
+	Settings
+	Dir     string
+	Console *Console
+
+	procMu     sync.Mutex
+	proc       *proc
+	state      string // stopped | starting | running | stopping
+	userStop   bool   // 本次退出是否用户主动触发（区分崩溃）
+	startedAt  time.Time
+	crashCount int
+
+	onlineMu sync.Mutex
+	online   map[string]bool
+}
+
+func (i *Instance) Status() string {
+	i.procMu.Lock()
+	defer i.procMu.Unlock()
+	if i.state == "" {
+		return "stopped"
+	}
+	return i.state
+}
+
+func (i *Instance) PropsPath() string { return filepath.Join(i.Dir, "server.properties") }
+
+// Port 读取当前 server.properties 中的端口。
+func (i *Instance) Port() int {
+	p, err := LoadProps(i.PropsPath())
+	if err != nil {
+		return 25565
+	}
+	if v, ok := p.Get("server-port"); ok {
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 25565
+}
+
+type Manager struct {
+	mu    sync.Mutex
+	insts map[string]*Instance
+	Tasks *tasks.Manager
+}
+
+func NewManager() (*Manager, error) {
+	m := &Manager{insts: map[string]*Instance{}, Tasks: tasks.NewManager()}
+	ents, err := os.ReadDir(app.ServersDir)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range ents {
+		if !e.IsDir() {
+			continue
+		}
+		dir := filepath.Join(app.ServersDir, e.Name())
+		b, err := os.ReadFile(filepath.Join(dir, "instance.json"))
+		if err != nil {
+			continue
+		}
+		var s Settings
+		if json.Unmarshal(b, &s) != nil || s.Name == "" {
+			continue
+		}
+		m.insts[s.Name] = &Instance{Settings: s, Dir: dir, Console: newConsole()}
+	}
+	m.startScheduler()
+	return m, nil
+}
+
+func (m *Manager) saveInstance(i *Instance) error {
+	b, err := json.MarshalIndent(i.Settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(i.Dir, "instance.json"), b, 0o644)
+}
+
+func (m *Manager) List() []*Instance {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]*Instance, 0, len(m.insts))
+	for _, i := range m.insts {
+		out = append(out, i)
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].CreatedAt.After(out[b].CreatedAt) })
+	return out
+}
+
+func (m *Manager) Get(name string) (*Instance, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	i, ok := m.insts[name]
+	if !ok {
+		return nil, fmt.Errorf("实例不存在: %s", name)
+	}
+	return i, nil
+}
+
+// Delete 删除实例；files=true 时同时删除实例目录。
+func (m *Manager) Delete(name string, files bool) error {
+	i, err := m.Get(name)
+	if err != nil {
+		return err
+	}
+	if i.Status() != "stopped" {
+		return fmt.Errorf("请先停止服务器再删除")
+	}
+	if files {
+		rel, err := filepath.Rel(app.ServersDir, i.Dir)
+		if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+			return fmt.Errorf("实例目录异常，已拒绝删除: %s", i.Dir)
+		}
+		if err := os.RemoveAll(i.Dir); err != nil {
+			return fmt.Errorf("删除文件失败: %w", err)
+		}
+	}
+	m.mu.Lock()
+	delete(m.insts, name)
+	m.mu.Unlock()
+	return nil
+}
+
+// UpdateSettings 调整实例运行参数（内存、控制台编码）并重新生成启动脚本。
+// xmxMB<=0 表示不修改内存；consoleEnc 为空表示不修改编码。
+func (m *Manager) UpdateSettings(name string, xmxMB, xmsMB int, consoleEnc string) error {
+	i, err := m.Get(name)
+	if err != nil {
+		return err
+	}
+	switch consoleEnc {
+	case "auto", "utf-8", "gbk", "":
+	default:
+		return fmt.Errorf("不支持的控制台编码: %s", consoleEnc)
+	}
+	// 运行中控制台 goroutine 会并发读这些字段，写入必须持锁
+	i.procMu.Lock()
+	if xmxMB > 0 {
+		if xmxMB < 512 {
+			i.procMu.Unlock()
+			return fmt.Errorf("最大内存不能低于 512MB")
+		}
+		if xmsMB < 128 || xmsMB > xmxMB {
+			xmsMB = min(1024, xmxMB)
+		}
+		i.XmxMB, i.XmsMB = xmxMB, xmsMB
+	}
+	if consoleEnc != "" {
+		i.ConsoleEncoding = consoleEnc
+	}
+	i.procMu.Unlock()
+	if err := m.saveInstance(i); err != nil {
+		return err
+	}
+	return writeRunBat(i)
+}
+
+// consoleEnc 加锁读取控制台编码（供输出 goroutine 每行调用）。
+func (i *Instance) consoleEnc() string {
+	i.procMu.Lock()
+	defer i.procMu.Unlock()
+	return i.ConsoleEncoding
+}
+
+// PoliciesSnapshot 加锁快照运维策略（供 API 读取）。
+func (i *Instance) PoliciesSnapshot() Policies {
+	i.procMu.Lock()
+	defer i.procMu.Unlock()
+	p := i.Policies
+	p.Schedules = append([]Schedule{}, i.Policies.Schedules...)
+	return p
+}
+
+var invalidNameChars = `\/:*?"<>|`
+
+func validateName(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" || len([]rune(name)) > 40 {
+		return fmt.Errorf("实例名需为 1~40 个字符")
+	}
+	if strings.ContainsAny(name, invalidNameChars) {
+		return fmt.Errorf(`实例名不能包含字符 %s`, invalidNameChars)
+	}
+	if name == "." || name == ".." || strings.HasSuffix(name, ".") || strings.HasSuffix(name, " ") {
+		return fmt.Errorf("实例名不合法")
+	}
+	return nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}

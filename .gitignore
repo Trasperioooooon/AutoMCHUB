@@ -1,0 +1,16 @@
+# 运行时数据（用户本地内容，不入库）
+/runtimes/
+/cache/
+/servers/
+/backups/
+/config.json
+/tunnels.json
+/update.bat
+
+# 构建产物
+*.exe
+*.exe~
+
+# 编辑器
+.idea/
+.vscode/
