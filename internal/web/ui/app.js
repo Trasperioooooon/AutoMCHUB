@@ -179,6 +179,82 @@ function renderMotd(el, text) {
   if (!el.childNodes.length) { const d = document.createElement("span"); d.style.color = "#666"; d.textContent = "(预览)"; el.appendChild(d); }
 }
 
+/* ---------- 版本比较（支持 1.x.y 与年份版号 26.x 混排） ----------
+   逐段解析为整数元组比较：年份版号首段 26 天然大于 1.x 的 1，故 26.x 恒大于 1.x；
+   对 1.21-pre1 之类后缀取前导整数（parseInt 容错）。供 properties 版本感知等复用。 */
+function verParts(v) { return String(v).split(".").map(s => parseInt(s, 10) || 0); }
+function verCmp(a, b) { // a<b → -1 ; a==b → 0 ; a>b → 1
+  const pa = verParts(a), pb = verParts(b), n = Math.max(pa.length, pb.length);
+  for (let i = 0; i < n; i++) {
+    const x = pa[i] || 0, y = pb[i] || 0;
+    if (x !== y) return x < y ? -1 : 1;
+  }
+  return 0;
+}
+const verGte = (mc, ref) => verCmp(mc, ref) >= 0;
+const verLt = (mc, ref) => verCmp(mc, ref) < 0;
+
+/* ---------- 行式控件（HMCL 三件套：普通行 / 可展开摘要行 / 行内嵌编辑器） ----------
+   rowControl(opts) → HTMLElement，设置页与常用设置共用。
+   opts: { title, desc?, key?, needsRestart?, control?（普通行右侧控件 Node）,
+           summary?（可展开行收起时摘要 string|Node）, editor?((row)=>Node 惰性构建), open? } */
+function rowControl(opts) {
+  const row = document.createElement("div");
+  row.className = "row-item" + (opts.editor ? " expandable" : "");
+  if (opts.key) row.dataset.k = opts.key;
+  const head = document.createElement("div");
+  head.className = "ri-head";
+  const main = document.createElement("div");
+  main.className = "ri-main";
+  const title = document.createElement("div");
+  title.className = "ri-title";
+  title.textContent = opts.title;
+  if (opts.needsRestart) {
+    const tag = document.createElement("span");
+    tag.className = "ri-restart"; tag.textContent = "重启生效";
+    title.appendChild(tag);
+  }
+  main.appendChild(title);
+  if (opts.desc) {
+    const sub = document.createElement("div");
+    sub.className = "ri-sub"; sub.textContent = opts.desc;
+    main.appendChild(sub);
+  }
+  if (opts.key) {
+    const kk = document.createElement("div");
+    kk.className = "ri-key"; kk.textContent = opts.key;
+    main.appendChild(kk);
+  }
+  head.appendChild(main);
+  const right = document.createElement("div");
+  right.className = "ri-right";
+  if (opts.editor) {
+    const sum = document.createElement("span");
+    sum.className = "ri-summary";
+    if (opts.summary instanceof Node) sum.appendChild(opts.summary);
+    else sum.textContent = opts.summary ?? "";
+    const chev = document.createElement("span");
+    chev.className = "ri-chev"; chev.textContent = "▾";
+    right.append(sum, chev);
+  } else if (opts.control) {
+    right.appendChild(opts.control);
+  }
+  head.appendChild(right);
+  row.appendChild(head);
+  if (opts.editor) {
+    const ed = document.createElement("div");
+    ed.className = "ri-editor";
+    row.appendChild(ed);
+    let built = false;
+    head.addEventListener("click", () => {
+      const open = row.classList.toggle("open");
+      if (open && !built) { ed.appendChild(opts.editor(row)); built = true; }
+    });
+    if (opts.open) { row.classList.add("open"); ed.appendChild(opts.editor(row)); built = true; }
+  }
+  return row;
+}
+
 /* server.properties 常用项定义 */
 const COMMON_PROPS = [
   { k: "online-mode", t: "bool", label: "正版验证", desc: "关闭后离线账户可进服（局域网常用）" },

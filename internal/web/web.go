@@ -51,12 +51,13 @@ var sessionValue = func() string {
 var OnShutdown func()
 
 type Server struct {
-	mgr *inst.Manager
-	tun *tunnel.Manager
+	mgr  *inst.Manager
+	tun  *tunnel.Manager
+	port int // 实际监听端口（由 main 注入，只读；被占用时可能与默认端口不同）
 }
 
-func New(mgr *inst.Manager, tun *tunnel.Manager) http.Handler {
-	s := &Server{mgr: mgr, tun: tun}
+func New(mgr *inst.Manager, tun *tunnel.Manager, port int) http.Handler {
+	s := &Server{mgr: mgr, tun: tun, port: port}
 	mux := http.NewServeMux()
 
 	sub, _ := fs.Sub(uiFS, "ui")
@@ -211,12 +212,14 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 	cfg := app.GetConfig()
 	cfg.AccessPasswordHash = "" // 不下发哈希
 	writeJSON(w, map[string]any{
-		"version": app.Version,
-		"base":    app.Base,
-		"ramMb":   app.TotalRAMMB(),
-		"config":  cfg,
-		"lanSet":  app.GetConfig().AccessPasswordHash != "",
-		"ips":     localIPs(),
+		"version":    app.Version,
+		"base":       app.Base,
+		"ramMb":      app.TotalRAMMB(),
+		"availRamMb": app.AvailRAMMB(),
+		"port":       s.port,
+		"config":     cfg,
+		"lanSet":     app.GetConfig().AccessPasswordHash != "",
+		"ips":        localIPs(),
 	})
 }
 

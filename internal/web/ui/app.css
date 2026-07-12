@@ -478,6 +478,37 @@ table.raw input { padding: 5px 8px; font-size: 13px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); border: 3px solid transparent; background-clip: padding-box; }
 ::-webkit-scrollbar-track { background: transparent; }
 
+/* ---------- 行式控件（HMCL 三件套：普通行 / 可展开摘要 / 行内嵌编辑器） ---------- */
+.row-list { display: flex; flex-direction: column; gap: 8px; max-width: 760px; }
+.row-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.ri-head { display: flex; align-items: center; gap: 16px; padding: 12px 16px; min-height: 56px; }
+.row-item.expandable .ri-head { cursor: pointer; }
+.row-item.expandable:hover { border-color: var(--border-strong); }
+.ri-main { flex: 1; min-width: 0; }
+.ri-title { font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ri-sub { font-size: 11px; color: var(--muted); margin-top: 3px; line-height: 1.5; }
+.ri-key { font-size: 11px; color: var(--muted); font-family: var(--mono); margin-top: 2px; opacity: .8; }
+.ri-restart {
+  font-size: 10px; font-weight: 600; color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 16%, transparent);
+  padding: 1px 6px; border-radius: 5px;
+}
+.ri-right { display: flex; align-items: center; gap: 10px; flex: none; }
+.ri-summary {
+  font-size: 12px; color: var(--muted); font-family: var(--mono);
+  max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ri-chev { color: var(--muted); font-size: 11px; transition: transform .15s steps(2, end); }
+.row-item.open .ri-chev { transform: rotate(180deg); }
+.ri-editor { display: none; padding: 6px 16px 14px; border-top: 1px solid var(--border); }
+.row-item.open .ri-editor { display: block; }
+
 @media (max-width: 720px) {
   #main { padding: 16px 14px; }
   .form-grid { grid-template-columns: 1fr; }

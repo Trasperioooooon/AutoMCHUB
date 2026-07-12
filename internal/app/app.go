@@ -122,3 +122,15 @@ func TotalRAMMB() int {
 	}
 	return int(m.TotalPhys / (1024 * 1024))
 }
+
+// AvailRAMMB 返回当前可用物理内存（MB）；调用失败时返回 0（表示未知，
+// 与 TotalRAMMB 的保守兜底 8192 区分，便于前端据 0 走降级逻辑）。
+func AvailRAMMB() int {
+	var m memoryStatusEx
+	m.Length = uint32(unsafe.Sizeof(m))
+	r, _, _ := procGlobalMemoryStatusEx.Call(uintptr(unsafe.Pointer(&m)))
+	if r == 0 {
+		return 0
+	}
+	return int(m.AvailPhys / (1024 * 1024))
+}

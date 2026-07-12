@@ -54,9 +54,10 @@ func main() {
 			fatal("无法监听本地端口: " + err.Error())
 		}
 	}
-	url := fmt.Sprintf("http://127.0.0.1:%d/?token=%s", ln.Addr().(*net.TCPAddr).Port, web.Token)
+	addr := ln.Addr().(*net.TCPAddr)
+	url := fmt.Sprintf("http://127.0.0.1:%d/?token=%s", addr.Port, web.Token)
 	go func() {
-		if err := http.Serve(ln, web.New(mgr, tun)); err != nil {
+		if err := http.Serve(ln, web.New(mgr, tun, addr.Port)); err != nil {
 			log.Println("HTTP 服务退出:", err)
 		}
 	}()
