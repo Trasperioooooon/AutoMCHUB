@@ -524,6 +524,37 @@ input.mem-num { width: 92px; padding: 5px 8px; font-size: 13px; text-align: righ
 .mem-stat b { color: var(--text); }
 .mem-warn { color: var(--redstone); font-weight: 600; }
 
+/* ---------- 设置页二级导航 ---------- */
+.settings-layout { display: flex; gap: 26px; align-items: flex-start; }
+.settings-nav { flex: none; width: 190px; display: flex; flex-direction: column; gap: 3px; position: sticky; top: 0; }
+.set-nav {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 13px; border-radius: 9px;
+  color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 600;
+  border: 1px solid transparent; transition: background .1s, color .1s;
+}
+.set-nav:hover { color: var(--text); background: var(--surface); }
+.set-nav.cur { color: var(--text); background: var(--surface); border-color: var(--border-strong); box-shadow: var(--shadow-sm); }
+.set-nav .sn-ico { font-size: 15px; filter: grayscale(.25); }
+.settings-body { flex: 1; min-width: 0; max-width: 760px; }
+.set-sec-head { margin-bottom: 12px; }
+.set-sec-head h2 { font-size: 15px; font-weight: 700; }
+.set-sec-head .sub { margin: 5px 0 0; }
+.settings-body .set-sec-head:not(:first-child) { margin-top: 26px; }
+.set-danger {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  margin-top: 28px; padding: 14px 16px;
+  background: var(--err-bg);
+  border: 1px solid color-mix(in srgb, var(--redstone) 30%, transparent);
+  border-radius: 12px;
+}
+.set-danger .ri-title { font-size: 13px; font-weight: 700; }
+.set-danger .ri-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+@media (max-width: 720px) {
+  .settings-layout { flex-direction: column; }
+  .settings-nav { flex-direction: row; flex-wrap: wrap; width: 100%; position: static; }
+}
+
 @media (max-width: 720px) {
   #main { padding: 16px 14px; }
   .form-grid { grid-template-columns: 1fr; }

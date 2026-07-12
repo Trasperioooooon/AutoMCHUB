@@ -105,16 +105,21 @@ const eyebrow = t => `<div class="eyebrow">${esc(t)}</div>`;
 /* 浅色 / 深色主题切换（index.html 已在样式生效前预置 data-theme） */
 (function initTheme() {
   const btn = $("#theme-btn");
-  const cur = () => document.documentElement.dataset.theme || "dark";
-  const paint = () => {
-    btn.textContent = cur() === "light" ? "🌙" : "☀️";
-    btn.title = cur() === "light" ? "切换到深色" : "切换到浅色";
-  };
-  btn.onclick = () => {
-    document.documentElement.dataset.theme = cur() === "light" ? "dark" : "light";
-    localStorage.setItem("amh_theme", document.documentElement.dataset.theme);
+  const root = document.documentElement;
+  const sysLight = () => matchMedia("(prefers-color-scheme: light)").matches;
+  const pref = () => root.dataset.themePref || "auto";
+  const ICONS = { light: "☀️", dark: "🌙", auto: "🖥" };
+  const NEXT = { light: "dark", dark: "auto", auto: "light" };
+  const LABEL = { light: "浅色", dark: "深色", auto: "跟随系统" };
+  const paint = () => { btn.textContent = ICONS[pref()] || "☀️"; btn.title = `主题：${LABEL[pref()]}（点击切换）`; };
+  const apply = p => {
+    root.dataset.themePref = p;
+    localStorage.setItem("amh_theme", p);
+    root.dataset.theme = p === "auto" ? (sysLight() ? "light" : "dark") : p;
     paint();
   };
+  btn.onclick = () => apply(NEXT[pref()] || "auto");
+  matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => { if (pref() === "auto") apply("auto"); });
   paint();
 })();
 
@@ -338,7 +343,7 @@ function navigate() {
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("active", a.dataset.nav === view));
   if (view === "create") renderCreate();
   else if (view === "inst" && arg) renderDetail(arg);
-  else if (view === "settings") renderSettings();
+  else if (view === "settings") renderSettings(arg);
   else if (view === "tunnels") renderTunnels();
   else if (view === "task" && arg) renderTaskPage(arg);
   else renderInstances();
@@ -1183,72 +1188,47 @@ async function renderTunnels() {
 }
 
 /* ---------- 视图：全局设置 ---------- */
-async function renderSettings() {
+const SETTINGS_SECTIONS = [
+  { id: "download", label: "下载与网络", icon: "🌐" },
+  { id: "storage", label: "存储位置", icon: "📁" },
+  { id: "java", label: "Java 运行时", icon: "☕" },
+  { id: "remote", label: "远程访问", icon: "📱" },
+  { id: "notify", label: "通知与集成", icon: "🔔" },
+  { id: "about", label: "更新与关于", icon: "ℹ️" },
+];
+
+async function renderSettings(section) {
+  if (!SETTINGS_SECTIONS.some(s => s.id === section)) section = "download";
   let info;
   try { info = await api("/api/app"); } catch (e) { Main().innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
+  Main().innerHTML = eyebrow("OPTIONS") + `<h1>全局设置</h1>
+    <div class="settings-layout">
+      <nav class="settings-nav">${SETTINGS_SECTIONS.map(s => `
+        <a class="set-nav ${s.id === section ? "cur" : ""}" href="#/settings/${s.id}"><span class="sn-ico">${s.icon}</span>${s.label}</a>`).join("")}</nav>
+      <div class="settings-body" id="set-body"><div class="sub">加载中…</div></div>
+    </div>`;
+  const body = $("#set-body");
+  ({ download: setDownload, storage: setStorage, java: setJava, remote: setRemote, notify: setNotify, about: setAbout }[section])(body, info);
+}
+
+/* 分区标题；sub 允许富文本（调用方自负安全，标题走 esc） */
+function settingsHead(t, sub) {
+  return `<div class="set-sec-head"><h2>${esc(t)}</h2>${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
+}
+
+/* — 下载与网络 — */
+function setDownload(body, info) {
   const src = info.config.source || "auto";
-  const lanPort = info.port || location.port || "27333"; // 实际监听端口（被占用时会随机化）
   const opts = [
     { v: "auto", t: "自动（推荐）", d: "国内镜像（BMCLAPI / 清华）优先，失败自动切换官方源" },
     { v: "mirror", t: "仅国内镜像", d: "只用 BMCLAPI 与清华镜像（Paper/Purpur 无镜像，仍走官方）" },
     { v: "official", t: "仅官方源", d: "只用 Mojang / Forge / Adoptium 等官方源（海外网络适用）" },
   ];
-  let javas = { portable: [], scanned: [] };
-  try { javas = await api("/api/javas"); } catch {}
-  Main().innerHTML = eyebrow("OPTIONS") + `<h1>全局设置</h1><div class="sub">数据目录：${esc(info.base)}</div>
-    <h3 style="margin-bottom:10px">下载源</h3>
-    <div class="radio-cards" id="src-cards">${opts.map(o => `
-      <div class="radio-card ${src === o.v ? "sel" : ""}" data-v="${o.v}">
-        <div><div class="rt">${o.t}</div><div class="rd">${o.d}</div></div>
-      </div>`).join("")}</div>
-    <h3 style="margin:26px 0 6px">CurseForge API Key（选填）</h3>
-    <div class="sub">导入 CurseForge 格式整合包时解析模组直链用，<a href="https://console.curseforge.com/" target="_blank" style="color:var(--accent)">免费申请</a>；Modrinth 格式整合包无需配置。</div>
-    <div class="row" style="margin-bottom:8px">
-      <input type="password" id="cf-key" value="${esc(info.config.cfApiKey || "")}" placeholder="粘贴 API Key" style="max-width:420px">
-      <button class="btn" id="cf-save">保存</button>
-    </div>
-    <h3 style="margin:26px 0 6px">Java 管理</h3>
-    <div class="sub">创建实例时优先复用本机已装 Java → 便携运行时 → 自动下载。</div>
-    ${javas.portable.length ? `<div class="badges" style="margin-bottom:8px">${javas.portable.map(j => `<span class="badge core">便携 Java ${j.major}</span>`).join("")}</div>` : ""}
-    <div id="java-list">${javas.scanned.length ? javas.scanned.map(j => `
-      <div class="java-row"><span class="badge core">Java ${j.major}</span><span class="jv">${esc(j.version)}</span><span class="jp">${esc(j.path)}</span></div>`).join("")
-      : `<div class="sub">尚未发现本机安装的 Java，点击下方扫描</div>`}</div>
-    <div class="row" style="margin-top:10px;flex-wrap:wrap">
-      <button class="btn" id="java-scan">🔄 重新扫描本机 Java</button>
-      <input type="text" id="java-path" placeholder="手动添加：粘贴 java.exe 或 JDK 目录路径" style="max-width:420px">
-      <button class="btn" id="java-add">添加</button>
-    </div>
-    <h3 style="margin:26px 0 6px">远程访问（手机管理）</h3>
-    <div class="sub">开启后本机 IP 可从局域网访问管理界面（密码保护，改动需重启程序生效）。</div>
-    <div class="row" style="margin-bottom:8px;flex-wrap:wrap">
-      <label class="switch"><input type="checkbox" id="lan-on" ${info.config.listenLan ? "checked" : ""}><span class="sw"></span><span class="sw-label">允许局域网访问</span></label>
-      <input type="password" id="lan-pw" placeholder="${info.lanSet ? "已设置密码（留空则不修改）" : "设置访问密码（必填）"}" style="max-width:260px">
-      <button class="btn" id="lan-save">保存</button>
-    </div>
-    <div class="hint">${info.config.listenLan ? `手机访问：${(info.ips || []).map(ip => `http://${ip}:${lanPort}`).join(" 或 ")}<br>` : ""}若无法访问，请以管理员运行一次放行防火墙：<code>netsh advfirewall firewall add rule name="AutoMCHUB" dir=in action=allow protocol=TCP localport=${lanPort}</code></div>
-    <h3 style="margin:26px 0 6px">Webhook 事件推送（选填）</h3>
-    <div class="sub">服务器启停/崩溃、玩家进出、备份完成、隧道上线等事件将 POST 到该地址（JSON），可接入群机器人等。</div>
-    <div class="row" style="margin-bottom:8px">
-      <input type="text" id="wh-url" value="${esc(info.config.webhookUrl || "")}" placeholder="https://example.com/hook（留空关闭）" style="max-width:420px">
-      <button class="btn" id="wh-save">保存</button>
-    </div>
-    <h3 style="margin:26px 0 6px">自动更新</h3>
-    <div class="row" style="margin-bottom:8px;flex-wrap:wrap">
-      <input type="text" id="up-repo" value="${esc(info.config.updateRepo || "")}" placeholder="GitHub 仓库，如 yourname/AutoMCHUB" style="max-width:300px">
-      <button class="btn" id="up-save">保存</button>
-      <button class="btn" id="up-check">🔎 检查更新</button>
-      <span id="up-result" class="hint"></span>
-    </div>
-    <div class="hint" style="margin-top:20px">基于 OpenFrp OPENAPI 提供穿透接入 · 开源软件，遵循仓库 LICENSE</div>
-    <div style="margin-top:26px"><button class="btn danger" id="quit-app">⏻ 退出 AutoMCHUB（自动停止所有服务器）</button></div>`;
-  $("#quit-app").onclick = async () => {
-    const r = await confirmModal({ title: "退出 AutoMCHUB？", body: "将优雅停止所有运行中的服务器（保存世界）后退出程序。", okText: "退出", danger: true });
-    if (!r) return;
-    try {
-      await api("/api/shutdown", { method: "POST" });
-      document.body.innerHTML = `<div style="padding:80px;text-align:center;color:#8aa392">AutoMCHUB 正在停止服务器并退出，可以关闭此页面了。</div>`;
-    } catch (e) { toast(e.message, true); }
-  };
+  body.innerHTML = settingsHead("下载源", "下载 Java 与服务端核心时的线路选择。") +
+    `<div class="radio-cards" id="src-cards">${opts.map(o => `
+      <div class="radio-card ${src === o.v ? "sel" : ""}" data-v="${o.v}"><div><div class="rt">${o.t}</div><div class="rd">${o.d}</div></div></div>`).join("")}</div>` +
+    settingsHead("CurseForge API Key（选填）", `导入 CurseForge 格式整合包时解析模组直链用，<a href="https://console.curseforge.com/" target="_blank" style="color:var(--accent)">免费申请</a>；Modrinth 格式整合包无需配置。`) +
+    `<div class="row"><input type="password" id="cf-key" value="${esc(info.config.cfApiKey || "")}" placeholder="粘贴 API Key" style="max-width:420px"><button class="btn" id="cf-save">保存</button></div>`;
   $("#src-cards").querySelectorAll(".radio-card").forEach(c => c.onclick = async () => {
     try {
       await api("/api/config", { method: "PUT", body: { source: c.dataset.v } });
@@ -1260,32 +1240,125 @@ async function renderSettings() {
     try { await api("/api/config", { method: "PUT", body: { cfApiKey: $("#cf-key").value.trim() } }); toast("CurseForge API Key 已保存"); }
     catch (e) { toast(e.message, true); }
   };
-  $("#lan-save").onclick = async () => {
-    const body = { listenLan: $("#lan-on").checked };
-    if ($("#lan-pw").value) body.lanPassword = $("#lan-pw").value;
-    try { await api("/api/config", { method: "PUT", body }); toast("远程访问设置已保存，重启 AutoMCHUB 后生效"); }
+}
+
+/* — 存储位置（阶段5 将开放自定义目录；此处先透明化当前根目录） — */
+function setStorage(body, info) {
+  body.innerHTML = settingsHead("存储位置", "服务器实例、备份与缓存的存放位置。") +
+    `<div class="row-list">
+      <div class="row-item"><div class="ri-head"><div class="ri-main">
+        <div class="ri-title">数据根目录</div>
+        <div class="ri-sub">所有服务器、备份、缓存与配置默认存放于此</div>
+        <div class="ri-key">${esc(info.base)}</div>
+      </div></div></div>
+    </div>
+    <div class="hint" style="margin-top:12px">自定义存放目录（放到大容量分区、每个实例独立选址）将在后续版本开放；当前数据自包含于程序目录，便携可整体迁移。</div>`;
+}
+
+/* — Java 运行时 — */
+async function setJava(body, info) {
+  body.innerHTML = settingsHead("Java 运行时", "创建实例时优先复用本机已装 Java → 便携运行时 → 自动下载。") + `<div class="sub">加载中…</div>`;
+  let javas = { portable: [], scanned: [] };
+  try { javas = await api("/api/javas"); } catch {}
+  body.innerHTML = settingsHead("Java 运行时", "创建实例时优先复用本机已装 Java → 便携运行时 → 自动下载。") +
+    `${javas.portable.length ? `<div class="badges" style="margin-bottom:10px">${javas.portable.map(j => `<span class="badge core">便携 Java ${j.major}</span>`).join("")}</div>` : ""}
+    <div class="row-list">${javas.scanned.length ? javas.scanned.map(j => `
+      <div class="row-item"><div class="ri-head"><div class="ri-main">
+        <div class="ri-title">Java ${j.major} <span class="badge">${esc(j.version)}</span></div>
+        <div class="ri-key">${esc(j.path)}</div></div></div></div>`).join("")
+      : `<div class="sub">尚未发现本机安装的 Java，点击下方扫描</div>`}</div>
+    <div class="row" style="margin-top:12px;flex-wrap:wrap">
+      <button class="btn" id="java-scan">🔄 重新扫描本机 Java</button>
+      <input type="text" id="java-path" placeholder="手动添加：粘贴 java.exe 或 JDK 目录路径" style="max-width:420px">
+      <button class="btn" id="java-add">添加</button>
+    </div>`;
+  $("#java-scan").onclick = async () => {
+    $("#java-scan").disabled = true; $("#java-scan").textContent = "扫描中…（约数秒）";
+    try { const list = await api("/api/javas/scan", { method: "POST" }); toast(`扫描完成，发现 ${list.length} 个 Java`); setJava(body, info); }
+    catch (e) { toast(e.message, true); $("#java-scan").disabled = false; $("#java-scan").textContent = "🔄 重新扫描本机 Java"; }
+  };
+  $("#java-add").onclick = async () => {
+    const p = $("#java-path").value.trim(); if (!p) return;
+    try { const j = await api("/api/javas/add", { method: "POST", body: { path: p } }); toast(`已添加 Java ${j.major}（${j.version}）`); setJava(body, info); }
     catch (e) { toast(e.message, true); }
   };
+}
+
+/* — 远程访问 — */
+function setRemote(body, info) {
+  const lanPort = info.port || location.port || "27333"; // 实际监听端口（被占用时会随机化）
+  body.innerHTML = settingsHead("远程访问（手机 / 平板管理）", "开启后本机 IP 可从局域网访问管理界面（密码保护，改动需重启程序生效）。") +
+    `<div class="row" style="margin-bottom:10px;flex-wrap:wrap">
+      <label class="switch"><input type="checkbox" id="lan-on" ${info.config.listenLan ? "checked" : ""}><span class="sw"></span><span class="sw-label">允许局域网访问</span></label>
+      <input type="password" id="lan-pw" placeholder="${info.lanSet ? "已设置密码（留空则不修改）" : "设置访问密码（必填）"}" style="max-width:260px">
+      <button class="btn" id="lan-save">保存</button>
+    </div>
+    ${info.config.listenLan ? `<div class="hint">手机访问：${(info.ips || []).map(ip => `<b style="color:var(--accent-text)">http://${ip}:${lanPort}</b>`).join(" 或 ")}</div>` : ""}
+    <div class="hint">若无法访问，请以管理员运行一次放行防火墙：<code>netsh advfirewall firewall add rule name="AutoMCHUB" dir=in action=allow protocol=TCP localport=${lanPort}</code></div>`;
+  $("#lan-save").onclick = async () => {
+    const b = { listenLan: $("#lan-on").checked };
+    if ($("#lan-pw").value) b.lanPassword = $("#lan-pw").value;
+    try { await api("/api/config", { method: "PUT", body: b }); toast("远程访问设置已保存，重启 AutoMCHUB 后生效"); }
+    catch (e) { toast(e.message, true); }
+  };
+}
+
+/* — 通知与集成 — */
+function setNotify(body, info) {
+  body.innerHTML = settingsHead("Webhook 事件推送（选填）", "服务器启停/崩溃、玩家进出、备份完成、隧道上线等事件将 POST 到该地址（JSON），可接入群机器人等。") +
+    `<div class="row"><input type="text" id="wh-url" value="${esc(info.config.webhookUrl || "")}" placeholder="https://example.com/hook（留空关闭）" style="max-width:460px"><button class="btn" id="wh-save">保存</button></div>`;
   $("#wh-save").onclick = async () => {
     try { await api("/api/config", { method: "PUT", body: { webhookUrl: $("#wh-url").value.trim() } }); toast("Webhook 已保存，即时生效"); }
     catch (e) { toast(e.message, true); }
   };
+}
+
+/* — 更新与关于 — */
+function setAbout(body, info) {
+  body.innerHTML = settingsHead("版本与更新", "") +
+    `<div class="row-list" style="margin-bottom:14px">
+      <div class="row-item"><div class="ri-head"><div class="ri-main"><div class="ri-title">当前版本</div><div class="ri-sub">AutoMCHUB · Windows 本地 Minecraft 开服工具</div></div><div class="ri-right"><span class="badge core">v${esc(info.version)}</span></div></div></div>
+    </div>
+    <div class="row" style="flex-wrap:wrap;margin-bottom:10px">
+      <input type="text" id="up-repo" value="${esc(info.config.updateRepo || "")}" placeholder="GitHub 仓库，如 yourname/AutoMCHUB" style="max-width:300px">
+      <button class="btn" id="up-save">保存</button>
+      <button class="btn" id="up-check">🔎 检查更新</button>
+      <span id="up-result" class="hint"></span>
+    </div>
+    <div class="row-list" style="margin-bottom:18px">
+      <div class="row-item"><div class="ri-head"><div class="ri-main"><div class="ri-title">启动时静默检查更新</div><div class="ri-sub">程序启动后在后台检查一次新版本（需已填写更新仓库）</div></div>
+        <div class="ri-right"><label class="switch"><input type="checkbox" id="up-silent" ${info.config.checkUpdateOnStart ? "checked" : ""}><span class="sw"></span></label></div></div></div>
+    </div>` +
+    settingsHead("关于", "") +
+    `<div class="hint" style="line-height:1.9">
+      内网穿透基于 <b>OpenFrp OPENAPI</b> 接入（<a href="https://www.openfrp.net" target="_blank" style="color:var(--accent)">openfrp.net</a>）。<br>
+      本软件为开源项目，遵循仓库 LICENSE（MIT）。<br>
+      Minecraft 是 Mojang Studios 的商标，本工具与 Mojang / Microsoft 无隶属关系。
+    </div>
+    <div class="set-danger">
+      <div><div class="ri-title">退出程序</div><div class="ri-sub">优雅停止所有运行中的服务器（保存世界）后退出</div></div>
+      <button class="btn danger" id="quit-app">⏻ 退出 AutoMCHUB</button>
+    </div>`;
   $("#up-save").onclick = async () => {
     try { await api("/api/config", { method: "PUT", body: { updateRepo: $("#up-repo").value.trim() } }); toast("更新仓库已保存"); }
     catch (e) { toast(e.message, true); }
+  };
+  $("#up-silent").onchange = async () => {
+    try { await api("/api/config", { method: "PUT", body: { checkUpdateOnStart: $("#up-silent").checked } }); toast($("#up-silent").checked ? "已开启启动时检查更新" : "已关闭启动时检查更新"); }
+    catch (e) { toast(e.message, true); $("#up-silent").checked = !$("#up-silent").checked; }
   };
   $("#up-check").onclick = async () => {
     $("#up-result").textContent = "检查中…";
     try {
       const r = await api("/api/update/check", { method: "POST" });
       if (r.hasUpdate) {
-        $("#up-result").innerHTML = `发现新版本 <b style="color:var(--accent)">${esc(r.latest.tag)}</b>（当前 v${esc(r.current)}）`;
+        $("#up-result").innerHTML = `发现新版本 <b style="color:var(--accent-text)">${esc(r.latest.tag)}</b>（当前 v${esc(r.current)}）`;
         const btn = document.createElement("button");
         btn.className = "btn sm primary";
         btn.textContent = "⬆ 立即更新并重启";
         btn.onclick = async () => {
           btn.disabled = true;
-          try { await api("/api/update/apply", { method: "POST" }); document.body.innerHTML = `<div style="padding:80px;text-align:center;color:#8aa392">正在更新，程序将自动重启…</div>`; }
+          try { await api("/api/update/apply", { method: "POST" }); document.body.innerHTML = `<div style="padding:80px;text-align:center;color:var(--muted)">正在更新，程序将自动重启…</div>`; }
           catch (e) { toast(e.message, true); btn.disabled = false; }
         };
         $("#up-result").appendChild(btn);
@@ -1294,16 +1367,10 @@ async function renderSettings() {
       }
     } catch (e) { $("#up-result").textContent = e.message; }
   };
-  $("#java-scan").onclick = async () => {
-    $("#java-scan").disabled = true;
-    $("#java-scan").textContent = "扫描中…（约数秒）";
-    try { const list = await api("/api/javas/scan", { method: "POST" }); toast(`扫描完成，发现 ${list.length} 个 Java`); renderSettings(); }
-    catch (e) { toast(e.message, true); $("#java-scan").disabled = false; $("#java-scan").textContent = "🔄 重新扫描本机 Java"; }
-  };
-  $("#java-add").onclick = async () => {
-    const p = $("#java-path").value.trim();
-    if (!p) return;
-    try { const j = await api("/api/javas/add", { method: "POST", body: { path: p } }); toast(`已添加 Java ${j.major}（${j.version}）`); renderSettings(); }
+  $("#quit-app").onclick = async () => {
+    const r = await confirmModal({ title: "退出 AutoMCHUB？", body: "将优雅停止所有运行中的服务器（保存世界）后退出程序。", okText: "退出", danger: true });
+    if (!r) return;
+    try { await api("/api/shutdown", { method: "POST" }); document.body.innerHTML = `<div style="padding:80px;text-align:center;color:var(--muted)">AutoMCHUB 正在停止服务器并退出，可以关闭此页面了。</div>`; }
     catch (e) { toast(e.message, true); }
   };
 }

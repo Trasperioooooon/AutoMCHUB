@@ -252,9 +252,10 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		Source      *string `json:"source"`
 		CFApiKey    *string `json:"cfApiKey"`
 		WebhookURL  *string `json:"webhookUrl"`
-		UpdateRepo  *string `json:"updateRepo"`
-		ListenLAN   *bool   `json:"listenLan"`
-		LanPassword *string `json:"lanPassword"` // 明文仅在本次请求中出现，存储为 SHA-256
+		UpdateRepo         *string `json:"updateRepo"`
+		CheckUpdateOnStart *bool   `json:"checkUpdateOnStart"`
+		ListenLAN          *bool   `json:"listenLan"`
+		LanPassword        *string `json:"lanPassword"` // 明文仅在本次请求中出现，存储为 SHA-256
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeErr(w, 400, err)
@@ -277,6 +278,9 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.UpdateRepo != nil {
 		c.UpdateRepo = strings.TrimSpace(*body.UpdateRepo)
+	}
+	if body.CheckUpdateOnStart != nil {
+		c.CheckUpdateOnStart = *body.CheckUpdateOnStart
 	}
 	if body.LanPassword != nil && *body.LanPassword != "" {
 		sum := sha256.Sum256([]byte(*body.LanPassword))

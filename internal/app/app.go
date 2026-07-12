@@ -27,6 +27,7 @@ type Config struct {
 	CFApiKey           string `json:"cfApiKey,omitempty"`           // CurseForge API Key（导入 CF 整合包用，选填）
 	WebhookURL         string `json:"webhookUrl,omitempty"`         // 事件推送地址（选填）
 	UpdateRepo         string `json:"updateRepo,omitempty"`         // GitHub 更新仓库，如 user/AutoMCHUB
+	CheckUpdateOnStart bool   `json:"checkUpdateOnStart,omitempty"` // 启动时后台静默检查更新
 	ListenLAN          bool   `json:"listenLan,omitempty"`          // 允许局域网访问（需设置密码，重启生效）
 	AccessPasswordHash string `json:"accessPasswordHash,omitempty"` // 远程访问密码的 SHA-256
 }

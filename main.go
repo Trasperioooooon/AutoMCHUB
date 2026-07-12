@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -18,6 +19,7 @@ import (
 	"automchub/internal/java"
 	"automchub/internal/procutil"
 	"automchub/internal/tunnel"
+	"automchub/internal/update"
 	"automchub/internal/web"
 	"automchub/internal/webhook"
 
@@ -62,6 +64,17 @@ func main() {
 		}
 	}()
 	log.Println("AutoMCHUB 已启动:", url)
+
+	// 启动时静默检查更新（可在设置中开关；仅日志提示，不打断）
+	if cfg := app.GetConfig(); cfg.CheckUpdateOnStart && cfg.UpdateRepo != "" {
+		go func(repo string) {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if rel, has, err := update.Check(ctx, repo); err == nil && has {
+				log.Printf("发现新版本 %s（当前 v%s），可在设置中一键更新", rel.Tag, app.Version)
+			}
+		}(cfg.UpdateRepo)
+	}
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
