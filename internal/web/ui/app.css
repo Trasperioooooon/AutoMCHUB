@@ -64,8 +64,8 @@
   --redstone: #c23a29;
   --red-btn-a: #c25240;
   --red-btn-b: #a03a2a;
-  --text: #1e2224;
-  --muted: #5b6459;
+  --text: #17191b;
+  --muted: #3d453e; /* 次级文字加深：浅灰面板上需要 ≥7:1 对比度 */
   --btn-a: #e2e2e2;
   --btn-b: #cfcfcf;
   --shadow: 0 4px 12px rgba(0, 0, 0, .18);
@@ -279,6 +279,7 @@ input[type=text], input[type=number], input[type=password], select, input[type=t
   padding: 9px 12px; font-size: 14px; font-family: inherit;
 }
 input:focus, select:focus { outline: 2px solid var(--frame); outline-offset: 1px; }
+input::placeholder { color: var(--muted); opacity: .72; }
 input[type=range] { width: 100%; accent-color: var(--xp-btn-a); }
 input[type=file]::file-selector-button {
   background: linear-gradient(180deg, var(--btn-a), var(--btn-b));
