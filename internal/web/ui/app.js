@@ -148,7 +148,7 @@ function renderMotd(el, text) {
     return "#" + [(n >> 16) & 255, (n >> 8) & 255, n & 255]
       .map(c => f(c).toString(16).padStart(2, "0")).join("");
   };
-  const baseColor = onDark ? "#AAAAAA" : "#565e57";
+  const baseColor = onDark ? "#AAAAAA" : "#5b5647";
   el.innerHTML = "";
   let style = { color: baseColor, bold: false, italic: false, underline: false, strike: false };
   let span = null;
@@ -253,6 +253,53 @@ function rowControl(opts) {
     if (opts.open) { row.classList.add("open"); ed.appendChild(opts.editor(row)); built = true; }
   }
   return row;
+}
+
+/* 内存分配控件（滑条 + 精确输入框 + 实时物理内存状态条）：向导 / 导入 / JVM 三处共用。
+   在 mount 内渲染一个 id=sliderId 的 range，提交端仍按原 id 读取其 value，故调用方无需改提交逻辑。
+   o: { sliderId, min, max, value, totalMb, availMb, hint? } */
+function renderMemoryControl(mount, o) {
+  const min = o.min, max = Math.max(o.min, o.max);
+  const totalMb = o.totalMb || 0;
+  let availMb = o.availMb;
+  if (!availMb || availMb <= 0) availMb = totalMb;      // 后端拿不到可用内存(返回0)时退化为总量
+  const usedMb = Math.max(0, totalMb - availMb);
+  const g = mb => (mb / 1024).toFixed(1);
+  mount.innerHTML = `
+    <div class="mem-head"><span>最大内存 -Xmx</span><b class="mem-gb"></b>
+      <span class="mem-mb"><input type="number" class="mem-num" min="${min}" max="${max}" step="256"> MB</span></div>
+    <input type="range" id="${o.sliderId}" class="mem-range" min="${min}" max="${max}" step="512">
+    <div class="mem-bar"><i class="mem-used"></i><i class="mem-alloc"></i></div>
+    <div class="mem-stat"></div>
+    ${o.hint ? `<div class="hint">${esc(o.hint)}</div>` : ""}`;
+  const range = mount.querySelector(".mem-range");
+  const num = mount.querySelector(".mem-num");
+  const gb = mount.querySelector(".mem-gb");
+  const used = mount.querySelector(".mem-used");
+  const alloc = mount.querySelector(".mem-alloc");
+  const stat = mount.querySelector(".mem-stat");
+  const clamp = v => Math.min(max, Math.max(min, Math.round(+v || min)));
+  const paint = v => {
+    gb.textContent = g(v) + " GB";
+    const usedPct = totalMb ? Math.min(100, usedMb / totalMb * 100) : 0;
+    const allocPct = totalMb ? Math.min(100 - usedPct, v / totalMb * 100) : 0;
+    used.style.width = usedPct + "%";
+    alloc.style.left = usedPct + "%";
+    alloc.style.width = Math.max(0, allocPct) + "%";
+    const over = v > availMb;
+    alloc.classList.toggle("over", over);
+    let note = "";
+    if (over) note = ` <span class="mem-warn">⚠ 超过当前可用 ${g(availMb)} GB，可能触发频繁 GC 或分配失败</span>`;
+    else if (v > 16384) note = ` <span class="mem-warn">⚠ 过大的堆可能增加 GC 停顿</span>`;
+    stat.innerHTML = totalMb
+      ? `已用 ${g(usedMb)} GB · 本服分配 <b>${g(v)} GB</b> / 共 ${g(totalMb)} GB${note}`
+      : `本服分配 <b>${g(v)} GB</b>`;
+  };
+  const sync = v => { v = clamp(v); range.value = v; num.value = v; paint(v); };
+  range.oninput = () => sync(range.value);
+  num.oninput = () => { range.value = clamp(num.value); paint(+range.value); };
+  num.onchange = () => sync(num.value);
+  sync(o.value);
 }
 
 /* server.properties 常用项定义 */
@@ -380,8 +427,8 @@ async function renderCreate() {
 
 /* ---------- 视图：整合包导入 ---------- */
 async function drawImport() {
-  const app = await api("/api/app").catch(() => ({ ramMb: 8192, config: {} }));
-  const maxMem = Math.max(2048, Math.min(16384, app.ramMb - 2048));
+  const app = await api("/api/app").catch(() => ({ ramMb: 8192, availRamMb: 4096, config: {} }));
+  const maxMem = Math.max(2048, app.ramMb - 2048);
   const defMem = Math.min(6144, maxMem);
   Main().innerHTML = eyebrow("IMPORT PACK") + `<h1>导入整合包</h1>
     <div class="sub">支持 Modrinth (.mrpack) 与 CurseForge (zip)。核心、MC 版本与加载器将从整合包自动识别。</div>
@@ -389,8 +436,7 @@ async function drawImport() {
       <label class="field full"><span>整合包文件</span><input type="file" id="im-file" accept=".mrpack,.zip"></label>
       <label class="field"><span>实例名称</span><input type="text" id="im-name" value="我的整合包服务器" maxlength="40"></label>
       <label class="field"><span>端口</span><input type="number" id="im-port" value="25565" min="1" max="65535"></label>
-      <label class="field full"><span>最大内存：<b id="im-mem-val">${(defMem / 1024).toFixed(1)} GB</b>（整合包服建议 6GB+）</span>
-        <input type="range" id="im-mem" min="2048" max="${maxMem}" step="512" value="${defMem}"></label>
+      <div class="field full" id="im-mem-mount"></div>
       <div class="field"><label class="switch"><input type="checkbox" id="im-online"><span class="sw"></span>
         <span><span class="sw-label">正版验证</span><div class="sw-desc">默认关闭</div></span></label></div>
       <div class="field"><label class="switch"><input type="checkbox" id="im-flight" checked><span class="sw"></span>
@@ -406,7 +452,7 @@ async function drawImport() {
       <button class="btn primary" id="im-go">⚒ 导入并部署</button>
     </div>`;
   $("#im-back").onclick = () => renderCreate(); // 直接重绘（hash 相同不会触发路由，不能用 location.hash）
-  $("#im-mem").oninput = () => $("#im-mem-val").textContent = ($("#im-mem").value / 1024).toFixed(1) + " GB";
+  renderMemoryControl($("#im-mem-mount"), { sliderId: "im-mem", min: 2048, max: maxMem, value: defMem, totalMb: app.ramMb, availMb: app.availRamMb, hint: "整合包服建议 6GB 以上" });
   $("#im-go").onclick = async () => {
     const f = $("#im-file").files[0];
     if (!f) { toast("请先选择整合包文件", true); return; }
@@ -521,17 +567,14 @@ async function drawWizard() {
 
   } else {
     const isProxy = coreKind(wiz.core) === "proxy";
-    const app = await api("/api/app").catch(() => ({ ramMb: 8192 }));
-    const maxMem = Math.max(2048, Math.min(16384, app.ramMb - 2048));
+    const app = await api("/api/app").catch(() => ({ ramMb: 8192, availRamMb: 4096 }));
+    const maxMem = Math.max(2048, app.ramMb - 2048);
     const defMem = isProxy ? 1024 : Math.min(4096, maxMem);
     wizardShell(`
       <div class="form-grid">
         <label class="field"><span>实例名称</span><input type="text" id="f-name" value="我的${coreName(wiz.core)}服务器" maxlength="40"></label>
         ${isProxy ? "" : `<label class="field"><span>端口（默认 25565）</span><input type="number" id="f-port" value="25565" min="1" max="65535"></label>`}
-        <label class="field full"><span>最大内存：<b id="mem-val">${(defMem / 1024).toFixed(1)} GB</b>（本机共 ${(app.ramMb / 1024).toFixed(0)} GB）</span>
-          <input type="range" id="f-mem" min="512" max="${maxMem}" step="512" value="${defMem}">
-          <div class="hint">${isProxy ? "代理端很省内存，1GB 通常足够" : "模组服建议 4GB 以上；纯净小队游玩 2~4GB 足够"}</div>
-        </label>
+        <div class="field full" id="mem-mount"></div>
         ${isProxy ? "" : `
         <label class="field full"><span>服务器介绍 MOTD（支持中文与 § 色码）</span><input type="text" id="f-motd" value="AutoMCHUB 开服 · 一起来玩！"></label>
         <div class="field"><label class="switch"><input type="checkbox" id="f-online"><span class="sw"></span>
@@ -550,7 +593,7 @@ async function drawWizard() {
         <button class="btn primary" id="wcreate">⚒ 开始部署</button>
       </div>`);
     $("#wback").onclick = () => { wiz.step = wiz.core === "vanilla" ? 1 : 2; drawWizard(); };
-    $("#f-mem").oninput = () => $("#mem-val").textContent = ($("#f-mem").value / 1024).toFixed(1) + " GB";
+    renderMemoryControl($("#mem-mount"), { sliderId: "f-mem", min: 512, max: maxMem, value: defMem, totalMb: app.ramMb, availMb: app.availRamMb, hint: isProxy ? "代理端很省内存，1GB 通常足够" : "模组服建议 4GB 以上；纯净小队游玩 2~4GB 足够" });
     $("#wcreate").onclick = async () => {
       if (!isProxy && !$("#f-eula").checked) { toast("需要勾选同意 Minecraft EULA 才能开服", true); return; }
       $("#wcreate").disabled = true;
@@ -999,16 +1042,15 @@ async function renderDetail(name, tab = "console") {
     };
 
   } else if (tab === "jvm") {
-    const appInfo = await api("/api/app").catch(() => ({ ramMb: 8192 }));
-    const maxMem = Math.max(2048, Math.min(16384, appInfo.ramMb - 2048));
+    const appInfo = await api("/api/app").catch(() => ({ ramMb: 8192, availRamMb: 4096 }));
+    const maxMem = Math.max(2048, appInfo.ramMb - 2048);
     body.innerHTML = `
       <div style="max-width:560px">
-        <label class="field"><span>最大内存 -Xmx：<b id="jm-val">${(info.xmxMb / 1024).toFixed(1)} GB</b></span>
-          <input type="range" id="jm-mem" min="1024" max="${maxMem}" step="512" value="${Math.min(info.xmxMb, maxMem)}"></label>
+        <div class="field" id="jm-mem-mount"></div>
         <div class="hint" style="margin-bottom:14px">Java ${info.javaMajor}（便携运行时，由 AutoMCHUB 独立管理，不影响系统）<br>实例目录：${esc(info.dir)}<br>手动启动：双击实例目录中的 run.bat（与此处配置同步）</div>
         <button class="btn primary" id="jm-save">💾 保存（重启后生效）</button>
       </div>`;
-    $("#jm-mem").oninput = () => $("#jm-val").textContent = ($("#jm-mem").value / 1024).toFixed(1) + " GB";
+    renderMemoryControl($("#jm-mem-mount"), { sliderId: "jm-mem", min: 1024, max: maxMem, value: Math.min(info.xmxMb, maxMem), totalMb: appInfo.ramMb, availMb: appInfo.availRamMb });
     $("#jm-save").onclick = async () => {
       try {
         await api(`/api/instances/${encodeURIComponent(name)}/settings`, { method: "PUT", body: { xmxMb: +$("#jm-mem").value, xmsMb: 0 } });
@@ -1145,6 +1187,7 @@ async function renderSettings() {
   let info;
   try { info = await api("/api/app"); } catch (e) { Main().innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
   const src = info.config.source || "auto";
+  const lanPort = info.port || location.port || "27333"; // 实际监听端口（被占用时会随机化）
   const opts = [
     { v: "auto", t: "自动（推荐）", d: "国内镜像（BMCLAPI / 清华）优先，失败自动切换官方源" },
     { v: "mirror", t: "仅国内镜像", d: "只用 BMCLAPI 与清华镜像（Paper/Purpur 无镜像，仍走官方）" },
@@ -1182,7 +1225,7 @@ async function renderSettings() {
       <input type="password" id="lan-pw" placeholder="${info.lanSet ? "已设置密码（留空则不修改）" : "设置访问密码（必填）"}" style="max-width:260px">
       <button class="btn" id="lan-save">保存</button>
     </div>
-    <div class="hint">${info.config.listenLan ? `手机访问：${(info.ips || []).map(ip => `http://${ip}:27333`).join(" 或 ")}<br>` : ""}若无法访问，请以管理员运行一次放行防火墙：<code>netsh advfirewall firewall add rule name="AutoMCHUB" dir=in action=allow protocol=TCP localport=27333</code></div>
+    <div class="hint">${info.config.listenLan ? `手机访问：${(info.ips || []).map(ip => `http://${ip}:${lanPort}`).join(" 或 ")}<br>` : ""}若无法访问，请以管理员运行一次放行防火墙：<code>netsh advfirewall firewall add rule name="AutoMCHUB" dir=in action=allow protocol=TCP localport=${lanPort}</code></div>
     <h3 style="margin:26px 0 6px">Webhook 事件推送（选填）</h3>
     <div class="sub">服务器启停/崩溃、玩家进出、备份完成、隧道上线等事件将 POST 到该地址（JSON），可接入群机器人等。</div>
     <div class="row" style="margin-bottom:8px">

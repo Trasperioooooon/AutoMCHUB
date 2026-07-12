@@ -39,15 +39,15 @@
 }
 
 :root[data-theme="light"] {
-  /* ---- 浅色（纸白卡片浮于带草绿一丝的浅底） ---- */
-  --bg: #f1f4ef;
-  --surface: #ffffff;
-  --surface-2: #f6f9f4;
-  --sunken: #e7ece5;
-  --border: rgba(22, 34, 25, .12);
-  --border-strong: rgba(22, 34, 25, .24);
-  --text: #1b201c;
-  --muted: #5a675e;
+  /* ---- 浅色（暖沙中性：暖白卡片浮于米色纸底；参照 Radix Sand / claude.ai 象牙纸，弃纯白防眩光） ---- */
+  --bg: #efece2;
+  --surface: #fbfaf5;
+  --surface-2: #f5f3ea;
+  --sunken: #e6e2d6;
+  --border: rgba(62, 55, 32, .13);
+  --border-strong: rgba(62, 55, 32, .26);
+  --text: #221f18;
+  --muted: #625d4e;
   --accent: #3e8f2a;
   --accent-text: #2e7d1f;
   --accent-solid: #3e8f2a;
@@ -57,13 +57,13 @@
   --redstone: #c23a29;
   --red-solid: #bb4531;
   --red-solid-hov: #a83c29;
-  --err-bg: #fbeae6;
+  --err-bg: #f7e8e2;
   --err-text: #9a2a1c;
   --frame: #262b27;
-  --hud-bg: #ffffff;
-  --hotbar-fade: rgba(226, 232, 223, .8);
-  --shadow-sm: 0 1px 2px rgba(24, 34, 26, .07);
-  --shadow-md: 0 8px 24px rgba(24, 34, 26, .1);
+  --hud-bg: #fbfaf5;
+  --hotbar-fade: rgba(231, 226, 214, .82);
+  --shadow-sm: 0 1px 2px rgba(60, 50, 28, .08);
+  --shadow-md: 0 8px 24px rgba(60, 50, 28, .11);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -508,6 +508,21 @@ table.raw input { padding: 5px 8px; font-size: 13px; }
 .row-item.open .ri-chev { transform: rotate(180deg); }
 .ri-editor { display: none; padding: 6px 16px 14px; border-top: 1px solid var(--border); }
 .row-item.open .ri-editor { display: block; }
+
+/* ---------- 内存分配控件（滑条 + 精确输入 + 实时状态条） ---------- */
+.mem-head { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
+.mem-head .mem-gb { color: var(--text); font-size: 15px; }
+.mem-head .mem-mb { margin-left: auto; display: flex; align-items: center; gap: 5px; color: var(--muted); }
+input.mem-num { width: 92px; padding: 5px 8px; font-size: 13px; text-align: right; }
+.mem-range { width: 100%; }
+.mem-bar { position: relative; height: 9px; background: var(--sunken); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin: 12px 0 7px; }
+.mem-bar i { position: absolute; top: 0; height: 100%; }
+.mem-used { left: 0; background: var(--border-strong); }
+.mem-alloc { background: var(--accent); transition: left .1s, width .1s; }
+.mem-alloc.over { background: var(--redstone); }
+.mem-stat { font-size: 12px; color: var(--muted); }
+.mem-stat b { color: var(--text); }
+.mem-warn { color: var(--redstone); font-weight: 600; }
 
 @media (max-width: 720px) {
   #main { padding: 16px 14px; }
