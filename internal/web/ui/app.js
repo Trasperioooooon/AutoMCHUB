@@ -307,26 +307,7 @@ function renderMemoryControl(mount, o) {
   sync(o.value);
 }
 
-/* server.properties 常用项定义 */
-const COMMON_PROPS = [
-  { k: "online-mode", t: "bool", label: "正版验证", desc: "关闭后离线账户可进服（局域网常用）" },
-  { k: "allow-flight", t: "bool", label: "允许飞行", desc: "防止模组/鞘翅玩家被误踢" },
-  { k: "pvp", t: "bool", label: "玩家 PVP", desc: "允许玩家互相攻击" },
-  { k: "difficulty", t: "sel", opts: ["peaceful", "easy", "normal", "hard"], optNames: ["和平", "简单", "普通", "困难"], label: "难度" },
-  { k: "gamemode", t: "sel", opts: ["survival", "creative", "adventure", "spectator"], optNames: ["生存", "创造", "冒险", "旁观"], label: "默认游戏模式" },
-  { k: "max-players", t: "int", label: "最大玩家数" },
-  { k: "server-port", t: "int", label: "服务器端口", desc: "修改后需重启，并告知玩家新端口" },
-  { k: "motd", t: "str", label: "服务器介绍 (MOTD)", desc: "支持中文，显示在多人游戏列表" },
-  { k: "view-distance", t: "int", label: "视距（区块）", desc: "越大越吃配置，局域网建议 8~12" },
-  { k: "simulation-distance", t: "int", label: "模拟距离（区块）" },
-  { k: "spawn-protection", t: "int", label: "出生点保护半径", desc: "0 为不保护，非管理员可自由破坏" },
-  { k: "white-list", t: "bool", label: "白名单", desc: "开启后需 whitelist add 添加玩家" },
-  { k: "enable-command-block", t: "bool", label: "命令方块" },
-  { k: "spawn-monsters", t: "bool", label: "生成怪物" },
-  { k: "hardcore", t: "bool", label: "极限模式", desc: "死亡后变旁观者" },
-  { k: "force-gamemode", t: "bool", label: "强制默认模式", desc: "玩家每次进服都重置为默认游戏模式" },
-  { k: "level-seed", t: "str", label: "世界种子", desc: "仅对新建世界生效" },
-];
+/* server.properties 目录已数据化至 props-catalog.js（window.PROPS_CATALOG，约 60 项，含版本/gamerule 元数据） */
 
 /* ---------- 路由 ---------- */
 const Main = () => $("#main");
@@ -342,7 +323,7 @@ function navigate() {
   const arg = m && m[2] ? decodeURIComponent(m[2]) : null;
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("active", a.dataset.nav === view));
   if (view === "create") renderCreate();
-  else if (view === "inst" && arg) renderDetail(arg);
+  else if (view === "inst" && arg) { const sl = arg.indexOf("/"); sl >= 0 ? renderDetail(arg.slice(0, sl), arg.slice(sl + 1)) : renderDetail(arg); }
   else if (view === "settings") renderSettings(arg);
   else if (view === "tunnels") renderTunnels();
   else if (view === "task" && arg) renderTaskPage(arg);
@@ -684,7 +665,7 @@ async function renderDetail(name, tab = "console") {
       return tabs.map(([id, label]) => `<span class="tab ${tab === id ? "cur" : ""}" data-t="${id}">${label}</span>`).join("");
     })()}</div>
     <div id="tab-body"></div>`;
-  document.querySelectorAll(".tab").forEach(t => t.onclick = () => renderDetail(name, t.dataset.t));
+  document.querySelectorAll(".tab").forEach(t => t.onclick = () => location.hash = "#/inst/" + encodeURIComponent(name) + "/" + t.dataset.t);
   $("#d-dir").onclick = () => api(`/api/instances/${encodeURIComponent(name)}/opendir`, { method: "POST" }).catch(e => toast(e.message, true));
   $("#d-start").onclick = async () => {
     try { $("#d-start").disabled = true; await api(`/api/instances/${encodeURIComponent(name)}/start`, { method: "POST" }); toast("正在启动，首次生成世界可能需要一两分钟"); refreshHead(); }
@@ -951,35 +932,71 @@ async function renderDetail(name, tab = "console") {
     let data;
     try { data = await api(`/api/instances/${encodeURIComponent(name)}/properties`); } catch (e) { body.innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
     const cur = Object.fromEntries(data.pairs.map(p => [p.key, p.value]));
+    const mc = info.mc, running = data.running;
+    const GROUPS = ["基础与玩法", "世界生成", "玩家与权限", "性能", "网络与远程管理", "资源包", "安全与杂项"];
+    // 按实例版本计算适用项与呈现模式（gamerule 迁移项在新版转为 /gamerule 控件）
+    const items = [];
+    for (const p of (window.PROPS_CATALOG || [])) {
+      if (p.since && verLt(mc, p.since)) continue;                 // 尚未引入
+      let mode;
+      if (p.type === "gamerule-bool") mode = (p.removed && verGte(mc, p.removed)) ? "gamerule" : "bool";
+      else { if (p.removed && verGte(mc, p.removed)) continue; mode = p.type; } // 该版本已移除的属性 → 隐藏
+      if (p.key === "level-type" && verLt(mc, "1.16")) mode = "str";  // 旧版世界类型写法不同，转自由文本
+      items.push({ ...p, mode });
+    }
+    const inGroup = g => items.filter(p => p.group === g);
+    const fieldHTML = p => {
+      const v = cur[p.key] ?? p.def;
+      if (p.key === "motd") return `<div class="motd-palette" id="motd-pal"></div>
+        <input type="text" data-k="motd" id="motd-in" value="${esc(v ?? "")}" style="width:100%;margin-top:6px"><div class="motd-preview" id="motd-prev"></div>`;
+      if (p.mode === "gamerule") return `<label class="switch" title="游戏规则：服务器运行时通过 /gamerule 即时生效"><input type="checkbox" data-gr="${p.gamerule}" ${v === "true" ? "checked" : ""} ${running ? "" : "disabled"}><span class="sw"></span></label>`;
+      if (p.mode === "bool") return `<label class="switch"><input type="checkbox" data-k="${p.key}" ${v === "true" ? "checked" : ""}><span class="sw"></span></label>`;
+      if (p.mode === "sel") return `<select data-k="${p.key}">${p.opts.map((o, i) => `<option value="${o}" ${v === o ? "selected" : ""}>${esc(p.optNames ? p.optNames[i] : o)}</option>`).join("")}</select>`;
+      if (p.mode === "int") return `<input type="number" data-k="${p.key}" value="${esc(v ?? "")}">`;
+      return `<input type="text" data-k="${p.key}" value="${esc(v ?? "")}" style="width:200px">`;
+    };
+    const rowHTML = p => {
+      const tags = (p.restart ? `<span class="ri-restart">重启生效</span>` : "") + (p.mode === "gamerule" ? `<span class="gr-tag">游戏规则</span>` : "");
+      const notice = (p.key === "white-list" && verGte(mc, "26.3")) ? `<div class="pd" style="color:var(--gold)">注意：此版本起白名单默认开启</div>` : "";
+      const grHint = (p.mode === "gamerule" && !running) ? "（服务器启动后可切换）" : "";
+      if (p.key === "motd") return `<div class="prop-item wide" data-search="${esc(p.label)} ${p.key}"><div style="flex:1">
+        <div class="pl">${esc(p.label)} ${tags}</div><div class="pd">${esc(p.desc || "")}</div><div class="pd" style="font-family:var(--mono)">${p.key}</div>${fieldHTML(p)}</div></div>`;
+      return `<div class="prop-item" data-search="${esc(p.label)} ${p.key}"><div>
+        <div class="pl">${esc(p.label)} ${tags}</div><div class="pd">${esc(p.desc || "")}${grHint}</div>${notice}<div class="pd" style="font-family:var(--mono)">${p.key}</div></div>${fieldHTML(p)}</div>`;
+    };
     body.innerHTML = `
+      <div class="common-bar">
+        <input type="text" id="cp-search" placeholder="🔍 搜索设置项（中文名 / 键名，如 视距 / rcon）" style="max-width:320px">
+        <div class="cp-chips">${GROUPS.map((g, i) => inGroup(g).length ? `<button class="cp-chip" data-g="${i}">${g}</button>` : "").join("")}</div>
+      </div>
       ${data.pairs.length === 0 ? `<div class="sub">⚠ 服务器还未首次启动，部分配置项将在首次启动后由服务端补全；现在设置的值会被保留。</div>` : ""}
-      <div class="props-grid">${COMMON_PROPS.map(p => {
-        const v = cur[p.k];
-        if (p.k === "motd") {
-          return `<div class="prop-item wide"><div style="flex:1">
-            <div class="pl">${p.label}</div><div class="pd">${p.desc || ""}</div><div class="pd" style="font-family:var(--mono)">motd</div>
-            <div class="motd-palette" id="motd-pal"></div>
-            <input type="text" data-k="motd" id="motd-in" value="${esc(v ?? "")}" style="width:100%;margin-top:6px">
-            <div class="motd-preview" id="motd-prev"></div>
-          </div></div>`;
-        }
-        let ctrl;
-        if (p.t === "bool") {
-          ctrl = `<label class="switch"><input type="checkbox" data-k="${p.k}" ${v === "true" ? "checked" : ""}><span class="sw"></span></label>`;
-        } else if (p.t === "sel") {
-          ctrl = `<select data-k="${p.k}">${p.opts.map((o, i) =>
-            `<option value="${o}" ${v === o ? "selected" : ""}>${p.optNames ? p.optNames[i] : o}</option>`).join("")}</select>`;
-        } else if (p.t === "int") {
-          ctrl = `<input type="number" data-k="${p.k}" value="${esc(v ?? "")}">`;
-        } else {
-          ctrl = `<input type="text" data-k="${p.k}" value="${esc(v ?? "")}" style="width:200px">`;
-        }
-        return `<div class="prop-item"><div><div class="pl">${p.label}</div>${p.desc ? `<div class="pd">${p.desc}</div>` : ""}<div class="pd" style="font-family:var(--mono)">${p.k}</div></div>${ctrl}</div>`;
+      <div id="cp-list">${GROUPS.map((g, i) => {
+        const gi = inGroup(g);
+        return gi.length ? `<div class="cp-group" id="cpg-${i}"><h3 class="cp-gh">${g}<span class="cp-gn">${gi.length}</span></h3>
+          <div class="props-grid">${gi.map(rowHTML).join("")}</div></div>` : "";
       }).join("")}</div>
       <div class="save-bar">
         <button class="btn primary" id="props-save">💾 保存设置</button>
-        ${data.running ? `<span class="warn-text">⚠ 服务器运行中，大部分修改需重启后生效</span>` : ""}
+        ${running ? `<span class="warn-text">⚠ 运行中：属性类修改需重启生效（游戏规则即时生效）</span>` : ""}
       </div>`;
+    body.querySelectorAll(".cp-chip").forEach(c => c.onclick = () => $("#cpg-" + c.dataset.g, body)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    $("#cp-search").oninput = () => {
+      const q = $("#cp-search").value.trim().toLowerCase();
+      body.querySelectorAll(".cp-group").forEach(g => {
+        let any = false;
+        g.querySelectorAll(".prop-item").forEach(it => {
+          const hit = !q || (it.dataset.search || "").toLowerCase().includes(q);
+          it.style.display = hit ? "" : "none"; if (hit) any = true;
+        });
+        g.style.display = any ? "" : "none";
+      });
+    };
+    // 游戏规则开关：运行时即时发送 /gamerule（不写入 server.properties）
+    body.querySelectorAll("[data-gr]").forEach(sw => sw.onchange = async () => {
+      const rule = sw.dataset.gr, val = sw.checked;
+      try { await api(`/api/instances/${encodeURIComponent(name)}/command`, { method: "POST", body: { cmd: `gamerule ${rule} ${val}` } }); toast(`已设置 gamerule ${rule} ${val}`); }
+      catch (e) { toast(e.message, true); sw.checked = !val; }
+    });
     // MOTD 编辑器：色码调色板 + 实时预览
     const motdIn = $("#motd-in", body);
     if (motdIn) {
@@ -1035,9 +1052,10 @@ async function renderDetail(name, tab = "console") {
     let data;
     try { data = await api(`/api/instances/${encodeURIComponent(name)}/properties`); } catch (e) { body.innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
     if (!data.pairs.length) { body.innerHTML = `<div class="sub">配置文件为空 —— 首次启动服务器后，服务端会自动生成全部配置项。</div>`; return; }
-    body.innerHTML = `<div class="sub">server.properties 全部键值（高级）。改完点保存。</div>
+    const LABELS = Object.fromEntries((window.PROPS_CATALOG || []).map(p => [p.key, p.label]));
+    body.innerHTML = `<div class="sub">server.properties 全部键值（高级）。改完点保存。已知项附中文名。</div>
       <table class="raw">${data.pairs.map(p =>
-        `<tr><td>${esc(p.key)}</td><td><input type="text" data-k="${esc(p.key)}" value="${esc(p.value)}"></td></tr>`).join("")}</table>
+        `<tr><td>${esc(p.key)}</td><td class="raw-cn">${LABELS[p.key] ? esc(LABELS[p.key]) : ""}</td><td><input type="text" data-k="${esc(p.key)}" value="${esc(p.value)}"></td></tr>`).join("")}</table>
       <div class="save-bar"><button class="btn primary" id="raw-save">💾 保存全部</button>
       ${data.running ? `<span class="warn-text">⚠ 运行中，重启后生效</span>` : ""}</div>`;
     $("#raw-save").onclick = async () => {

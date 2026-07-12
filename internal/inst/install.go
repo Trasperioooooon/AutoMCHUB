@@ -261,6 +261,12 @@ func (m *Manager) runCreate(ctx context.Context, t *tasks.Task, req CreateReq, d
 		props.Set("server-port", fmt.Sprintf("%d", req.Port))
 		props.Set("online-mode", boolStr(req.OnlineMode))
 		props.Set("allow-flight", boolStr(req.AllowFlight))
+		// 离线模式下 1.19+ 显式关闭聊天签名校验，规避代理/插件环境「无法验证安全档案」踢人
+		if !req.OnlineMode {
+			if ge, err := mcsrc.NewerOrEqual(ctx, req.MC, "1.19"); err == nil && ge {
+				props.Set("enforce-secure-profile", "false")
+			}
+		}
 		motd := req.MOTD
 		if motd == "" {
 			motd = "AutoMCHUB 服务器"

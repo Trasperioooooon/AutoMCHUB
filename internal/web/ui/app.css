@@ -555,6 +555,22 @@ input.mem-num { width: 92px; padding: 5px 8px; font-size: 13px; text-align: righ
   .settings-nav { flex-direction: row; flex-wrap: wrap; width: 100%; position: static; }
 }
 
+/* ---------- 常用设置：分组 + 搜索 + 版本感知 ---------- */
+.common-bar { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+.cp-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.cp-chip {
+  background: var(--sunken); border: 1px solid var(--border); color: var(--muted);
+  border-radius: 20px; padding: 5px 12px; font-size: 12px; font-weight: 600;
+  cursor: pointer; font-family: inherit;
+}
+.cp-chip:hover { color: var(--text); border-color: var(--border-strong); }
+.cp-group { margin-bottom: 22px; }
+.cp-gh { font-size: 14px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; color: var(--accent-text); }
+.cp-gn { font-size: 11px; color: var(--muted); background: var(--sunken); border-radius: 10px; padding: 1px 8px; font-weight: 400; }
+.gr-tag { font-size: 10px; font-weight: 600; color: var(--diamond); background: color-mix(in srgb, var(--diamond) 16%, transparent); padding: 1px 6px; border-radius: 5px; }
+.prop-item .pl .ri-restart { margin-left: 4px; }
+.raw-cn { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
 @media (max-width: 720px) {
   #main { padding: 16px 14px; }
   .form-grid { grid-template-columns: 1fr; }
