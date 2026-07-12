@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AutoMCHUB · MC 一键开服</title>
+<script>
+/* 主题需在样式表生效前落到 <html>，避免切页闪烁；优先级：URL 参数 > 记忆 > 系统 */
+document.documentElement.dataset.theme =
+  new URLSearchParams(location.search).get("theme") ||
+  localStorage.getItem("amh_theme") ||
+  (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='2' width='28' height='28' fill='%237ee81f'/%3E%3Crect x='2' y='2' width='28' height='4' fill='%23a6f55d'/%3E%3Crect x='2' y='26' width='28' height='4' fill='%233f7a1e'/%3E%3Crect x='8' y='10' width='6' height='6' fill='%230e1113'/%3E%3Crect x='18' y='10' width='6' height='6' fill='%230e1113'/%3E%3Crect x='11' y='18' width='10' height='5' fill='%230e1113'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="app.css">
 </head>
@@ -16,6 +23,7 @@
     </div>
     <div id="hud-status"></div>
     <span class="grow"></span>
+    <button class="hud-btn" id="theme-btn" title="切换浅色 / 深色">☀️</button>
     <span class="hud-ver">v<span id="app-ver">…</span></span>
   </header>
   <main id="main"></main>

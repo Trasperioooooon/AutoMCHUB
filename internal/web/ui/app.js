@@ -102,6 +102,22 @@ const CORE_COLORS = {
 const cubeOf = id => `<div class="cube" style="--c:${CORE_COLORS[id] || "#8fa08e"}"><i></i></div>`;
 const eyebrow = t => `<div class="eyebrow">${esc(t)}</div>`;
 
+/* 浅色 / 深色主题切换（index.html 已在样式生效前预置 data-theme） */
+(function initTheme() {
+  const btn = $("#theme-btn");
+  const cur = () => document.documentElement.dataset.theme || "dark";
+  const paint = () => {
+    btn.textContent = cur() === "light" ? "🌙" : "☀️";
+    btn.title = cur() === "light" ? "切换到深色" : "切换到浅色";
+  };
+  btn.onclick = () => {
+    document.documentElement.dataset.theme = cur() === "light" ? "dark" : "light";
+    localStorage.setItem("amh_theme", document.documentElement.dataset.theme);
+    paint();
+  };
+  paint();
+})();
+
 /* 快捷键：1-4 切换物品栏页签；T 或 / 聚焦控制台输入（MC 聊天习惯） */
 document.addEventListener("keydown", e => {
   if (e.ctrlKey || e.altKey || e.metaKey) return;
@@ -119,10 +135,22 @@ document.addEventListener("keydown", e => {
 /* Minecraft § 色码表 */
 const MC_COLORS = { 0:"#000000",1:"#0000AA",2:"#00AA00",3:"#00AAAA",4:"#AA0000",5:"#AA00AA",6:"#FFAA00",7:"#AAAAAA",8:"#555555",9:"#5555FF",a:"#55FF55",b:"#55FFFF",c:"#FF5555",d:"#FF55FF",e:"#FFFF55",f:"#FFFFFF" };
 
-/* 将带 § 色码的 MOTD 渲染进容器（textContent 安全构建） */
+/* 将带 § 色码的 MOTD 渲染进容器（textContent 安全构建）。
+   浅色主题下把游戏原亮色压暗以保证对比度（深色容器如 motd-preview 不受影响，
+   因为其背景恒为深色，调用时机在页面主题下仍成立——按容器背景取色）。 */
 function renderMotd(el, text) {
+  const onDark = el.classList.contains("motd-preview") ||
+    document.documentElement.dataset.theme !== "light";
+  const dim = hex => {
+    if (onDark) return hex;
+    const n = parseInt(hex.slice(1), 16);
+    const f = c => Math.round(c * 0.55);
+    return "#" + [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+      .map(c => f(c).toString(16).padStart(2, "0")).join("");
+  };
+  const baseColor = onDark ? "#AAAAAA" : "#565e57";
   el.innerHTML = "";
-  let style = { color: "#AAAAAA", bold: false, italic: false, underline: false, strike: false };
+  let style = { color: baseColor, bold: false, italic: false, underline: false, strike: false };
   let span = null;
   const newSpan = () => {
     span = document.createElement("span");
@@ -137,12 +165,12 @@ function renderMotd(el, text) {
     if ((ch === "§" || ch === "&") && i + 1 < text.length && ch === "§") {
       const c = text[i + 1].toLowerCase();
       i++;
-      if (MC_COLORS[c] !== undefined) { style = { color: MC_COLORS[c], bold: false, italic: false, underline: false, strike: false }; span = null; }
+      if (MC_COLORS[c] !== undefined) { style = { color: dim(MC_COLORS[c]), bold: false, italic: false, underline: false, strike: false }; span = null; }
       else if (c === "l") { style.bold = true; span = null; }
       else if (c === "o") { style.italic = true; span = null; }
       else if (c === "n") { style.underline = true; span = null; }
       else if (c === "m") { style.strike = true; span = null; }
-      else if (c === "r") { style = { color: "#AAAAAA", bold: false, italic: false, underline: false, strike: false }; span = null; }
+      else if (c === "r") { style = { color: baseColor, bold: false, italic: false, underline: false, strike: false }; span = null; }
       continue;
     }
     if (!span) newSpan();
@@ -298,9 +326,10 @@ async function drawImport() {
         <span class="sw-label">我已阅读并同意 <a href="https://aka.ms/MinecraftEULA" target="_blank">Minecraft EULA</a></span></label>
     </div>
     <div class="wizard-foot">
-      <button class="btn" onclick="location.hash='#/create'">← 返回</button>
+      <button class="btn" id="im-back">← 返回</button>
       <button class="btn primary" id="im-go">⚒ 导入并部署</button>
     </div>`;
+  $("#im-back").onclick = () => renderCreate(); // 直接重绘（hash 相同不会触发路由，不能用 location.hash）
   $("#im-mem").oninput = () => $("#im-mem-val").textContent = ($("#im-mem").value / 1024).toFixed(1) + " GB";
   $("#im-go").onclick = async () => {
     const f = $("#im-file").files[0];
@@ -337,7 +366,8 @@ function wizardShell(inner) {
 async function drawWizard() {
   if (wiz.step === 0) {
     wizardShell(`<div class="core-grid" id="core-grid">加载中…</div>
-      <div class="wizard-foot"><span></span><button class="btn primary" id="wnext" disabled>下一步 →</button></div>`);
+      <div class="wizard-foot"><button class="btn" id="wback0">← 返回</button><button class="btn primary" id="wnext" disabled>下一步 →</button></div>`);
+    $("#wback0").onclick = () => renderCreate();
     let cores;
     try { cores = await api("/api/cores"); } catch (e) { $("#core-grid").innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
     cores.forEach(c => CORES[c.id] = c);
