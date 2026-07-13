@@ -123,6 +123,34 @@ const eyebrow = t => `<div class="eyebrow">${esc(t)}</div>`;
   paint();
 })();
 
+/* 无边框宿主：系统标题栏已去除，HUD 顶栏充当标题栏。窗口按钮 + 拖动经 WebView2 的 Bind 桥接驱动。
+   仅当宿主注入了 hostWin* 函数时启用（浏览器回退时保留系统窗口，什么都不做）。 */
+(function initHostChrome() {
+  if (typeof window.hostWinClose !== "function") return;
+  document.body.classList.add("has-host-chrome");
+  const call = fn => { try { window[fn](); } catch (e) {} };
+  const maxBtn = $("#wc-max");
+  const boxMax = `<svg viewBox="0 0 12 12" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1"><rect x="2" y="2" width="8" height="8"/></svg>`;
+  const boxRestore = `<svg viewBox="0 0 12 12" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1"><rect x="2.5" y="3.5" width="6" height="6"/><path d="M4.5 3.5V1.5h6v6H8"/></svg>`;
+  const refreshMax = async () => { try { maxBtn.innerHTML = (await window.hostWinIsMax()) ? boxRestore : boxMax; } catch (e) {} };
+  $("#wc-min").onclick = () => call("hostWinMin");
+  $("#wc-close").onclick = () => call("hostWinClose");
+  maxBtn.onclick = () => { call("hostWinMaxToggle"); setTimeout(refreshMax, 80); };
+  refreshMax();
+  // HUD 空白处按下 → 发起原生拖动；双击 → 最大化/还原。交互元素（按钮/链接/输入/控制键）除外。
+  const hud = $("#hud");
+  const onChrome = e => e.target.closest("button, a, input, select, .win-ctrls");
+  hud.addEventListener("mousedown", e => {
+    if (e.button !== 0 || onChrome(e)) return;
+    e.preventDefault();
+    call("hostWinDrag");
+  });
+  hud.addEventListener("dblclick", e => {
+    if (onChrome(e)) return;
+    call("hostWinMaxToggle"); setTimeout(refreshMax, 80);
+  });
+})();
+
 /* 快捷键：1-4 切换物品栏页签；T 或 / 聚焦控制台输入（MC 聊天习惯） */
 document.addEventListener("keydown", e => {
   if (e.ctrlKey || e.altKey || e.metaKey) return;

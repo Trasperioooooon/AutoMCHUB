@@ -125,6 +125,18 @@ h3 { font-size: 15px; }
 }
 .hud-btn:hover { background: var(--sunken); border-color: var(--border); }
 
+/* 无边框：窗口控制键（最小化/最大化/关闭）。仅在原生 WebView 宿主内显示，浏览器回退时隐藏。
+   负外边距让其撑满 HUD 高度并贴到右上角，充当系统标题栏被移除后的窗口控制。 */
+.win-ctrls { display: none; align-self: stretch; margin: -12px -24px -12px 8px; }
+body.has-host-chrome .win-ctrls { display: flex; }
+body.has-host-chrome #hud { -webkit-user-select: none; user-select: none; }
+.win-ctrls .wc {
+  width: 46px; border: 0; background: none; color: var(--muted);
+  display: grid; place-items: center; cursor: pointer; -webkit-app-region: no-drag;
+}
+.win-ctrls .wc:hover { background: var(--sunken); color: var(--text); }
+.win-ctrls .wc-close:hover { background: #e5484d; color: #fff; }
+
 /* 体素方块（颜色由 --c 决定） */
 .cube {
   --c: #7ec850;
