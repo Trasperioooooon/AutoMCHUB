@@ -91,7 +91,30 @@ func (m *Manager) validateCreate(req *CreateReq) (string, error) {
 	if (req.Core == mcsrc.CoreMohist || req.Core == mcsrc.CoreBanner) && !isASCII(dir) {
 		return "", fmt.Errorf("Mohist/Banner 与非英文路径不兼容，请把存放目录设为纯英文路径（当前将创建于：%s）", dir)
 	}
+	// 所有校验通过后，原子性登记「创建中」占位。实例要到流水线末尾（Finish）才写入 m.insts，
+	// 期间同名请求（一键部署双击 / 重复 POST）此前都能各自通过校验并建目录，完成时相互覆盖 map
+	// 造成孤儿实例。此处在返回目录前占位，重复请求会被拒；调用方 goroutine 负责最终 releaseCreating。
+	m.mu.Lock()
+	_, taken := m.insts[req.Name]
+	inflight := m.creating[req.Name]
+	if !taken && !inflight {
+		m.creating[req.Name] = true
+	}
+	m.mu.Unlock()
+	if taken {
+		return "", fmt.Errorf("实例名已存在: %s", req.Name)
+	}
+	if inflight {
+		return "", fmt.Errorf("「%s」正在创建中，请稍候", req.Name)
+	}
 	return dir, nil
+}
+
+// releaseCreating 释放实例名的「创建中」占位；由创建/导入 goroutine 在任务结束时（无论成败）调用。
+func (m *Manager) releaseCreating(name string) {
+	m.mu.Lock()
+	delete(m.creating, name)
+	m.mu.Unlock()
 }
 
 // slugify 把实例显示名转为 ASCII 安全的目录名；全非 ASCII 时回退带时间戳。
@@ -120,6 +143,7 @@ func (m *Manager) CreateAsync(req CreateReq) (string, error) {
 	}
 	t, ctx := m.Tasks.New(fmt.Sprintf("创建实例 %s（%s %s）", req.Name, req.Core, req.MC), createSteps)
 	go func() {
+		defer m.releaseCreating(req.Name)
 		if err := m.runCreate(ctx, t, req, dir); err != nil {
 			t.Fail(err)
 			os.RemoveAll(dir) // 清理半成品目录（缓存保留，重试无需重新下载）

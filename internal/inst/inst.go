@@ -77,13 +77,14 @@ func (i *Instance) Port() int {
 }
 
 type Manager struct {
-	mu    sync.Mutex
-	insts map[string]*Instance
-	Tasks *tasks.Manager
+	mu       sync.Mutex
+	insts    map[string]*Instance
+	creating map[string]bool // 正在创建中的实例名（注册进 insts 前的占位，防并发/重复创建同名实例）
+	Tasks    *tasks.Manager
 }
 
 func NewManager() (*Manager, error) {
-	m := &Manager{insts: map[string]*Instance{}, Tasks: tasks.NewManager()}
+	m := &Manager{insts: map[string]*Instance{}, creating: map[string]bool{}, Tasks: tasks.NewManager()}
 	// 多根扫描：内置默认根 + 配置默认根 + 历史自定义根（支持实例散落于不同盘符/目录）
 	for _, root := range app.InstanceRoots() {
 		ents, err := os.ReadDir(root)

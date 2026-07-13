@@ -334,9 +334,12 @@ function navigate() {
 window.addEventListener("hashchange", navigate);
 
 /* 一键开服：Paper 最新正式版 + 推荐设置（空状态入口） */
+let quickBusy = false; // 防重入：代理慢时接口耗时较长，避免用户以为「没反应」而重复点击创建出多台
 async function quickStart() {
+  if (quickBusy) { toast("正在创建，请稍候…"); return; }
   const ok = await confirmModal({ title: "一键开服", okText: "同意并开始", body: "将创建一台 <b>Paper 最新正式版</b> 服务器，采用推荐设置（离线模式、允许飞行、默认端口 25565）。<br>继续即表示同意 <a href='https://aka.ms/MinecraftEULA' target='_blank'>Minecraft EULA</a>。" });
   if (!ok) return;
+  quickBusy = true;
   try {
     const app = await api("/api/app");
     const vers = await api("/api/mcversions?core=paper&snapshots=0");
@@ -354,6 +357,7 @@ async function quickStart() {
     toast(`正在部署 Paper ${mc}`);
     location.hash = `#/task/${r.taskId}`;
   } catch (e) { toast(e.message, true); }
+  finally { quickBusy = false; }
 }
 
 /* ---------- 视图：实例列表 ---------- */
@@ -747,7 +751,7 @@ async function renderTaskPage(taskId) {
     try { t = await api(`/api/tasks/${taskId}`); } catch (e) { $("#task-box").innerHTML = `<div class="err-box">${esc(e.message)}</div>`; clearInterval(pollTimer); return; }
     const pct = t.total > 0 ? Math.min(100, t.done / t.total * 100) : 0;
     $("#task-box").innerHTML = `
-      <div class="task-steps">${t.steps.map(s =>
+      <div class="task-steps">${(t.steps || []).map(s =>
         `<div class="task-step ${s.status}"><span class="ts-ico">${icons[s.status]}</span>${esc(s.name)}</div>`).join("")}</div>
       ${t.label ? `<div class="progress-wrap"><div class="progress-bar"><div style="width:${pct}%"></div></div>
         <div class="progress-text">${esc(t.label)} · ${fmtBytes(t.done)}${t.total > 0 ? " / " + fmtBytes(t.total) : ""}</div></div>` : ""}
@@ -758,7 +762,7 @@ async function renderTaskPage(taskId) {
         ${(w.items || []).length ? `<ul class="wc-list">${w.items.map(it =>
           `<li>${/^https?:\/\//i.test(it.url || "") ? `<a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.name)}</a>` : esc(it.name)}</li>`).join("")}</ul>` : ""}
       </div>`).join("")}
-      <div class="task-log" id="task-log">${t.log.map(esc).join("\n")}</div>
+      <div class="task-log" id="task-log">${(t.log || []).map(esc).join("\n")}</div>
       <div class="save-bar">
         ${t.ended && !t.error ? `<a class="btn primary" href="#/inst/${encodeURIComponent(t.result)}">✔ 完成，进入控制台</a>` : ""}
         ${t.ended && t.error ? `<a class="btn" href="#/create">← 返回重试</a>` : ""}
@@ -768,7 +772,8 @@ async function renderTaskPage(taskId) {
     lg.scrollTop = lg.scrollHeight;
     if (t.ended) { clearInterval(pollTimer); pollTimer = null; if (!t.error) toast("服务器创建成功 🎉"); }
   };
-  await draw();
+  // 首次 draw 若因任何原因抛错，也必须启动轮询——否则后续状态永远无法刷新，页面会永久停在「加载中…」。
+  try { await draw(); } catch (e) { console.warn("首次任务渲染失败，转由轮询接管：", e); }
   pollTimer = setInterval(draw, 800);
 }
 

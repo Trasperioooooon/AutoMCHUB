@@ -29,6 +29,7 @@ func (m *Manager) ImportModpackAsync(pack *modpack.Pack, req CreateReq, cfKey st
 	}
 	t, ctx := m.Tasks.New(fmt.Sprintf("导入整合包 %s（%s %s）", title, req.Core, req.MC), steps)
 	go func() {
+		defer m.releaseCreating(req.Name)
 		if err := m.runImport(ctx, t, pack, req, dir, cfKey); err != nil {
 			t.Fail(err)
 			_ = m.Delete(req.Name, false) // 从列表移除（可能已注册）
