@@ -78,7 +78,7 @@ func readZipFile(f *zip.File, out any) error {
 func safeRelPath(p string) (string, error) {
 	p = strings.ReplaceAll(p, "\\", "/")
 	clean := path.Clean(p)
-	if clean == "." || strings.HasPrefix(clean, "../") || path.IsAbs(clean) ||
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || path.IsAbs(clean) ||
 		strings.Contains(clean, ":") || strings.HasPrefix(clean, "/") {
 		return "", fmt.Errorf("整合包内含非法路径: %s", p)
 	}

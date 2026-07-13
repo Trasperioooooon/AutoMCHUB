@@ -98,6 +98,8 @@ func (m *Manager) Start(name string) error {
 	i.state = "starting"
 	i.userStop = false
 	i.startedAt = time.Now()
+	i.runGen++
+	gen := i.runGen // 本次运行的代号：崩溃重启只在无更新的运行发生时才生效
 	i.clearOnline()
 
 	go func() {
@@ -134,7 +136,7 @@ func (m *Manager) Start(name string) error {
 			events.Publish("instance.crash", map[string]any{"instance": i.Name})
 		}
 		if !wasUser && crashPolicy {
-			go m.crashRestart(i)
+			go m.crashRestart(i, gen)
 		}
 	}()
 	events.Publish("instance.start", map[string]any{"instance": i.Name})
@@ -166,18 +168,19 @@ func (m *Manager) Stop(name string) error {
 		for {
 			select {
 			case <-deadline:
+				// 仅当仍是本次要停止的那个进程时才强杀——否则可能误杀期间已重启的新进程
 				i.procMu.Lock()
-				if i.proc != nil {
+				if i.proc == p {
 					i.Console.Append("[AutoMCHUB] 停止超时，强制结束进程")
-					_ = i.proc.cmd.Process.Kill()
+					_ = p.cmd.Process.Kill()
 				}
 				i.procMu.Unlock()
 				return
 			case <-tick.C:
 				i.procMu.Lock()
-				alive := i.proc != nil
+				gone := i.proc != p // 本次进程已退出（i.proc 置空或已换成新一次运行）
 				i.procMu.Unlock()
-				if !alive {
+				if gone {
 					return
 				}
 			}
@@ -299,11 +302,22 @@ func (m *Manager) ShutdownAll(wait time.Duration) {
 	}
 }
 
-// OpenDir 在资源管理器中打开实例目录。
-func (m *Manager) OpenDir(name string) error {
+// OpenDir 在资源管理器中打开实例目录，或其白名单子目录（sub，做穿越防护）。
+func (m *Manager) OpenDir(name, sub string) error {
 	i, err := m.Get(name)
 	if err != nil {
 		return err
 	}
-	return exec.Command("explorer.exe", filepath.Clean(i.Dir)).Start()
+	target := i.Dir
+	if sub = strings.TrimSpace(sub); sub != "" {
+		clean := filepath.Clean(sub)
+		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("非法子目录")
+		}
+		target = filepath.Join(i.Dir, clean)
+	}
+	if st, err := os.Stat(target); err != nil || !st.IsDir() {
+		return fmt.Errorf("目录尚不存在（服务器可能还没生成它）")
+	}
+	return exec.Command("explorer.exe", filepath.Clean(target)).Start()
 }

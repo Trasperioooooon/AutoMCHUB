@@ -12,7 +12,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const Version = "2.0.0"
+const Version = "2.1.0"
 
 var (
 	Base        string // 程序所在目录（数据自包含于此，不写注册表、不动环境变量）
@@ -27,9 +27,20 @@ type Config struct {
 	CFApiKey           string `json:"cfApiKey,omitempty"`           // CurseForge API Key（导入 CF 整合包用，选填）
 	WebhookURL         string `json:"webhookUrl,omitempty"`         // 事件推送地址（选填）
 	UpdateRepo         string `json:"updateRepo,omitempty"`         // GitHub 更新仓库，如 user/AutoMCHUB
+	CheckUpdateOnStart bool   `json:"checkUpdateOnStart,omitempty"` // 启动时后台静默检查更新
 	ListenLAN          bool   `json:"listenLan,omitempty"`          // 允许局域网访问（需设置密码，重启生效）
 	AccessPasswordHash string `json:"accessPasswordHash,omitempty"` // 远程访问密码的 SHA-256
+	MinimizeToTray     bool   `json:"minimizeToTray,omitempty"`     // 关闭窗口时最小化到托盘（服务器不停），默认关
+
+	ServersDir string   `json:"serversDir,omitempty"` // 自定义实例存放根目录（空=内置 servers/），仅对新建生效
+	BackupsDir string   `json:"backupsDir,omitempty"` // 自定义备份根目录（空=内置 backups/）
+	Roots      []string `json:"roots,omitempty"`      // 曾放置实例的其它根目录（多根扫描用）
+	BackupKeep int      `json:"backupKeep,omitempty"` // 每实例保留的备份份数（0=默认 10）
+	Onboarded  bool     `json:"onboarded,omitempty"`  // 首次运行引导卡是否已完成
 }
+
+// DefaultBackupKeep 未配置时每实例保留的备份份数。
+const DefaultBackupKeep = 10
 
 var (
 	cfgMu sync.RWMutex
@@ -98,6 +109,79 @@ func MirrorFirst() bool  { return GetConfig().Source != "official" }
 func OfficialOnly() bool { return GetConfig().Source == "official" }
 func MirrorOnly() bool   { return GetConfig().Source == "mirror" }
 
+// ServersRoot 返回新实例的默认存放根目录（配置优先，否则程序内置 servers/）。
+func ServersRoot() string {
+	if d := GetConfig().ServersDir; d != "" {
+		return filepath.Clean(d)
+	}
+	return ServersDir
+}
+
+// BackupKeep 返回每实例保留的备份份数（配置优先，缺省 DefaultBackupKeep，范围 1~1000）。
+func BackupKeep() int {
+	k := GetConfig().BackupKeep
+	if k <= 0 {
+		return DefaultBackupKeep
+	}
+	if k > 1000 {
+		return 1000
+	}
+	return k
+}
+
+// BackupsRoot 返回备份根目录（配置优先，否则程序内置 backups/）。
+func BackupsRoot() string {
+	if d := GetConfig().BackupsDir; d != "" {
+		return filepath.Clean(d)
+	}
+	return BackupsDir
+}
+
+// InstanceRoots 返回所有需要扫描实例的根目录（去重、保持顺序）。
+func InstanceRoots() []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(d string) {
+		if d == "" {
+			return
+		}
+		c := filepath.Clean(d)
+		if !seen[c] {
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	c := GetConfig()
+	add(ServersDir)   // 内置默认根
+	add(c.ServersDir) // 配置的默认根
+	for _, r := range c.Roots {
+		add(r) // 历史自定义根
+	}
+	return out
+}
+
+// RememberRoot 记录一个曾放置实例的自定义根，便于下次启动扫描发现。
+// 内置默认根与当前配置默认根已被扫描，无需记录。
+func RememberRoot(dir string) {
+	if dir == "" {
+		return
+	}
+	dir = filepath.Clean(dir)
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
+	if dir == filepath.Clean(ServersDir) || (cfg.ServersDir != "" && dir == filepath.Clean(cfg.ServersDir)) {
+		return
+	}
+	for _, r := range cfg.Roots {
+		if filepath.Clean(r) == dir {
+			return
+		}
+	}
+	cfg.Roots = append(cfg.Roots, dir)
+	b, _ := json.MarshalIndent(cfg, "", "  ")
+	_ = os.WriteFile(configPath(), b, 0o644)
+}
+
 type memoryStatusEx struct {
 	Length               uint32
 	MemoryLoad           uint32
@@ -121,4 +205,16 @@ func TotalRAMMB() int {
 		return 8192
 	}
 	return int(m.TotalPhys / (1024 * 1024))
+}
+
+// AvailRAMMB 返回当前可用物理内存（MB）；调用失败时返回 0（表示未知，
+// 与 TotalRAMMB 的保守兜底 8192 区分，便于前端据 0 走降级逻辑）。
+func AvailRAMMB() int {
+	var m memoryStatusEx
+	m.Length = uint32(unsafe.Sizeof(m))
+	r, _, _ := procGlobalMemoryStatusEx.Call(uintptr(unsafe.Pointer(&m)))
+	if r == 0 {
+		return 0
+	}
+	return int(m.AvailPhys / (1024 * 1024))
 }

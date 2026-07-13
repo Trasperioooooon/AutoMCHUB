@@ -13,17 +13,32 @@ type Step struct {
 	Status string `json:"status"` // pending | running | done | error
 }
 
+// WarnItem 一条可点击的告警条目（如需手动补装的模组）。
+type WarnItem struct {
+	Name string `json:"name"`
+	URL  string `json:"url,omitempty"`
+}
+
+// Warning 任务完成后需在结果页醒目呈现的结构化提示（区别于滚动日志）。
+type Warning struct {
+	Kind  string     `json:"kind"`  // 如 cf-unresolved
+	Title string     `json:"title"` // 如「3 个模组需手动补装」
+	Note  string     `json:"note,omitempty"`
+	Items []WarnItem `json:"items,omitempty"`
+}
+
 type Snapshot struct {
-	ID     string   `json:"id"`
-	Title  string   `json:"title"`
-	Steps  []Step   `json:"steps"`
-	Log    []string `json:"log"`
-	Label  string   `json:"label"`
-	Done   int64    `json:"done"`
-	Total  int64    `json:"total"`
-	Ended  bool     `json:"ended"`
-	Err    string   `json:"error,omitempty"`
-	Result string   `json:"result,omitempty"`
+	ID       string    `json:"id"`
+	Title    string    `json:"title"`
+	Steps    []Step    `json:"steps"`
+	Log      []string  `json:"log"`
+	Label    string    `json:"label"`
+	Done     int64     `json:"done"`
+	Total    int64     `json:"total"`
+	Ended    bool      `json:"ended"`
+	Err      string    `json:"error,omitempty"`
+	Result   string    `json:"result,omitempty"`
+	Warnings []Warning `json:"warnings,omitempty"`
 }
 
 type Task struct {
@@ -35,10 +50,11 @@ type Task struct {
 	label  string
 	done   int64
 	total  int64
-	ended  bool
-	err    string
-	result string
-	cancel context.CancelFunc
+	ended    bool
+	err      string
+	result   string
+	warnings []Warning
+	cancel   context.CancelFunc
 }
 
 type Manager struct {
@@ -96,6 +112,13 @@ func (t *Task) Logf(format string, a ...any) {
 	}
 }
 
+// AddWarning 追加一条结构化告警，供结果页醒目呈现。
+func (t *Task) AddWarning(w Warning) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.warnings = append(t.warnings, w)
+}
+
 // ProgressFn 返回带标签的进度回调。
 func (t *Task) ProgressFn(label string) func(done, total int64) {
 	return func(done, total int64) {
@@ -141,5 +164,6 @@ func (t *Task) Snapshot() Snapshot {
 	}
 	s.Steps = append(s.Steps, t.steps...)
 	s.Log = append(s.Log, t.log...)
+	s.Warnings = append(s.Warnings, t.warnings...)
 	return s
 }

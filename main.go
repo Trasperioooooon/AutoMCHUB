@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"time"
 
 	"automchub/internal/app"
@@ -18,6 +20,7 @@ import (
 	"automchub/internal/java"
 	"automchub/internal/procutil"
 	"automchub/internal/tunnel"
+	"automchub/internal/update"
 	"automchub/internal/web"
 	"automchub/internal/webhook"
 
@@ -25,7 +28,9 @@ import (
 )
 
 func main() {
+	setDPIAware() // 高 DPI 屏清晰渲染：必须在任何窗口创建前声明 DPI 感知
 	nogui := flag.Bool("nogui", false, "仅启动本地服务，不打开窗口")
+	minimized := flag.Bool("minimized", false, "启动后隐藏窗口到托盘（配合开机自启）")
 	port := flag.Int("port", 27333, "本地 Web 端口（被占用时自动改用随机端口）")
 	flag.Parse()
 
@@ -54,13 +59,25 @@ func main() {
 			fatal("无法监听本地端口: " + err.Error())
 		}
 	}
-	url := fmt.Sprintf("http://127.0.0.1:%d/?token=%s", ln.Addr().(*net.TCPAddr).Port, web.Token)
+	addr := ln.Addr().(*net.TCPAddr)
+	url := fmt.Sprintf("http://127.0.0.1:%d/?token=%s", addr.Port, web.Token)
 	go func() {
-		if err := http.Serve(ln, web.New(mgr, tun)); err != nil {
+		if err := http.Serve(ln, web.New(mgr, tun, addr.Port)); err != nil {
 			log.Println("HTTP 服务退出:", err)
 		}
 	}()
 	log.Println("AutoMCHUB 已启动:", url)
+
+	// 启动时静默检查更新（可在设置中开关；仅日志提示，不打断）
+	if cfg := app.GetConfig(); cfg.CheckUpdateOnStart && cfg.UpdateRepo != "" {
+		go func(repo string) {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if rel, has, err := update.Check(ctx, repo); err == nil && has {
+				log.Printf("发现新版本 %s（当前 v%s），可在设置中一键更新", rel.Tag, app.Version)
+			}
+		}(cfg.UpdateRepo)
+	}
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
@@ -73,7 +90,7 @@ func main() {
 
 	if *nogui {
 		<-sig
-	} else if !openWebView(url, sig) {
+	} else if !openWebView(url, sig, *minimized) {
 		log.Println("WebView2 不可用，使用默认浏览器打开界面")
 		_ = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 		<-sig
@@ -85,29 +102,39 @@ func main() {
 }
 
 // openWebView 尝试以原生窗口运行界面；窗口关闭或收到中断信号时返回。
-func openWebView(url string, sig chan os.Signal) (ok bool) {
+func openWebView(url string, sig chan os.Signal, minimized bool) (ok bool) {
 	defer func() {
 		if recover() != nil {
 			ok = false
 		}
 	}()
+	// Win32 窗口线程亲和：建窗与消息循环须固定在同一 OS 线程
+	runtime.LockOSThread()
+	scale := systemDPIScale() // 窗口尺寸按 DPI 放大，保持高分屏上的视觉大小
 	w := webview2.NewWithOptions(webview2.WebViewOptions{
 		Debug:     false,
 		AutoFocus: true,
 		WindowOptions: webview2.WindowOptions{
 			Title:  "AutoMCHUB · MC 一键开服",
-			Width:  1280,
-			Height: 850,
+			Width:  uint(float64(1280) * scale),
+			Height: uint(float64(850) * scale),
 			Center: true,
 		},
 	})
 	if w == nil {
+		runtime.UnlockOSThread() // WebView2 不可用，回退浏览器：释放线程绑定
 		return false
 	}
 	defer w.Destroy()
+	hwnd := uintptr(w.Window())
+	setupTray(hwnd)          // 子类化窗口过程 + 挂托盘图标（关窗最小化 / 右键菜单）
+	if minimized {
+		hideTrayWindow(hwnd) // 随开机自启静默进托盘
+	}
+	// 退出信号（Ctrl-C / 「退出程序」按钮）线程安全地投递到窗口线程，避免跨线程 Terminate
 	go func() {
 		<-sig
-		w.Terminate()
+		postTrayQuit(hwnd)
 	}()
 	w.Navigate(url)
 	w.Run()

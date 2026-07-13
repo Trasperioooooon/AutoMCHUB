@@ -3,6 +3,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -15,12 +16,14 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"automchub/internal/app"
+	"automchub/internal/autostart"
 	"automchub/internal/inst"
 	"automchub/internal/java"
 	"automchub/internal/mcsrc"
@@ -51,19 +54,24 @@ var sessionValue = func() string {
 var OnShutdown func()
 
 type Server struct {
-	mgr *inst.Manager
-	tun *tunnel.Manager
+	mgr  *inst.Manager
+	tun  *tunnel.Manager
+	port int // 实际监听端口（由 main 注入，只读；被占用时可能与默认端口不同）
 }
 
-func New(mgr *inst.Manager, tun *tunnel.Manager) http.Handler {
-	s := &Server{mgr: mgr, tun: tun}
+func New(mgr *inst.Manager, tun *tunnel.Manager, port int) http.Handler {
+	s := &Server{mgr: mgr, tun: tun, port: port}
 	mux := http.NewServeMux()
 
 	sub, _ := fs.Sub(uiFS, "ui")
 	fileServer := http.FileServer(http.FS(sub))
 	mux.Handle("GET /", noCache(fileServer))
+	mux.HandleFunc("GET /bg/{name}", s.handleBGImage) // 用户壁纸（程序旁 bg/ 目录），免 token 供 CSS url() 引用
 
 	mux.HandleFunc("GET /api/app", s.handleApp)
+	mux.HandleFunc("GET /api/bg", s.handleBGList)
+	mux.HandleFunc("POST /api/pickdir", s.handlePickDir)
+	mux.HandleFunc("POST /api/openpath", s.handleOpenPath)
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("POST /api/shutdown", s.handleShutdown)
 	mux.HandleFunc("PUT /api/config", s.handleSetConfig)
@@ -103,7 +111,7 @@ func New(mgr *inst.Manager, tun *tunnel.Manager) http.Handler {
 	mux.HandleFunc("POST /api/instances/{name}/start", s.handleInstStart)
 	mux.HandleFunc("POST /api/instances/{name}/stop", s.instAction((*inst.Manager).Stop))
 	mux.HandleFunc("POST /api/instances/{name}/kill", s.instAction((*inst.Manager).Kill))
-	mux.HandleFunc("POST /api/instances/{name}/opendir", s.instAction((*inst.Manager).OpenDir))
+	mux.HandleFunc("POST /api/instances/{name}/opendir", s.handleOpenDir)
 	mux.HandleFunc("POST /api/instances/{name}/command", s.handleCommand)
 	mux.HandleFunc("DELETE /api/instances/{name}", s.handleDelete)
 	mux.HandleFunc("GET /api/instances/{name}/console", s.handleConsole)
@@ -211,13 +219,82 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 	cfg := app.GetConfig()
 	cfg.AccessPasswordHash = "" // 不下发哈希
 	writeJSON(w, map[string]any{
-		"version": app.Version,
-		"base":    app.Base,
-		"ramMb":   app.TotalRAMMB(),
-		"config":  cfg,
-		"lanSet":  app.GetConfig().AccessPasswordHash != "",
-		"ips":     localIPs(),
+		"version":    app.Version,
+		"base":       app.Base,
+		"ramMb":      app.TotalRAMMB(),
+		"availRamMb":  app.AvailRAMMB(),
+		"port":        s.port,
+		"serversRoot": app.ServersRoot(),
+		"backupsRoot": app.BackupsRoot(),
+		"config":      cfg,
+		"lanSet":     app.GetConfig().AccessPasswordHash != "",
+		"autoStart":  autostart.Enabled(), // 开机自启真值以注册表为准
+		"ips":        localIPs(),
 	})
+}
+
+// isLoopbackReq 判断请求是否来自本机（限制仅本机可弹系统对话框 / 开资源管理器）。
+func isLoopbackReq(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return host == "localhost"
+}
+
+// handlePickDir 弹出系统文件夹选择对话框，返回所选目录（取消则 path 为空）。仅本机可用。
+func (s *Server) handlePickDir(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackReq(r) {
+		writeErr(w, 403, fmt.Errorf("文件夹选择仅支持在本机操作（远程管理时请手动填写路径）"))
+		return
+	}
+	path, err := pickFolder()
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	writeJSON(w, map[string]string{"path": path})
+}
+
+// handleOpenPath 在资源管理器中打开指定目录。仅本机可用。
+func (s *Server) handleOpenPath(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackReq(r) {
+		writeErr(w, 403, fmt.Errorf("打开目录仅支持在本机操作"))
+		return
+	}
+	var body struct {
+		Path string `json:"path"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	p := filepath.Clean(strings.TrimSpace(body.Path))
+	if st, err := os.Stat(p); err != nil || !st.IsDir() {
+		writeErr(w, 400, fmt.Errorf("目录不存在"))
+		return
+	}
+	_ = exec.Command("explorer.exe", p).Start()
+	writeJSON(w, "ok")
+}
+
+// pickFolder 通过 PowerShell 调用系统 FolderBrowserDialog（-STA），返回所选目录。
+func pickFolder() (string, error) {
+	const ps = "Add-Type -AssemblyName System.Windows.Forms | Out-Null; " +
+		"$f = New-Object System.Windows.Forms.FolderBrowserDialog; " +
+		"$f.Description = 'Choose a folder for AutoMCHUB'; $f.ShowNewFolderButton = $true; " +
+		"if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($f.SelectedPath) }"
+	cmd := exec.Command("powershell", "-STA", "-NoProfile", "-NonInteractive", "-Command", ps)
+	cmd.Env = procutil.CleanEnv()
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("打开文件夹对话框失败: %w", err)
+	}
+	return strings.TrimSpace(out.String()), nil
 }
 
 func localIPs() []string {
@@ -232,6 +309,58 @@ func localIPs() []string {
 		}
 	}
 	return out
+}
+
+// ---------- 壁纸个性化（程序旁 bg/ 目录） ----------
+
+var bgExt = map[string]string{
+	".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+	".webp": "image/webp", ".gif": "image/gif", ".avif": "image/avif", ".bmp": "image/bmp",
+}
+
+func bgDir() string { return filepath.Join(app.Base, "bg") }
+
+// handleBGList 列出 bg/ 目录内的图片文件名（前端随机取一张作背景）。
+func (s *Server) handleBGList(w http.ResponseWriter, r *http.Request) {
+	var imgs []string
+	if ents, err := os.ReadDir(bgDir()); err == nil {
+		for _, e := range ents {
+			if e.IsDir() {
+				continue
+			}
+			if _, ok := bgExt[strings.ToLower(filepath.Ext(e.Name()))]; ok {
+				imgs = append(imgs, e.Name())
+			}
+		}
+	}
+	if imgs == nil {
+		imgs = []string{}
+	}
+	writeJSON(w, map[string]any{"images": imgs})
+}
+
+// handleBGImage 提供 bg/ 目录内的单张图片（filepath.Base 去除路径成分防穿越）。
+func (s *Server) handleBGImage(w http.ResponseWriter, r *http.Request) {
+	name := filepath.Base(r.PathValue("name"))
+	ct, ok := bgExt[strings.ToLower(filepath.Ext(name))]
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := os.Open(filepath.Join(bgDir(), name))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil || st.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Cache-Control", "max-age=3600")
+	http.ServeContent(w, r, name, st.ModTime(), f)
 }
 
 func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
@@ -249,9 +378,16 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		Source      *string `json:"source"`
 		CFApiKey    *string `json:"cfApiKey"`
 		WebhookURL  *string `json:"webhookUrl"`
-		UpdateRepo  *string `json:"updateRepo"`
-		ListenLAN   *bool   `json:"listenLan"`
-		LanPassword *string `json:"lanPassword"` // 明文仅在本次请求中出现，存储为 SHA-256
+		UpdateRepo         *string `json:"updateRepo"`
+		CheckUpdateOnStart *bool   `json:"checkUpdateOnStart"`
+		ServersDir         *string `json:"serversDir"`
+		BackupsDir         *string `json:"backupsDir"`
+		BackupKeep         *int    `json:"backupKeep"`
+		Onboarded          *bool   `json:"onboarded"`
+		MinimizeToTray     *bool   `json:"minimizeToTray"`
+		AutoStart          *bool   `json:"autoStart"`
+		ListenLAN          *bool   `json:"listenLan"`
+		LanPassword        *string `json:"lanPassword"` // 明文仅在本次请求中出现，存储为 SHA-256
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeErr(w, 400, err)
@@ -275,6 +411,44 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 	if body.UpdateRepo != nil {
 		c.UpdateRepo = strings.TrimSpace(*body.UpdateRepo)
 	}
+	if body.CheckUpdateOnStart != nil {
+		c.CheckUpdateOnStart = *body.CheckUpdateOnStart
+	}
+	if body.ServersDir != nil {
+		d := strings.TrimSpace(*body.ServersDir)
+		if d != "" {
+			if err := os.MkdirAll(d, 0o755); err != nil {
+				writeErr(w, 400, fmt.Errorf("存放目录不可用: %w", err))
+				return
+			}
+		}
+		c.ServersDir = d
+	}
+	if body.BackupsDir != nil {
+		d := strings.TrimSpace(*body.BackupsDir)
+		if d != "" {
+			if err := os.MkdirAll(d, 0o755); err != nil {
+				writeErr(w, 400, fmt.Errorf("备份目录不可用: %w", err))
+				return
+			}
+		}
+		c.BackupsDir = d
+	}
+	if body.BackupKeep != nil {
+		k := *body.BackupKeep
+		if k < 1 {
+			k = 1
+		} else if k > 1000 {
+			k = 1000
+		}
+		c.BackupKeep = k
+	}
+	if body.Onboarded != nil {
+		c.Onboarded = *body.Onboarded
+	}
+	if body.MinimizeToTray != nil {
+		c.MinimizeToTray = *body.MinimizeToTray
+	}
 	if body.LanPassword != nil && *body.LanPassword != "" {
 		sum := sha256.Sum256([]byte(*body.LanPassword))
 		c.AccessPasswordHash = hex.EncodeToString(sum[:])
@@ -287,6 +461,14 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		c.ListenLAN = *body.ListenLAN
 	}
 	app.SetConfig(c)
+	// 开机自启是注册表副作用（不落 config.json）：放在所有校验与配置保存成功之后再执行，
+	// 避免上面任一校验失败提前 return 时已经改动了注册表（否则会「报错却已悄悄改了自启」）
+	if body.AutoStart != nil {
+		if err := autostart.Set(*body.AutoStart); err != nil {
+			writeErr(w, 500, fmt.Errorf("设置开机自启失败: %w", err))
+			return
+		}
+	}
 	writeJSON(w, app.GetConfig())
 }
 
@@ -389,6 +571,7 @@ func (s *Server) handleImportModpack(w http.ResponseWriter, r *http.Request) {
 		OnlineMode:  r.FormValue("onlineMode") == "true",
 		AllowFlight: r.FormValue("allowFlight") == "true",
 		MOTD:        r.FormValue("motd"),
+		Root:        r.FormValue("root"),
 	}
 	id, err := s.mgr.ImportModpackAsync(pack, req, app.GetConfig().CFApiKey)
 	if err != nil {
@@ -600,12 +783,22 @@ type instSummary struct {
 	Dir       string `json:"dir"`
 	CreatedAt string `json:"createdAt"`
 	ConsoleEncoding string `json:"consoleEncoding"`
+	OnlineCount int      `json:"onlineCount"`
+	UptimeSec   int      `json:"uptimeSec"`
+	MaxPlayers  int      `json:"maxPlayers"`
+	ExtraJVM    []string `json:"extraJvm"`
 }
 
 func summarize(i *inst.Instance) instSummary {
 	motd := ""
+	maxP := 20
 	if p, err := inst.LoadProps(i.PropsPath()); err == nil {
 		motd, _ = p.Get("motd")
+		if v, ok := p.Get("max-players"); ok {
+			if n, e := strconv.Atoi(strings.TrimSpace(v)); e == nil && n > 0 {
+				maxP = n
+			}
+		}
 	}
 	enc := i.ConsoleEncoding
 	if enc == "" {
@@ -618,6 +811,8 @@ func summarize(i *inst.Instance) instSummary {
 		Port: i.Port(), Status: i.Status(), MOTD: motd, Dir: i.Dir,
 		CreatedAt: i.CreatedAt.Format("2006-01-02 15:04"),
 		ConsoleEncoding: enc,
+		OnlineCount: i.OnlineCount(), UptimeSec: i.UptimeSec(), MaxPlayers: maxP,
+		ExtraJVM: i.ExtraJVMSnapshot(),
 	}
 }
 
@@ -675,6 +870,20 @@ func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.mgr.Command(r.PathValue("name"), body.Cmd); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	writeJSON(w, "ok")
+}
+
+// handleOpenDir 在资源管理器打开实例目录或其白名单子目录（sub 查询参数）。
+// 与 pickdir/openpath 同理：资源管理器窗口开在主机桌面上，对远程用户无意义，故仅限本机。
+func (s *Server) handleOpenDir(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackReq(r) {
+		writeErr(w, 403, fmt.Errorf("打开目录仅支持在本机操作（远程管理时请在主机上操作）"))
+		return
+	}
+	if err := s.mgr.OpenDir(r.PathValue("name"), r.URL.Query().Get("sub")); err != nil {
 		writeErr(w, 400, err)
 		return
 	}
@@ -878,15 +1087,16 @@ func (s *Server) handleSetProps(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSetSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		XmxMB           int    `json:"xmxMb"`
-		XmsMB           int    `json:"xmsMb"`
-		ConsoleEncoding string `json:"consoleEncoding"`
+		XmxMB           int       `json:"xmxMb"`
+		XmsMB           int       `json:"xmsMb"`
+		ConsoleEncoding string    `json:"consoleEncoding"`
+		ExtraJVM        *[]string `json:"extraJvm"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeErr(w, 400, err)
 		return
 	}
-	if err := s.mgr.UpdateSettings(r.PathValue("name"), body.XmxMB, body.XmsMB, body.ConsoleEncoding); err != nil {
+	if err := s.mgr.UpdateSettings(r.PathValue("name"), body.XmxMB, body.XmsMB, body.ConsoleEncoding, body.ExtraJVM); err != nil {
 		writeErr(w, 400, err)
 		return
 	}

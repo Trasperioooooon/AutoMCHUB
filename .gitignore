@@ -3,6 +3,7 @@
 /cache/
 /servers/
 /backups/
+/bg/
 /config.json
 /tunnels.json
 /update.bat

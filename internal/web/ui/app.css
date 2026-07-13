@@ -34,20 +34,21 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, .35);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, .3);
   --term-bg: #101412;        /* 终端（双主题恒深） */
+  --bg-veil: rgba(18, 23, 21, .88); /* 壁纸铺底蒙版：仅露约 12% 图，保证文字对比度 */
   --mono: "Cascadia Mono", Consolas, monospace;
   --brand: "Cascadia Code", "Cascadia Mono", Consolas, monospace;
 }
 
 :root[data-theme="light"] {
-  /* ---- 浅色（纸白卡片浮于带草绿一丝的浅底） ---- */
-  --bg: #f1f4ef;
-  --surface: #ffffff;
-  --surface-2: #f6f9f4;
-  --sunken: #e7ece5;
-  --border: rgba(22, 34, 25, .12);
-  --border-strong: rgba(22, 34, 25, .24);
-  --text: #1b201c;
-  --muted: #5a675e;
+  /* ---- 浅色（暖沙中性：暖白卡片浮于米色纸底；参照 Radix Sand / claude.ai 象牙纸，弃纯白防眩光） ---- */
+  --bg: #efece2;
+  --surface: #fbfaf5;
+  --surface-2: #f5f3ea;
+  --sunken: #e6e2d6;
+  --border: rgba(62, 55, 32, .13);
+  --border-strong: rgba(62, 55, 32, .26);
+  --text: #221f18;
+  --muted: #625d4e;
   --accent: #3e8f2a;
   --accent-text: #2e7d1f;
   --accent-solid: #3e8f2a;
@@ -57,13 +58,14 @@
   --redstone: #c23a29;
   --red-solid: #bb4531;
   --red-solid-hov: #a83c29;
-  --err-bg: #fbeae6;
+  --err-bg: #f7e8e2;
   --err-text: #9a2a1c;
   --frame: #262b27;
-  --hud-bg: #ffffff;
-  --hotbar-fade: rgba(226, 232, 223, .8);
-  --shadow-sm: 0 1px 2px rgba(24, 34, 26, .07);
-  --shadow-md: 0 8px 24px rgba(24, 34, 26, .1);
+  --hud-bg: #fbfaf5;
+  --hotbar-fade: rgba(231, 226, 214, .82);
+  --shadow-sm: 0 1px 2px rgba(60, 50, 28, .08);
+  --shadow-md: 0 8px 24px rgba(60, 50, 28, .11);
+  --bg-veil: rgba(239, 236, 226, .86);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -76,6 +78,14 @@ body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow: hidden;
+}
+/* 用户壁纸：蒙版渐变叠在图上（固定不随内容滚动）；卡片自带实底，文字始终落在实色面上 */
+body.has-bg {
+  background-image: linear-gradient(var(--bg-veil), var(--bg-veil)), var(--bg-image);
+  background-size: cover;
+  background-position: center center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
 }
 #app { position: relative; display: flex; flex-direction: column; height: 100vh; }
 .px { font-family: var(--brand); }
@@ -245,6 +255,19 @@ h3 { font-size: 15px; }
 }
 .badge.core { color: var(--accent-text); font-weight: 600; }
 .inst-meta { font-size: 12px; color: var(--muted); margin-bottom: 12px; min-height: 16px; }
+.inst-stat { font-size: 12px; color: var(--accent-text); font-family: var(--mono); margin-bottom: 10px; }
+.dropmenu {
+  position: fixed; z-index: 70; min-width: 152px;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: 10px; box-shadow: var(--shadow-md); padding: 5px;
+  display: flex; flex-direction: column; gap: 2px;
+  animation: toast-in .12s steps(2, end);
+}
+.dropmenu button {
+  text-align: left; background: none; border: none; color: var(--text);
+  font-family: inherit; font-size: 13px; padding: 8px 11px; border-radius: 7px; cursor: pointer;
+}
+.dropmenu button:hover { background: var(--sunken); }
 .inst-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .inst-actions a.btn { text-decoration: none; }
 
@@ -271,6 +294,12 @@ input:focus, select:focus {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-solid) 22%, transparent);
 }
 input::placeholder { color: var(--muted); opacity: .65; }
+textarea {
+  width: 100%; background: var(--surface); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: 9px;
+  padding: 9px 12px; font-size: 14px; font-family: inherit; resize: vertical;
+}
+textarea:focus { outline: none; border-color: var(--accent-solid); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-solid) 22%, transparent); }
 input[type=range] { width: 100%; accent-color: var(--accent-solid); }
 input[type=file]::file-selector-button {
   background: var(--surface-2); color: var(--text);
@@ -314,6 +343,9 @@ input[type=file]::file-selector-button {
 .core-card.sel { border-color: var(--accent-solid); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-solid) 35%, transparent); }
 .core-card .cn { font-weight: 700; margin-bottom: 4px; }
 .core-card .cd { font-size: 12px; color: var(--muted); line-height: 1.55; }
+.core-group { margin-bottom: 18px; }
+.cg-title { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 9px; letter-spacing: .3px; }
+.rec-badge { font-size: 10px; font-weight: 600; color: #fff; background: var(--accent-solid); padding: 1px 7px; border-radius: 6px; margin-left: 4px; vertical-align: middle; }
 .ver-list {
   max-height: 420px; overflow-y: auto;
   background: var(--surface);
@@ -397,8 +429,21 @@ input[type=file]::file-selector-button {
 .console .lv-warn { color: #d9b23f; }
 .console .lv-err { color: #ff8574; }
 .console-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
-.console-input { display: flex; gap: 8px; margin-top: 10px; }
+.console-input { display: flex; gap: 8px; margin-top: 10px; position: relative; }
 .console-input input { flex: 1; font-family: var(--mono); }
+/* 命令补全下拉（浮在输入框上方） */
+.cmd-suggest {
+  display: none; position: absolute; bottom: calc(100% + 4px); left: 0;
+  min-width: 200px; max-width: 340px; max-height: 220px; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: 8px; box-shadow: var(--shadow-md); padding: 4px; z-index: 30;
+}
+.cs-item {
+  padding: 5px 10px; border-radius: 5px; cursor: pointer; font-family: var(--mono);
+  font-size: 12.5px; color: var(--text); white-space: nowrap;
+}
+.cs-item:hover { background: var(--sunken); }
+.cs-item.sel { background: var(--accent-solid); color: #fff; }
 
 .props-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 11px 24px; max-width: 1050px; }
 .prop-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 15px; }
@@ -441,6 +486,26 @@ table.raw input { padding: 5px 8px; font-size: 13px; }
 .modal .m-body { color: var(--muted); font-size: 13px; margin-bottom: 18px; line-height: 1.7; }
 .modal .m-actions { display: flex; justify-content: flex-end; gap: 10px; }
 
+/* 首次运行引导卡 */
+.modal.onboard { width: 500px; }
+.ob-sec { margin-top: 16px; }
+.ob-label { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 8px; letter-spacing: .3px; }
+.ob-radio { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; cursor: pointer; font-size: 13px; color: var(--text); }
+.ob-radio:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.ob-radio input { accent-color: var(--accent-solid); }
+.ob-path { font-family: var(--mono); font-size: 12.5px; color: var(--text); background: var(--sunken); border: 1px solid var(--border); border-radius: 7px; padding: 8px 11px; word-break: break-all; }
+
+/* 任务完成页告警卡（CF 未解析模组等） */
+.warn-card {
+  margin: 14px 0; padding: 14px 16px; border-radius: 10px;
+  background: color-mix(in srgb, var(--gold) 14%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--gold) 50%, var(--border-strong));
+}
+.wc-title { font-weight: 700; font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.wc-note { font-size: 12.5px; color: var(--muted); line-height: 1.7; margin-bottom: 8px; }
+.wc-list { margin: 0; padding-left: 20px; font-size: 12.5px; line-height: 1.9; }
+.wc-list a { color: var(--diamond); word-break: break-all; }
+
 /* ---------- MOTD / Java 行 / 玩家区 ---------- */
 .motd-palette { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 8px; }
 .pal-btn {
@@ -477,6 +542,99 @@ table.raw input { padding: 5px 8px; font-size: 13px; }
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); border: 3px solid transparent; background-clip: padding-box; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* ---------- 行式控件（HMCL 三件套：普通行 / 可展开摘要 / 行内嵌编辑器） ---------- */
+.row-list { display: flex; flex-direction: column; gap: 8px; max-width: 760px; }
+.row-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.ri-head { display: flex; align-items: center; gap: 16px; padding: 12px 16px; min-height: 56px; }
+.row-item.expandable .ri-head { cursor: pointer; }
+.row-item.expandable:hover { border-color: var(--border-strong); }
+.ri-main { flex: 1; min-width: 0; }
+.ri-title { font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ri-sub { font-size: 11px; color: var(--muted); margin-top: 3px; line-height: 1.5; }
+.ri-key { font-size: 11px; color: var(--muted); font-family: var(--mono); margin-top: 2px; opacity: .8; }
+.ri-restart {
+  font-size: 10px; font-weight: 600; color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 16%, transparent);
+  padding: 1px 6px; border-radius: 5px;
+}
+.ri-right { display: flex; align-items: center; gap: 10px; flex: none; }
+.ri-summary {
+  font-size: 12px; color: var(--muted); font-family: var(--mono);
+  max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ri-chev { color: var(--muted); font-size: 11px; transition: transform .15s steps(2, end); }
+.row-item.open .ri-chev { transform: rotate(180deg); }
+.ri-editor { display: none; padding: 6px 16px 14px; border-top: 1px solid var(--border); }
+.row-item.open .ri-editor { display: block; }
+
+/* ---------- 内存分配控件（滑条 + 精确输入 + 实时状态条） ---------- */
+.mem-head { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
+.mem-head .mem-gb { color: var(--text); font-size: 15px; }
+.mem-head .mem-mb { margin-left: auto; display: flex; align-items: center; gap: 5px; color: var(--muted); }
+input.mem-num { width: 92px; padding: 5px 8px; font-size: 13px; text-align: right; }
+.mem-range { width: 100%; }
+.mem-bar { position: relative; height: 9px; background: var(--sunken); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin: 12px 0 7px; }
+.mem-bar i { position: absolute; top: 0; height: 100%; }
+.mem-used { left: 0; background: var(--border-strong); }
+.mem-alloc { background: var(--accent); transition: left .1s, width .1s; }
+.mem-alloc.over { background: var(--redstone); }
+.mem-stat { font-size: 12px; color: var(--muted); }
+.mem-stat b { color: var(--text); }
+.mem-warn { color: var(--redstone); font-weight: 600; }
+
+/* ---------- 设置页二级导航 ---------- */
+.settings-layout { display: flex; gap: 26px; align-items: flex-start; }
+.settings-nav { flex: none; width: 190px; display: flex; flex-direction: column; gap: 3px; position: sticky; top: 0; }
+.set-nav {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 13px; border-radius: 9px;
+  color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 600;
+  border: 1px solid transparent; transition: background .1s, color .1s;
+}
+.set-nav:hover { color: var(--text); background: var(--surface); }
+.set-nav.cur { color: var(--text); background: var(--surface); border-color: var(--border-strong); box-shadow: var(--shadow-sm); }
+.set-nav .sn-ico { font-size: 15px; filter: grayscale(.25); }
+.settings-body { flex: 1; min-width: 0; max-width: 760px; }
+.set-sec-head { margin-bottom: 12px; }
+.set-sec-head h2 { font-size: 15px; font-weight: 700; }
+.set-sec-head .sub { margin: 5px 0 0; }
+.settings-body .set-sec-head:not(:first-child) { margin-top: 26px; }
+.set-danger {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  margin-top: 28px; padding: 14px 16px;
+  background: var(--err-bg);
+  border: 1px solid color-mix(in srgb, var(--redstone) 30%, transparent);
+  border-radius: 12px;
+}
+.set-danger .ri-title { font-size: 13px; font-weight: 700; }
+.set-danger .ri-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+@media (max-width: 720px) {
+  .settings-layout { flex-direction: column; }
+  .settings-nav { flex-direction: row; flex-wrap: wrap; width: 100%; position: static; }
+}
+
+/* ---------- 常用设置：分组 + 搜索 + 版本感知 ---------- */
+.common-bar { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+.cp-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.cp-chip {
+  background: var(--sunken); border: 1px solid var(--border); color: var(--muted);
+  border-radius: 20px; padding: 5px 12px; font-size: 12px; font-weight: 600;
+  cursor: pointer; font-family: inherit;
+}
+.cp-chip:hover { color: var(--text); border-color: var(--border-strong); }
+.cp-group { margin-bottom: 22px; }
+.cp-gh { font-size: 14px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; color: var(--accent-text); }
+.cp-gn { font-size: 11px; color: var(--muted); background: var(--sunken); border-radius: 10px; padding: 1px 8px; font-weight: 400; }
+.gr-tag { font-size: 10px; font-weight: 600; color: var(--diamond); background: color-mix(in srgb, var(--diamond) 16%, transparent); padding: 1px 6px; border-radius: 5px; }
+.prop-item .pl .ri-restart { margin-left: 4px; }
+.raw-cn { color: var(--muted); font-size: 12px; white-space: nowrap; }
 
 @media (max-width: 720px) {
   #main { padding: 16px 14px; }
