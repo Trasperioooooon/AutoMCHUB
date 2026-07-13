@@ -488,6 +488,7 @@ func (s *Server) handleImportModpack(w http.ResponseWriter, r *http.Request) {
 		OnlineMode:  r.FormValue("onlineMode") == "true",
 		AllowFlight: r.FormValue("allowFlight") == "true",
 		MOTD:        r.FormValue("motd"),
+		Root:        r.FormValue("root"),
 	}
 	id, err := s.mgr.ImportModpackAsync(pack, req, app.GetConfig().CFApiKey)
 	if err != nil {

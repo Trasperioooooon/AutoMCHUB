@@ -331,6 +331,29 @@ function navigate() {
 }
 window.addEventListener("hashchange", navigate);
 
+/* 一键开服：Paper 最新正式版 + 推荐设置（空状态入口） */
+async function quickStart() {
+  const ok = await confirmModal({ title: "一键开服", okText: "同意并开始", body: "将创建一台 <b>Paper 最新正式版</b> 服务器，采用推荐设置（离线模式、允许飞行、默认端口 25565）。<br>继续即表示同意 <a href='https://aka.ms/MinecraftEULA' target='_blank'>Minecraft EULA</a>。" });
+  if (!ok) return;
+  try {
+    const app = await api("/api/app");
+    const vers = await api("/api/mcversions?core=paper&snapshots=0");
+    if (!vers || !vers.length) throw new Error("暂时获取不到 Paper 版本，请改用向导手动创建");
+    const mc = (vers.find(v => v.latest) || vers[0]).id;
+    const builds = await api(`/api/builds?core=paper&mc=${encodeURIComponent(mc)}`);
+    if (!builds || !builds.length) throw new Error("暂时获取不到 Paper 构建，请改用向导手动创建");
+    const build = (builds.find(b => b.recommended) || builds[0]).id;
+    const mem = Math.max(2048, Math.min(4096, (app.ramMb || 8192) - 2048));
+    const r = await api("/api/instances", { method: "POST", body: {
+      name: "我的服务器", core: "paper", mc, build, root: "",
+      xmxMb: mem, port: 25565, eula: true, onlineMode: false, allowFlight: true,
+      difficulty: "easy", gamemode: "survival", motd: "AutoMCHUB 一键开服 · 一起来玩！",
+    } });
+    toast(`正在部署 Paper ${mc}`);
+    location.hash = `#/task/${r.taskId}`;
+  } catch (e) { toast(e.message, true); }
+}
+
 /* ---------- 视图：实例列表 ---------- */
 async function renderInstances() {
   Main().innerHTML = eyebrow("SERVER LIST") + `<h1>我的服务器</h1><div class="sub">双击卡片进入控制台 · 按 2 快速新建 · 每个实例独立存放</div><div id="inst-cards">加载中…</div>`;
@@ -338,7 +361,10 @@ async function renderInstances() {
     let list;
     try { list = await api("/api/instances"); } catch (e) { $("#inst-cards").innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
     if (!list.length) {
-      $("#inst-cards").innerHTML = `<div class="empty"><div class="big">⛏</div>这里空空如也<br>去合成你的第一台服务器吧<br><br><a class="btn primary" href="#/create">⚒ 去合成（按 2）</a></div>`;
+      $("#inst-cards").innerHTML = `<div class="empty"><div class="big">⛏</div>这里空空如也<br>一键开一台推荐配置的服务器，或用向导自定义<br><br>
+        <button class="btn primary" id="quick-start">⚡ 一键开服（Paper 最新正式版）</button>
+        <a class="btn" href="#/create" style="margin-left:8px">⚒ 自定义合成（按 2）</a></div>`;
+      $("#quick-start").onclick = quickStart;
       return;
     }
     $("#inst-cards").innerHTML = `<div class="cards">` + list.map(i => `
@@ -416,6 +442,7 @@ async function drawImport() {
   const app = await api("/api/app").catch(() => ({ ramMb: 8192, availRamMb: 4096, config: {} }));
   const maxMem = Math.max(2048, app.ramMb - 2048);
   const defMem = Math.min(6144, maxMem);
+  let imRoot = "";
   Main().innerHTML = eyebrow("IMPORT PACK") + `<h1>导入整合包</h1>
     <div class="sub">支持 Modrinth (.mrpack) 与 CurseForge (zip)。核心、MC 版本与加载器将从整合包自动识别。</div>
     <div class="form-grid">
@@ -423,6 +450,11 @@ async function drawImport() {
       <label class="field"><span>实例名称</span><input type="text" id="im-name" value="我的整合包服务器" maxlength="40"></label>
       <label class="field"><span>端口</span><input type="number" id="im-port" value="25565" min="1" max="65535"></label>
       <div class="field full" id="im-mem-mount"></div>
+      <label class="field full"><span>存放位置</span>
+        <div class="row" style="gap:8px">
+          <input type="text" id="im-root" readonly style="flex:1;cursor:default;background:var(--surface-2)">
+          <button type="button" class="btn" id="im-browse">📁 浏览…</button>
+        </div></label>
       <div class="field"><label class="switch"><input type="checkbox" id="im-online"><span class="sw"></span>
         <span><span class="sw-label">正版验证</span><div class="sw-desc">默认关闭</div></span></label></div>
       <div class="field"><label class="switch"><input type="checkbox" id="im-flight" checked><span class="sw"></span>
@@ -439,6 +471,12 @@ async function drawImport() {
     </div>`;
   $("#im-back").onclick = () => renderCreate(); // 直接重绘（hash 相同不会触发路由，不能用 location.hash）
   renderMemoryControl($("#im-mem-mount"), { sliderId: "im-mem", min: 2048, max: maxMem, value: defMem, totalMb: app.ramMb, availMb: app.availRamMb, hint: "整合包服建议 6GB 以上" });
+  const imUpdateRoot = () => { $("#im-root").value = imRoot || app.serversRoot || "程序目录\\servers"; };
+  imUpdateRoot();
+  $("#im-browse").onclick = async () => {
+    try { const r = await api("/api/pickdir", { method: "POST" }); if (r.path) { imRoot = r.path; imUpdateRoot(); toast("已选择：" + r.path); } }
+    catch (e) { toast(e.message, true); }
+  };
   $("#im-go").onclick = async () => {
     const f = $("#im-file").files[0];
     if (!f) { toast("请先选择整合包文件", true); return; }
@@ -453,6 +491,7 @@ async function drawImport() {
     fd.append("eula", "true");
     fd.append("onlineMode", $("#im-online").checked ? "true" : "false");
     fd.append("allowFlight", $("#im-flight").checked ? "true" : "false");
+    fd.append("root", imRoot);
     try {
       const res = await fetch("/api/import/modpack", { method: "POST", headers: { "X-Token": TOKEN() }, body: fd });
       const j = await res.json();
@@ -473,18 +512,36 @@ function wizardShell(inner) {
 
 async function drawWizard() {
   if (wiz.step === 0) {
-    wizardShell(`<div class="core-grid" id="core-grid">加载中…</div>
+    wizardShell(`<div id="core-grid">加载中…</div>
       <div class="wizard-foot"><button class="btn" id="wback0">← 返回</button><button class="btn primary" id="wnext" disabled>下一步 →</button></div>`);
     $("#wback0").onclick = () => renderCreate();
     let cores;
     try { cores = await api("/api/cores"); } catch (e) { $("#core-grid").innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
     cores.forEach(c => CORES[c.id] = c);
-    $("#core-grid").innerHTML = cores.map(c => `
+    const CORE_GROUPS = [
+      { title: "原版与轻量", ids: ["vanilla"] },
+      { title: "插件服（Bukkit / Spigot 系）", ids: ["paper", "purpur", "leaves", "folia"] },
+      { title: "模组服（加载器）", ids: ["fabric", "forge", "neoforge"] },
+      { title: "混合服（模组 + 插件）", ids: ["mohist", "banner"] },
+      { title: "群组代理", ids: ["velocity", "waterfall"] },
+    ];
+    const REC = "paper";
+    const coreCard = c => `
       <div class="core-card ${wiz.core === c.id ? "sel" : ""}" data-id="${c.id}">
         ${cubeOf(c.id)}
-        <div><div class="cn">${esc(c.name)} <span class="badge core">${esc(c.tag)}</span></div>
+        <div><div class="cn">${esc(c.name)} <span class="badge core">${esc(c.tag)}</span>${c.id === REC ? `<span class="rec-badge">新手推荐</span>` : ""}</div>
         <div class="cd">${esc(c.desc)}</div></div>
-      </div>`).join("");
+      </div>`;
+    const byId = Object.fromEntries(cores.map(c => [c.id, c]));
+    const used = new Set();
+    let coreHtml = CORE_GROUPS.map(g => {
+      const items = g.ids.map(id => byId[id]).filter(Boolean);
+      items.forEach(c => used.add(c.id));
+      return items.length ? `<div class="core-group"><div class="cg-title">${g.title}</div><div class="core-grid">${items.map(coreCard).join("")}</div></div>` : "";
+    }).join("");
+    const rest = cores.filter(c => !used.has(c.id));
+    if (rest.length) coreHtml += `<div class="core-group"><div class="cg-title">其它</div><div class="core-grid">${rest.map(coreCard).join("")}</div></div>`;
+    $("#core-grid").innerHTML = coreHtml;
     $("#core-grid").querySelectorAll(".core-card").forEach(c => c.onclick = () => {
       wiz.core = c.dataset.id;
       $("#core-grid").querySelectorAll(".core-card").forEach(x => x.classList.toggle("sel", x.dataset.id === wiz.core));
@@ -573,7 +630,10 @@ async function drawWizard() {
         <div class="field"><label class="switch"><input type="checkbox" id="f-online"><span class="sw"></span>
           <span><span class="sw-label">正版验证（online-mode）</span><div class="sw-desc">默认关闭：离线账户可直接进服</div></span></label></div>
         <div class="field"><label class="switch"><input type="checkbox" id="f-flight" checked><span class="sw"></span>
-          <span><span class="sw-label">允许飞行（allow-flight）</span><div class="sw-desc">默认开启：防止模组移动被误踢</div></span></label></div>`}
+          <span><span class="sw-label">允许飞行（allow-flight）</span><div class="sw-desc">默认开启：防止模组移动被误踢</div></span></label></div>
+        <label class="field"><span>游戏难度</span><select id="f-diff"><option value="peaceful">和平</option><option value="easy" selected>简单</option><option value="normal">普通</option><option value="hard">困难</option></select></label>
+        <label class="field"><span>默认游戏模式</span><select id="f-mode"><option value="survival" selected>生存</option><option value="creative">创造</option><option value="adventure">冒险</option><option value="spectator">旁观</option></select></label>
+        <div class="hint" style="grid-column:1/-1">更多几十项设置（PVP、视距、白名单、命令方块…）可在创建后的「常用设置」中按分组修改。</div>`}
       </div>
       ${isProxy
         ? `<div class="eula-box">代理端不运行 Minecraft 本体，无需 EULA。其监听端口等配置在首次启动后于实例目录的配置文件中修改。</div>`
@@ -616,6 +676,8 @@ async function drawWizard() {
             onlineMode: isProxy ? false : $("#f-online").checked,
             allowFlight: isProxy ? false : $("#f-flight").checked,
             motd: isProxy ? "" : $("#f-motd").value.trim(),
+            difficulty: isProxy ? "" : $("#f-diff").value,
+            gamemode: isProxy ? "" : $("#f-mode").value,
           },
         });
         location.hash = `#/task/${r.taskId}`;

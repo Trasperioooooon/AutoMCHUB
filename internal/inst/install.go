@@ -29,6 +29,8 @@ type CreateReq struct {
 	OnlineMode  bool       `json:"onlineMode"`
 	AllowFlight bool       `json:"allowFlight"`
 	MOTD        string     `json:"motd"`
+	Difficulty  string     `json:"difficulty"` // 创建时写入 server.properties（空=不设，用服务端默认）
+	Gamemode    string     `json:"gamemode"`
 	Root        string     `json:"root"` // 自定义存放根目录（空=全局默认），仅创建时使用
 }
 
@@ -309,6 +311,12 @@ func (m *Manager) runCreate(ctx context.Context, t *tasks.Task, req CreateReq, d
 			motd = "AutoMCHUB 服务器"
 		}
 		props.Set("motd", motd)
+		if req.Difficulty != "" {
+			props.Set("difficulty", req.Difficulty)
+		}
+		if req.Gamemode != "" {
+			props.Set("gamemode", req.Gamemode)
+		}
 		if err := props.Save(filepath.Join(dir, "server.properties")); err != nil {
 			return err
 		}
