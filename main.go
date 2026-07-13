@@ -27,6 +27,7 @@ import (
 )
 
 func main() {
+	setDPIAware() // 高 DPI 屏清晰渲染：必须在任何窗口创建前声明 DPI 感知
 	nogui := flag.Bool("nogui", false, "仅启动本地服务，不打开窗口")
 	port := flag.Int("port", 27333, "本地 Web 端口（被占用时自动改用随机端口）")
 	flag.Parse()
@@ -105,13 +106,14 @@ func openWebView(url string, sig chan os.Signal) (ok bool) {
 			ok = false
 		}
 	}()
+	scale := systemDPIScale() // 窗口尺寸按 DPI 放大，保持高分屏上的视觉大小
 	w := webview2.NewWithOptions(webview2.WebViewOptions{
 		Debug:     false,
 		AutoFocus: true,
 		WindowOptions: webview2.WindowOptions{
 			Title:  "AutoMCHUB · MC 一键开服",
-			Width:  1280,
-			Height: 850,
+			Width:  uint(float64(1280) * scale),
+			Height: uint(float64(850) * scale),
 			Center: true,
 		},
 	})
