@@ -1,5 +1,7 @@
 # AutoMCHUB · Minecraft 一键开服工具
 
+[![Release](https://img.shields.io/github/v/release/Trasperioooooon/AutoMCHUB?color=6fd24b)](https://github.com/Trasperioooooon/AutoMCHUB/releases/latest) [![Downloads](https://img.shields.io/github/downloads/Trasperioooooon/AutoMCHUB/total?color=6fd24b)](https://github.com/Trasperioooooon/AutoMCHUB/releases) [![License](https://img.shields.io/github/license/Trasperioooooon/AutoMCHUB?color=6fd24b)](LICENSE) ![Platform](https://img.shields.io/badge/platform-Windows-2b6cb0) ![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)
+
 Windows 本地运行的 **MC 多人联机服务器自动部署工具**（单文件 `AutoMCHUB.exe`，约 8 MB，零依赖）。
 
 选好版本点创建，自动完成：**匹配并下载便携式 Java → 下载服务端核心 → 运行安装器 → 同意 EULA → 生成配置与启动脚本 → 图形界面管理开服**。全程使用国内镜像加速（BMCLAPI / 清华 TUNA），官方源自动兜底。
