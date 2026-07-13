@@ -122,6 +122,7 @@ func openWebView(url string, sig chan os.Signal, minimized bool) (ok bool) {
 		},
 	})
 	if w == nil {
+		runtime.UnlockOSThread() // WebView2 不可用，回退浏览器：释放线程绑定
 		return false
 	}
 	defer w.Destroy()

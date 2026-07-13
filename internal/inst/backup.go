@@ -20,7 +20,9 @@ type BackupInfo struct {
 	Time   string  `json:"time"`
 }
 
-func backupDirOf(name string) string { return filepath.Join(app.BackupsRoot(), name) }
+// backupDirOf 返回实例备份目录。filepath.Base 兜底：即便某个 instance.json 携带带路径
+// 分隔符的异常 name（多根扫描可能拾取到），也不会让备份读写逃出备份根。
+func backupDirOf(name string) string { return filepath.Join(app.BackupsRoot(), filepath.Base(name)) }
 
 // worldDirs 返回实例的世界存档目录（vanilla 单目录 / bukkit 三目录）。
 func (i *Instance) worldDirs() []string {

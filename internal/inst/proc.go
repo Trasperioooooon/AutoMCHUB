@@ -98,6 +98,8 @@ func (m *Manager) Start(name string) error {
 	i.state = "starting"
 	i.userStop = false
 	i.startedAt = time.Now()
+	i.runGen++
+	gen := i.runGen // 本次运行的代号：崩溃重启只在无更新的运行发生时才生效
 	i.clearOnline()
 
 	go func() {
@@ -134,7 +136,7 @@ func (m *Manager) Start(name string) error {
 			events.Publish("instance.crash", map[string]any{"instance": i.Name})
 		}
 		if !wasUser && crashPolicy {
-			go m.crashRestart(i)
+			go m.crashRestart(i, gen)
 		}
 	}()
 	events.Publish("instance.start", map[string]any{"instance": i.Name})
@@ -166,18 +168,19 @@ func (m *Manager) Stop(name string) error {
 		for {
 			select {
 			case <-deadline:
+				// 仅当仍是本次要停止的那个进程时才强杀——否则可能误杀期间已重启的新进程
 				i.procMu.Lock()
-				if i.proc != nil {
+				if i.proc == p {
 					i.Console.Append("[AutoMCHUB] 停止超时，强制结束进程")
-					_ = i.proc.cmd.Process.Kill()
+					_ = p.cmd.Process.Kill()
 				}
 				i.procMu.Unlock()
 				return
 			case <-tick.C:
 				i.procMu.Lock()
-				alive := i.proc != nil
+				gone := i.proc != p // 本次进程已退出（i.proc 置空或已换成新一次运行）
 				i.procMu.Unlock()
-				if !alive {
+				if gone {
 					return
 				}
 			}

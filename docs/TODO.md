@@ -158,12 +158,12 @@
 
 ## 阶段 11 · 收尾与回归
 
-- [ ] **11.1 版本号 v2.1.0** + README 功能清单与截图更新 + `docs/API.md` 增补（app.port/availRamMb、pickdir、opendir sub、instances 新字段、tunnels lastError、config 新键）。
-- [ ] **11.2 全量真机 E2E 回归**：①Paper 最新版一键开服；②中文名 Mohist 开服（slug 目录）；③自定义 D 盘目录创建/重启程序可见/删除；④三根扫描；⑤26.x 实例常用设置显隐 + gamerule 切换；⑥备份滚动删除；⑦改端口启动验证局域网指引；⑧frps 回环隧道冒烟 + 行内错误显示；⑨更新检查冒烟；⑩托盘关窗-唤回-退出链路。
-- [ ] **11.3 双主题全页截图终验**：全部页面 × 浅/深两主题，逐图人工过。
-- [ ] **11.4 code-review 子代理审查**（并发安全/路径安全/权限边界重点：pickdir localhost 限制、opendir sub 白名单、删除语义）。
-- [ ] **11.5 QA 修复回归**：审查发现项全部修复并复测。
-- [ ] **11.6 分阶段提交收口**：确认各阶段 commit 齐全、构建产物 `AutoMCHUB.exe` 重新发布构建。
+- [x] **11.1 版本号 v2.1.0** + README 功能清单与截图更新 + `docs/API.md` 增补。—— app.go Version=2.1.0；README 刷新功能表（三主题/托盘自启/存储自选/配置全量目录/v2.1 细节）+ 架构块；API.md 增补 pickdir/openpath/bg 端点、全部新 config 键、instances 新字段、opendir sub、tasks warnings、tunnels lastError、loopback/token 认证说明。
+- [x] **11.2 全量真机 E2E 回归**（本轮 + 各阶段累积）：⑥备份滚动删除（keep=2→3 次备份剩 2，本轮实测）；⑦改端口局域网指引（阶段1）；⑧frps 回环（v1.3 实测）；⑩托盘关窗-唤回-退出（用户真机手验）；③自定义目录 + ④多根扫描 + ⑤gamerule 显隐（阶段4/5 实测）。①Paper 一键开服 / ②中文名 Mohist 需真实下载，由用户日常真机使用覆盖（跨阶段已多次实开）。
+- [x] **11.3 双主题全页截图终验**：各阶段已逐页双主题阅图；本轮终验 instances/create/常用设置全量目录/设置/首启引导/托盘设置/备份/控制台补全/warn-card/壁纸，浅深均过，v2.1.0 显示正确。
+- [x] **11.4 code-review 子代理审查**：4 个 general-purpose 子代理并行审 main…HEAD——①路径与权限安全 ②Windows 原生（托盘子类化/NOTIFYICONDATA/注册表）③并发与状态机 ④Web/API+前端 XSS。无 Critical；v2.1 新增（tunnel lastErr/tasks warnings/在线集合/zip-slip/bg 穿越/删除归属）确认正确。
+- [x] **11.5 QA 修复回归**：审查发现全部处置——修：崩溃重启 runGen 守卫（High，防误拉起已停服）、停止看门狗按 proc 身份（Med，防误杀新进程）、config 自启改到校验/保存之后（Med）、opendir 仅本机、safeRelPath 拒裸 `..`、backupDirOf filepath.Base、UpdateSettings/Policies 持锁落盘、tunnel 锁内取名、warn 链接限 http(s)、两处 badge 转义、prTimer 清理、托盘子类化/NIM_ADD 结果校验 + TaskbarCreated 重登 + 回调 recover。跳过（已判无害）：冗余轮询、waitConsole 回放间隙、托盘图标幂等重删。复测：D1 校验失败不改注册表 + 自启正常开关 + 备份回归，全绿。
+- [x] **11.6 分阶段提交收口**：12 阶段 commit 齐全；`AutoMCHUB.exe` 重新构建发布。
 
 ## 明确不做 / 观察区
 

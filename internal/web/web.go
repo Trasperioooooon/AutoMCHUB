@@ -449,13 +449,6 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 	if body.MinimizeToTray != nil {
 		c.MinimizeToTray = *body.MinimizeToTray
 	}
-	if body.AutoStart != nil {
-		// 开机自启真值落在注册表（非 config.json），写失败即报错、不改其它配置
-		if err := autostart.Set(*body.AutoStart); err != nil {
-			writeErr(w, 500, fmt.Errorf("设置开机自启失败: %w", err))
-			return
-		}
-	}
 	if body.LanPassword != nil && *body.LanPassword != "" {
 		sum := sha256.Sum256([]byte(*body.LanPassword))
 		c.AccessPasswordHash = hex.EncodeToString(sum[:])
@@ -468,6 +461,14 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		c.ListenLAN = *body.ListenLAN
 	}
 	app.SetConfig(c)
+	// 开机自启是注册表副作用（不落 config.json）：放在所有校验与配置保存成功之后再执行，
+	// 避免上面任一校验失败提前 return 时已经改动了注册表（否则会「报错却已悄悄改了自启」）
+	if body.AutoStart != nil {
+		if err := autostart.Set(*body.AutoStart); err != nil {
+			writeErr(w, 500, fmt.Errorf("设置开机自启失败: %w", err))
+			return
+		}
+	}
 	writeJSON(w, app.GetConfig())
 }
 
@@ -876,7 +877,12 @@ func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleOpenDir 在资源管理器打开实例目录或其白名单子目录（sub 查询参数）。
+// 与 pickdir/openpath 同理：资源管理器窗口开在主机桌面上，对远程用户无意义，故仅限本机。
 func (s *Server) handleOpenDir(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackReq(r) {
+		writeErr(w, 403, fmt.Errorf("打开目录仅支持在本机操作（远程管理时请在主机上操作）"))
+		return
+	}
 	if err := s.mgr.OpenDir(r.PathValue("name"), r.URL.Query().Get("sub")); err != nil {
 		writeErr(w, 400, err)
 		return

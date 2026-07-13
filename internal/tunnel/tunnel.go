@@ -281,13 +281,14 @@ func (m *Manager) Start(id string) error {
 		_ = cmd.Wait()
 		m.mu.Lock()
 		userStopped := rs.stopped
+		name := t.Name // 在锁内取名，避免 delete 后与并发 Update 的 *old=t 竞争读 t.Name
 		delete(m.running, id)
 		m.mu.Unlock()
 		if userStopped {
 			con.Append("[AutoMCHUB] 隧道已停止")
 		} else {
 			con.Append("[AutoMCHUB] frpc 意外退出（检查凭据/隧道 ID 是否正确，或查看上方日志）")
-			events.Publish("tunnel.down", map[string]any{"tunnel": t.Name})
+			events.Publish("tunnel.down", map[string]any{"tunnel": name})
 		}
 	}()
 	return nil

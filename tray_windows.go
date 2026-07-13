@@ -62,13 +62,16 @@ var (
 	pAppendMenu       = user32t.NewProc("AppendMenuW")
 	pTrackPopupMenu   = user32t.NewProc("TrackPopupMenu")
 	pDestroyMenu      = user32t.NewProc("DestroyMenu")
-	pGetCursorPos     = user32t.NewProc("GetCursorPos")
-	pShellNotifyIcon  = shell32.NewProc("Shell_NotifyIconW")
+	pGetCursorPos          = user32t.NewProc("GetCursorPos")
+	pRegisterWindowMessage = user32t.NewProc("RegisterWindowMessageW")
+	pShellNotifyIcon       = shell32.NewProc("Shell_NotifyIconW")
 
-	origWndProc  uintptr
-	trayHWND     uintptr
-	trayHIcon    uintptr
-	trayCallback = syscall.NewCallback(trayWndProc)
+	origWndProc      uintptr
+	trayHWND         uintptr
+	trayHIcon        uintptr
+	trayActive       bool    // 托盘图标是否登记成功（NIM_ADD 返回真）
+	taskbarCreatedMsg uintptr // Explorer 重启后广播的消息，用于重新登记图标
+	trayCallback     = syscall.NewCallback(trayWndProc)
 )
 
 // NOTIFYICONDATAW（Vista+ 完整布局）；cbSize 取本结构体大小，Windows 据此识别版本。
@@ -98,18 +101,32 @@ func setupTray(hwnd uintptr) {
 	trayHIcon, _, _ = pLoadIcon.Call(0, _IDI_APPLICATION)
 	idx := _GWLP_WNDPROC // int(-4)；uintptr(idx) 在 64 位上正确符号扩展
 	origWndProc, _, _ = pSetWindowLongPtr.Call(hwnd, uintptr(idx), trayCallback)
+	if origWndProc == 0 {
+		// 子类化失败（返回 0 即未替换成功）：放弃托盘功能，避免后续 CallWindowProc(0) 破坏窗口
+		trayHWND = 0
+		return
+	}
+	if p, err := syscall.UTF16PtrFromString("TaskbarCreated"); err == nil {
+		taskbarCreatedMsg, _, _ = pRegisterWindowMessage.Call(uintptr(unsafe.Pointer(p)))
+	}
 	addTrayIcon(hwnd)
 }
 
 // trayWndProc 子类化后的窗口过程：拦截关窗/托盘事件/退出请求，其余转交原过程。
-func trayWndProc(hwnd, msg, wparam, lparam uintptr) uintptr {
+func trayWndProc(hwnd, msg, wparam, lparam uintptr) (ret uintptr) {
+	// 防御：回调经由 C 边界调入，Go panic 跨边界会直接杀进程且无法被 openWebView 的 recover 捕获
+	defer func() { _ = recover() }()
+	// Explorer 重启后需重新登记托盘图标（TaskbarCreated 为运行期注册的消息号，故用 if 而非 case）
+	if taskbarCreatedMsg != 0 && msg == taskbarCreatedMsg {
+		addTrayIcon(hwnd)
+	}
 	switch msg {
 	case _WM_CLOSE:
-		if app.GetConfig().MinimizeToTray {
+		if app.GetConfig().MinimizeToTray && trayActive {
 			pShowWindow.Call(hwnd, _SW_HIDE)
 			return 0 // 吞掉关闭：仅隐藏到托盘，服务器继续运行
 		}
-		// 未开启 → 落到原过程（销毁窗口 → 退出）
+		// 未开启或托盘图标登记失败 → 落到原过程（销毁窗口 → 退出），避免窗口既关不掉又无托盘可恢复
 	case _WM_TRAYCALLBACK:
 		switch lparam {
 		case _WM_LBUTTONUP, _WM_LBUTTONDBLCLK:
@@ -185,7 +202,8 @@ func newNID(hwnd uintptr) *notifyIconData {
 
 func addTrayIcon(hwnd uintptr) {
 	nid := newNID(hwnd)
-	pShellNotifyIcon.Call(_NIM_ADD, uintptr(unsafe.Pointer(nid)))
+	r, _, _ := pShellNotifyIcon.Call(_NIM_ADD, uintptr(unsafe.Pointer(nid)))
+	trayActive = r != 0 // 登记失败时（外壳未就绪等）关窗最小化会退化为正常退出，不困住窗口
 }
 
 func removeTrayIcon() {

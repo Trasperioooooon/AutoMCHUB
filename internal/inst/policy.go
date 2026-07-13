@@ -37,21 +37,27 @@ func (m *Manager) UpdatePolicies(name string, p Policies) error {
 		}
 	}
 	i.procMu.Lock()
+	defer i.procMu.Unlock()
 	i.Policies = p
-	i.procMu.Unlock()
-	return m.saveInstance(i)
+	return m.saveInstance(i) // 持锁落盘，避免与并发写竞争地读写 i.Settings
 }
 
-// crashRestartLoop 崩溃后按退避策略自动重启（10s/30s/60s，连续 3 次放弃；
-// 正常运行超过 10 分钟后计数清零）。
-func (m *Manager) crashRestart(i *Instance) {
+// crashRestart 崩溃后按退避策略自动重启（10s/30s/60s，连续 3 次放弃；
+// 正常运行超过 10 分钟后计数清零）。gen 为崩溃那次运行的代号：只要期间又发生过任何
+// 新的运行（用户手动启动/停止、或上一次退避重启），本次重启即作废，避免把用户主动
+// 停掉的服务器又拉起来。
+func (m *Manager) crashRestart(i *Instance, gen int64) {
 	i.procMu.Lock()
+	stale := i.runGen != gen
 	if time.Since(i.startedAt) > 10*time.Minute {
 		i.crashCount = 0
 	}
 	i.crashCount++
 	n := i.crashCount
 	i.procMu.Unlock()
+	if stale {
+		return // 期间已有新的运行发生，放弃本次重启
+	}
 	if n > 3 {
 		i.Console.Append("[AutoMCHUB] ⚠ 连续崩溃 3 次，已停止自动重启。请检查上方日志排查原因。")
 		return
@@ -59,8 +65,11 @@ func (m *Manager) crashRestart(i *Instance) {
 	delay := []time.Duration{10 * time.Second, 30 * time.Second, 60 * time.Second}[n-1]
 	i.Console.Append(fmt.Sprintf("[AutoMCHUB] 检测到服务器异常退出，%v 后自动重启（第 %d/3 次）...", delay, n))
 	time.Sleep(delay)
-	if i.Status() != "stopped" {
-		return // 用户已手动处理
+	i.procMu.Lock()
+	abort := i.runGen != gen || (i.state != "" && i.state != "stopped")
+	i.procMu.Unlock()
+	if abort {
+		return // 用户已手动处理（重启过或正在运行）
 	}
 	if err := m.Start(i.Name); err != nil {
 		i.Console.Append("[AutoMCHUB] 自动重启失败: " + err.Error())

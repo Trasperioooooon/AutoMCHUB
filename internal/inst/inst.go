@@ -44,6 +44,7 @@ type Instance struct {
 	userStop   bool   // 本次退出是否用户主动触发（区分崩溃）
 	startedAt  time.Time
 	crashCount int
+	runGen     int64 // 每次 Start 自增，用于让崩溃重启只作用于其对应的那次运行
 
 	onlineMu sync.Mutex
 	online   map[string]bool
@@ -195,11 +196,13 @@ func (m *Manager) UpdateSettings(name string, xmxMB, xmsMB int, consoleEnc strin
 	default:
 		return fmt.Errorf("不支持的控制台编码: %s", consoleEnc)
 	}
-	// 运行中控制台 goroutine 会并发读这些字段，写入必须持锁
+	// 运行中控制台 goroutine 会并发读这些字段，写入必须持锁；
+	// 落盘（saveInstance 序列化 i.Settings、writeRunBat 读取 i 字段）也在锁内完成，
+	// 避免与并发的 UpdateSettings 竞争地读写 i.Settings
 	i.procMu.Lock()
+	defer i.procMu.Unlock()
 	if xmxMB > 0 {
 		if xmxMB < 512 {
-			i.procMu.Unlock()
 			return fmt.Errorf("最大内存不能低于 512MB")
 		}
 		if xmsMB < 128 || xmsMB > xmxMB {
@@ -213,7 +216,6 @@ func (m *Manager) UpdateSettings(name string, xmxMB, xmsMB int, consoleEnc strin
 	if extraJVM != nil {
 		i.ExtraJVM = append([]string{}, (*extraJVM)...)
 	}
-	i.procMu.Unlock()
 	if err := m.saveInstance(i); err != nil {
 		return err
 	}

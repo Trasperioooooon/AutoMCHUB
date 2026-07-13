@@ -313,10 +313,12 @@ function renderMemoryControl(mount, o) {
 const Main = () => $("#main");
 let consoleES = null; // 当前 SSE 连接
 let pollTimer = null;
+let prTimer = null;   // 控制台在线玩家延迟刷新定时器（离开视图时清理）
 
 function navigate() {
   if (consoleES) { consoleES.close(); consoleES = null; }
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  if (prTimer) { clearTimeout(prTimer); prTimer = null; }
   const hash = location.hash || "#/instances";
   const m = hash.match(/^#\/([a-z]+)(?:\/(.+))?$/);
   const view = m ? m[1] : "instances";
@@ -754,7 +756,7 @@ async function renderTaskPage(taskId) {
         <div class="wc-title">⚠ ${esc(w.title)}</div>
         ${w.note ? `<div class="wc-note">${esc(w.note)}</div>` : ""}
         ${(w.items || []).length ? `<ul class="wc-list">${w.items.map(it =>
-          `<li>${it.url ? `<a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.name)}</a>` : esc(it.name)}</li>`).join("")}</ul>` : ""}
+          `<li>${/^https?:\/\//i.test(it.url || "") ? `<a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.name)}</a>` : esc(it.name)}</li>`).join("")}</ul>` : ""}
       </div>`).join("")}
       <div class="task-log" id="task-log">${t.log.map(esc).join("\n")}</div>
       <div class="save-bar">
@@ -775,6 +777,7 @@ async function renderDetail(name, tab = "console") {
   // 标签切换时不经过 navigate()，需自行清理上一视图的连接与定时器
   if (consoleES) { consoleES.close(); consoleES = null; }
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  if (prTimer) { clearTimeout(prTimer); prTimer = null; }
   let list;
   try { list = await api("/api/instances"); } catch (e) { Main().innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
   const info = list.find(i => i.name === name);
@@ -853,7 +856,6 @@ async function renderDetail(name, tab = "console") {
     let onlinePlayers = [];
     const refreshPlayers = () => api(`/api/instances/${encodeURIComponent(name)}/players`)
       .then(pl => { onlinePlayers = pl.online || []; }).catch(() => {});
-    let prTimer = null;
     const schedulePlayerRefresh = () => { clearTimeout(prTimer); prTimer = setTimeout(refreshPlayers, 600); };
     refreshPlayers();
     // 字号（localStorage 记忆）+ 复制 / 导出
@@ -1102,7 +1104,7 @@ async function renderDetail(name, tab = "console") {
       <button class="btn primary" id="pol-save">💾 保存策略</button>`;
     const drawScheds = () => {
       $("#sched-list").innerHTML = scheds.map((s, i) => `
-        <div class="java-row"><span class="badge core">${TYPE_NAMES[s.type] || s.type}</span>
+        <div class="java-row"><span class="badge core">${esc(TYPE_NAMES[s.type] || s.type)}</span>
           <span class="jv">每天 ${esc(s.at)}</span>
           <span class="jp">${esc(s.args || "")}</span>
           <button class="btn sm danger" data-i="${i}">移除</button></div>`).join("") ||
@@ -1397,7 +1399,7 @@ async function renderTunnels() {
       <div class="java-row" style="max-width:980px">
         <span class="dot ${t.running ? "running" : ""}"></span>
         <b style="min-width:110px">${esc(t.name)}</b>
-        <span class="badge core">${PROV_NAMES[t.provider] || t.provider}</span>
+        <span class="badge core">${esc(PROV_NAMES[t.provider] || t.provider)}</span>
         ${t.boundInstance ? `<span class="badge">↔ ${esc(t.boundInstance)}${t.autoStart ? " · 跟随" : ""}</span>` : ""}
         ${t.publicAddr ? `<span class="jv" style="color:var(--accent)">${esc(t.publicAddr)}</span>
           <button class="btn sm" data-copy="${esc(t.publicAddr)}">📋 复制</button>`
