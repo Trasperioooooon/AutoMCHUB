@@ -355,70 +355,119 @@ async function quickStart() {
 }
 
 /* ---------- 视图：实例列表 ---------- */
+/* 时长秒 → 2h13m / 5m / 45s */
+function fmtDur(sec) {
+  sec = Math.max(0, sec | 0);
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+  if (h) return `${h}h${m}m`;
+  if (m) return `${m}m`;
+  return `${sec}s`;
+}
+
+/* 「打开目录」直达菜单：按核心类型列出可用子目录 */
+function folderMenu(anchor, info) {
+  document.querySelectorAll(".dropmenu").forEach(m => m.remove());
+  const isProxy = info.kind === "proxy";
+  const hasMods = ["fabric", "forge", "neoforge", "mohist", "banner"].includes(info.core);
+  const hasPlugins = ["paper", "purpur", "leaves", "folia", "mohist", "banner", "velocity", "waterfall"].includes(info.core);
+  const items = [["", "📂 实例目录"]];
+  if (hasMods) items.push(["mods", "🧩 模组 mods"]);
+  if (hasPlugins) items.push(["plugins", "🔌 插件 plugins"]);
+  if (!isProxy) items.push(["world", "🌍 世界存档"], ["logs", "📜 日志 logs"], ["crash-reports", "💥 崩溃报告"]);
+  else items.push(["logs", "📜 日志 logs"]);
+  const m = document.createElement("div");
+  m.className = "dropmenu";
+  m.innerHTML = items.map(([sub, label]) => `<button data-sub="${sub}">${label}</button>`).join("");
+  document.body.appendChild(m);
+  const r = anchor.getBoundingClientRect();
+  m.style.left = Math.max(8, Math.min(r.left, innerWidth - m.offsetWidth - 8)) + "px";
+  m.style.top = (r.bottom + 4) + "px";
+  m.querySelectorAll("button").forEach(b => b.onclick = async () => {
+    m.remove();
+    const sub = b.dataset.sub;
+    try { await api(`/api/instances/${encodeURIComponent(info.name)}/opendir${sub ? "?sub=" + encodeURIComponent(sub) : ""}`, { method: "POST" }); }
+    catch (e) { toast(e.message, true); }
+  });
+  setTimeout(() => document.addEventListener("click", function off(e) { if (!m.contains(e.target)) { m.remove(); document.removeEventListener("click", off); } }), 0);
+}
+
 async function renderInstances() {
-  Main().innerHTML = eyebrow("SERVER LIST") + `<h1>我的服务器</h1><div class="sub">双击卡片进入控制台 · 按 2 快速新建 · 每个实例独立存放</div><div id="inst-cards">加载中…</div>`;
-  const draw = async () => {
-    let list;
-    try { list = await api("/api/instances"); } catch (e) { $("#inst-cards").innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
-    if (!list.length) {
-      $("#inst-cards").innerHTML = `<div class="empty"><div class="big">⛏</div>这里空空如也<br>一键开一台推荐配置的服务器，或用向导自定义<br><br>
-        <button class="btn primary" id="quick-start">⚡ 一键开服（Paper 最新正式版）</button>
-        <a class="btn" href="#/create" style="margin-left:8px">⚒ 自定义合成（按 2）</a></div>`;
-      $("#quick-start").onclick = quickStart;
-      return;
-    }
-    $("#inst-cards").innerHTML = `<div class="cards">` + list.map(i => `
-      <div class="card st-${i.status}" data-name="${esc(i.name)}">
-        <div class="inst-head">
-          ${cubeOf(i.core)}
-          <span class="inst-name grow">${esc(i.name)}</span>
-          <span class="dot ${i.status}"></span>
-        </div>
-        <div class="badges">
-          <span class="badge core">${coreName(i.core)}</span>
-          <span class="badge">${i.kind === "proxy" ? "v" : "MC "}${esc(i.mc)}</span>
-          <span class="badge">Java ${i.javaMajor}</span>
-          ${i.kind === "proxy" ? `<span class="badge">代理端</span>` : `<span class="badge">端口 ${i.port}</span>`}
-          <span class="badge">${(i.xmxMb / 1024).toFixed(1)}G</span>
-        </div>
-        <div class="inst-meta" data-motd="${esc(i.motd || "")}"></div>
-        <div class="inst-actions">
-          ${i.status === "stopped"
-            ? `<button class="btn sm primary" data-act="start">▶ 启动</button>`
-            : `<button class="btn sm" data-act="stop">■ 停止</button>`}
-          <a class="btn sm" href="#/inst/${encodeURIComponent(i.name)}">控制台 / 设置</a>
-          <button class="btn sm" data-act="opendir" title="打开目录">📁</button>
-          <button class="btn sm danger" data-act="del">删除</button>
-        </div>
-        <div class="dur"><i></i></div>
-      </div>`).join("") + `</div>`;
-    // MOTD 按 § 色码彩色渲染（与游戏内服务器列表一致）
-    $("#inst-cards").querySelectorAll(".inst-meta").forEach(el => {
-      if (el.dataset.motd) renderMotd(el, el.dataset.motd);
-    });
+  Main().innerHTML = eyebrow("SERVER LIST") + `<h1>我的服务器</h1>
+    <div class="row" style="margin-bottom:14px;flex-wrap:wrap;gap:10px">
+      <input type="text" id="inst-q" placeholder="🔍 搜索实例名" style="max-width:220px">
+      <select id="inst-sort" style="width:170px"><option value="recent">排序：最近创建</option><option value="running">排序：运行中优先</option><option value="name">排序：名称</option></select>
+      <span class="grow"></span><span class="sub" id="inst-summary" style="margin:0"></span>
+    </div>
+    <div id="inst-cards">加载中…</div>`;
+  let lastSig = "", curList = [];
+  const cardHTML = i => `
+    <div class="card st-${i.status}" data-name="${esc(i.name)}">
+      <div class="inst-head">${cubeOf(i.core)}<span class="inst-name grow">${esc(i.name)}</span><span class="dot ${i.status}"></span></div>
+      <div class="badges">
+        <span class="badge core">${coreName(i.core)}</span>
+        <span class="badge">${i.kind === "proxy" ? "v" : "MC "}${esc(i.mc)}</span>
+        <span class="badge">Java ${i.javaMajor}</span>
+        ${i.kind === "proxy" ? `<span class="badge">代理端</span>` : `<span class="badge">端口 ${i.port}</span>`}
+        <span class="badge">${(i.xmxMb / 1024).toFixed(1)}G</span>
+      </div>
+      ${i.status === "running" ? `<div class="inst-stat">⏱ ${fmtDur(i.uptimeSec)}${i.kind !== "proxy" ? ` · 👥 ${i.onlineCount}/${i.maxPlayers}` : ""}</div>` : ""}
+      <div class="inst-meta" data-motd="${esc(i.motd || "")}"></div>
+      <div class="inst-actions">
+        ${i.status === "stopped" ? `<button class="btn sm primary" data-act="start">▶ 启动</button>` : `<button class="btn sm" data-act="stop">■ 停止</button>`}
+        <a class="btn sm" href="#/inst/${encodeURIComponent(i.name)}">控制台 / 设置</a>
+        <button class="btn sm" data-act="opendir" title="打开目录">📁</button>
+        <button class="btn sm danger" data-act="del">删除</button>
+      </div>
+      <div class="dur"><i></i></div>
+    </div>`;
+  const applyView = () => {
+    const q = ($("#inst-q").value || "").trim().toLowerCase();
+    const sort = $("#inst-sort").value;
+    let list = curList.filter(i => !q || i.name.toLowerCase().includes(q));
+    if (sort === "name") list = list.slice().sort((a, b) => a.name.localeCompare(b.name));
+    else if (sort === "running") list = list.slice().sort((a, b) => (b.status === "running") - (a.status === "running"));
+    if (!list.length) { $("#inst-cards").innerHTML = `<div class="empty" style="padding:40px 0">没有匹配「${esc(q)}」的实例</div>`; return; }
+    $("#inst-cards").innerHTML = `<div class="cards">` + list.map(cardHTML).join("") + `</div>`;
+    $("#inst-cards").querySelectorAll(".inst-meta").forEach(el => { if (el.dataset.motd) renderMotd(el, el.dataset.motd); });
     $("#inst-cards").querySelectorAll("[data-act]").forEach(b => b.onclick = async ev => {
       ev.stopPropagation();
-      const name = b.closest(".card").dataset.name;
-      const act = b.dataset.act;
+      const name = b.closest(".card").dataset.name, act = b.dataset.act;
+      const info = curList.find(x => x.name === name);
+      if (act === "opendir") { folderMenu(b, info); return; }
       try {
         if (act === "start") { b.disabled = true; await api(`/api/instances/${encodeURIComponent(name)}/start`, { method: "POST" }); toast(`「${name}」正在启动`); }
         else if (act === "stop") { b.disabled = true; await api(`/api/instances/${encodeURIComponent(name)}/stop`, { method: "POST" }); toast(`「${name}」正在停止并保存世界`); }
-        else if (act === "opendir") await api(`/api/instances/${encodeURIComponent(name)}/opendir`, { method: "POST" });
         else if (act === "del") {
-          const r = await confirmModal({
-            title: `删除实例「${name}」？`, danger: true, okText: "删除",
-            body: "此操作会将实例从列表移除。",
-            extra: `<label class="switch" style="margin-bottom:16px"><input type="checkbox" data-k="files" checked><span class="sw"></span><span class="sw-label">同时删除服务器文件夹（含地图存档，不可恢复）</span></label>`,
-          });
+          const r = await confirmModal({ title: `删除实例「${name}」？`, danger: true, okText: "删除", body: "此操作会将实例从列表移除。", extra: `<label class="switch" style="margin-bottom:16px"><input type="checkbox" data-k="files" checked><span class="sw"></span><span class="sw-label">同时删除服务器文件夹（含地图存档，不可恢复）</span></label>` });
           if (!r) return;
           await api(`/api/instances/${encodeURIComponent(name)}?files=${r.files ? 1 : 0}`, { method: "DELETE" });
           toast(`已删除「${name}」`);
         }
       } catch (e) { toast(e.message, true); }
-      draw();
+      lastSig = ""; draw();
     });
     $("#inst-cards").querySelectorAll(".card").forEach(c => c.ondblclick = () => location.hash = `#/inst/${encodeURIComponent(c.dataset.name)}`);
   };
+  const draw = async () => {
+    let list;
+    try { list = await api("/api/instances"); } catch (e) { $("#inst-cards").innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
+    curList = list;
+    const running = list.filter(i => i.status === "running").length;
+    const online = list.reduce((s, i) => s + (i.onlineCount || 0), 0);
+    $("#inst-summary").textContent = list.length ? `共 ${list.length} 台 · 运行中 ${running}${online ? ` · 在线 ${online} 人` : ""}` : "";
+    if (!list.length) {
+      $("#inst-cards").innerHTML = `<div class="empty"><div class="big">⛏</div>这里空空如也<br>一键开一台推荐配置的服务器，或用向导自定义<br><br>
+        <button class="btn primary" id="quick-start">⚡ 一键开服（Paper 最新正式版）</button>
+        <a class="btn" href="#/create" style="margin-left:8px">⚒ 自定义合成（按 2）</a></div>`;
+      $("#quick-start").onclick = quickStart; lastSig = "empty"; return;
+    }
+    const sig = list.map(i => `${i.name}:${i.status}:${i.status === "running" ? Math.floor(i.uptimeSec / 60) + "/" + i.onlineCount : ""}`).join("|") + "#" + $("#inst-q").value + "#" + $("#inst-sort").value;
+    if (sig === lastSig) return; // 数据无实质变化则跳过重绘，消除周期性闪烁与焦点丢失
+    lastSig = sig;
+    applyView();
+  };
+  $("#inst-q").oninput = () => { lastSig = ""; draw(); };
+  $("#inst-sort").onchange = () => { lastSig = ""; draw(); };
   await draw();
   pollTimer = setInterval(draw, 3000);
 }
@@ -781,6 +830,10 @@ async function renderDetail(name, tab = "console") {
         <select id="con-enc" style="width:110px">
           ${["auto", "utf-8", "gbk"].map(e => `<option value="${e}" ${info.consoleEncoding === e ? "selected" : ""}>${e}</option>`).join("")}
         </select>
+        <button class="btn sm" id="con-fs-dn" title="缩小字号">A-</button>
+        <button class="btn sm" id="con-fs-up" title="放大字号">A+</button>
+        <button class="btn sm" id="con-copy" title="复制全部">📋</button>
+        <button class="btn sm" id="con-export" title="导出为 txt">⬇</button>
       </div>
       <div class="console" id="console"></div>
       <div class="console-input">
@@ -789,6 +842,21 @@ async function renderDetail(name, tab = "console") {
       </div>`;
     const con = $("#console");
     const filterEl = $("#con-filter");
+    // 字号（localStorage 记忆）+ 复制 / 导出
+    let conFS = +(localStorage.getItem("amh_con_fs") || 12.5);
+    const applyFS = () => { con.style.fontSize = conFS + "px"; };
+    applyFS();
+    $("#con-fs-dn").onclick = () => { conFS = Math.max(9, conFS - 1); localStorage.setItem("amh_con_fs", conFS); applyFS(); };
+    $("#con-fs-up").onclick = () => { conFS = Math.min(22, conFS + 1); localStorage.setItem("amh_con_fs", conFS); applyFS(); };
+    const conText = () => [...con.childNodes].map(d => d.textContent).join("\n");
+    $("#con-copy").onclick = () => navigator.clipboard.writeText(conText()).then(() => toast("已复制控制台内容")).catch(() => toast("复制失败", true));
+    $("#con-export").onclick = () => {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([conText()], { type: "text/plain;charset=utf-8" }));
+      a.download = `${name}-console.txt`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    };
     const classify = line => {
       if (line.startsWith(">") || line.startsWith("[AutoMCHUB]")) return "cmd-echo";
       if (/ERROR|SEVERE|FATAL|Exception|^\tat |^Caused by/.test(line)) return "lv-err";
@@ -1150,17 +1218,40 @@ async function renderDetail(name, tab = "console") {
   } else if (tab === "jvm") {
     const appInfo = await api("/api/app").catch(() => ({ ramMb: 8192, availRamMb: 4096 }));
     const maxMem = Math.max(2048, appInfo.ramMb - 2048);
+    const aikarsFlags = xmxMb => {
+      const big = xmxMb >= 12288;
+      return ["-XX:+UseG1GC", "-XX:+ParallelRefProcEnabled", "-XX:MaxGCPauseMillis=200",
+        "-XX:+UnlockExperimentalVMOptions", "-XX:+DisableExplicitGC", "-XX:+AlwaysPreTouch",
+        big ? "-XX:G1NewSizePercent=40" : "-XX:G1NewSizePercent=30",
+        big ? "-XX:G1MaxNewSizePercent=50" : "-XX:G1MaxNewSizePercent=40",
+        big ? "-XX:G1HeapRegionSize=16M" : "-XX:G1HeapRegionSize=8M",
+        big ? "-XX:G1ReservePercent=15" : "-XX:G1ReservePercent=20",
+        "-XX:G1HeapWastePercent=5", "-XX:G1MixedGCCountTarget=4",
+        big ? "-XX:InitiatingHeapOccupancyPercent=20" : "-XX:InitiatingHeapOccupancyPercent=15",
+        "-XX:G1MixedGCLiveThresholdPercent=90", "-XX:G1RSetUpdatingPauseTimePercent=5",
+        "-XX:SurvivorRatio=32", "-XX:+PerfDisableSharedMem", "-XX:MaxTenuringThreshold=1",
+        "-Dusing.aikars.flags=https://mcflags.emc.gs", "-Daikars.new.flags=true"];
+    };
     body.innerHTML = `
-      <div style="max-width:560px">
+      <div style="max-width:640px">
         <div class="field" id="jm-mem-mount"></div>
-        <div class="hint" style="margin-bottom:14px">Java ${info.javaMajor}（便携运行时，由 AutoMCHUB 独立管理，不影响系统）<br>实例目录：${esc(info.dir)}<br>手动启动：双击实例目录中的 run.bat（与此处配置同步）</div>
+        <label class="field"><span>自定义 JVM 参数（每行一个或空格分隔；-Xmx/-Xms 由上方内存自动生成，无需在此填写）</span>
+          <textarea id="jm-jvm" rows="5" spellcheck="false" placeholder="如：-XX:+UseG1GC">${esc((info.extraJvm || []).join("\n"))}</textarea></label>
+        <div class="row" style="margin-bottom:12px;flex-wrap:wrap">
+          <button class="btn sm" id="jm-aikar">⚡ 套用 Aikar's Flags（G1GC 优化）</button>
+          <button class="btn sm" id="jm-clear">清空</button>
+        </div>
+        <div class="hint" style="margin-bottom:14px">Java ${info.javaMajor}（便携运行时，独立管理，不影响系统）<br>实例目录：${esc(info.dir)}<br>手动启动：双击实例目录中的 run.bat（与此处配置同步）</div>
         <button class="btn primary" id="jm-save">💾 保存（重启后生效）</button>
       </div>`;
     renderMemoryControl($("#jm-mem-mount"), { sliderId: "jm-mem", min: 1024, max: maxMem, value: Math.min(info.xmxMb, maxMem), totalMb: appInfo.ramMb, availMb: appInfo.availRamMb });
+    $("#jm-aikar").onclick = () => { $("#jm-jvm").value = aikarsFlags(+$("#jm-mem").value).join("\n"); toast("已填入 Aikar's Flags，点保存生效"); };
+    $("#jm-clear").onclick = () => { $("#jm-jvm").value = ""; };
     $("#jm-save").onclick = async () => {
+      const flags = $("#jm-jvm").value.split(/\s+/).map(s => s.trim()).filter(Boolean);
       try {
-        await api(`/api/instances/${encodeURIComponent(name)}/settings`, { method: "PUT", body: { xmxMb: +$("#jm-mem").value, xmsMb: 0 } });
-        toast("已保存内存设置");
+        await api(`/api/instances/${encodeURIComponent(name)}/settings`, { method: "PUT", body: { xmxMb: +$("#jm-mem").value, xmsMb: 0, extraJvm: flags } });
+        toast("已保存内存与 JVM 参数");
       } catch (e) { toast(e.message, true); }
     };
   }

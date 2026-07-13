@@ -299,11 +299,22 @@ func (m *Manager) ShutdownAll(wait time.Duration) {
 	}
 }
 
-// OpenDir 在资源管理器中打开实例目录。
-func (m *Manager) OpenDir(name string) error {
+// OpenDir 在资源管理器中打开实例目录，或其白名单子目录（sub，做穿越防护）。
+func (m *Manager) OpenDir(name, sub string) error {
 	i, err := m.Get(name)
 	if err != nil {
 		return err
 	}
-	return exec.Command("explorer.exe", filepath.Clean(i.Dir)).Start()
+	target := i.Dir
+	if sub = strings.TrimSpace(sub); sub != "" {
+		clean := filepath.Clean(sub)
+		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("非法子目录")
+		}
+		target = filepath.Join(i.Dir, clean)
+	}
+	if st, err := os.Stat(target); err != nil || !st.IsDir() {
+		return fmt.Errorf("目录尚不存在（服务器可能还没生成它）")
+	}
+	return exec.Command("explorer.exe", filepath.Clean(target)).Start()
 }

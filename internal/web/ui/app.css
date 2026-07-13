@@ -245,6 +245,19 @@ h3 { font-size: 15px; }
 }
 .badge.core { color: var(--accent-text); font-weight: 600; }
 .inst-meta { font-size: 12px; color: var(--muted); margin-bottom: 12px; min-height: 16px; }
+.inst-stat { font-size: 12px; color: var(--accent-text); font-family: var(--mono); margin-bottom: 10px; }
+.dropmenu {
+  position: fixed; z-index: 70; min-width: 152px;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: 10px; box-shadow: var(--shadow-md); padding: 5px;
+  display: flex; flex-direction: column; gap: 2px;
+  animation: toast-in .12s steps(2, end);
+}
+.dropmenu button {
+  text-align: left; background: none; border: none; color: var(--text);
+  font-family: inherit; font-size: 13px; padding: 8px 11px; border-radius: 7px; cursor: pointer;
+}
+.dropmenu button:hover { background: var(--sunken); }
 .inst-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .inst-actions a.btn { text-decoration: none; }
 
@@ -271,6 +284,12 @@ input:focus, select:focus {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-solid) 22%, transparent);
 }
 input::placeholder { color: var(--muted); opacity: .65; }
+textarea {
+  width: 100%; background: var(--surface); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: 9px;
+  padding: 9px 12px; font-size: 14px; font-family: inherit; resize: vertical;
+}
+textarea:focus { outline: none; border-color: var(--accent-solid); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-solid) 22%, transparent); }
 input[type=range] { width: 100%; accent-color: var(--accent-solid); }
 input[type=file]::file-selector-button {
   background: var(--surface-2); color: var(--text);

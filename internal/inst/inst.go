@@ -185,7 +185,7 @@ func safeRemoveInstanceDir(i *Instance) error {
 
 // UpdateSettings 调整实例运行参数（内存、控制台编码）并重新生成启动脚本。
 // xmxMB<=0 表示不修改内存；consoleEnc 为空表示不修改编码。
-func (m *Manager) UpdateSettings(name string, xmxMB, xmsMB int, consoleEnc string) error {
+func (m *Manager) UpdateSettings(name string, xmxMB, xmsMB int, consoleEnc string, extraJVM *[]string) error {
 	i, err := m.Get(name)
 	if err != nil {
 		return err
@@ -210,6 +210,9 @@ func (m *Manager) UpdateSettings(name string, xmxMB, xmsMB int, consoleEnc strin
 	if consoleEnc != "" {
 		i.ConsoleEncoding = consoleEnc
 	}
+	if extraJVM != nil {
+		i.ExtraJVM = append([]string{}, (*extraJVM)...)
+	}
 	i.procMu.Unlock()
 	if err := m.saveInstance(i); err != nil {
 		return err
@@ -231,6 +234,30 @@ func (i *Instance) PoliciesSnapshot() Policies {
 	p := i.Policies
 	p.Schedules = append([]Schedule{}, i.Policies.Schedules...)
 	return p
+}
+
+// OnlineCount 返回当前在线玩家数（加锁读）。
+func (i *Instance) OnlineCount() int {
+	i.onlineMu.Lock()
+	defer i.onlineMu.Unlock()
+	return len(i.online)
+}
+
+// UptimeSec 返回运行时长（秒）；非运行态返回 0。
+func (i *Instance) UptimeSec() int {
+	i.procMu.Lock()
+	defer i.procMu.Unlock()
+	if i.state == "running" && !i.startedAt.IsZero() {
+		return int(time.Since(i.startedAt).Seconds())
+	}
+	return 0
+}
+
+// ExtraJVMSnapshot 加锁快照自定义 JVM 参数（供 API 读取）。
+func (i *Instance) ExtraJVMSnapshot() []string {
+	i.procMu.Lock()
+	defer i.procMu.Unlock()
+	return append([]string{}, i.ExtraJVM...)
 }
 
 var invalidNameChars = `\/:*?"<>|`

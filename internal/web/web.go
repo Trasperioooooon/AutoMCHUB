@@ -108,7 +108,7 @@ func New(mgr *inst.Manager, tun *tunnel.Manager, port int) http.Handler {
 	mux.HandleFunc("POST /api/instances/{name}/start", s.handleInstStart)
 	mux.HandleFunc("POST /api/instances/{name}/stop", s.instAction((*inst.Manager).Stop))
 	mux.HandleFunc("POST /api/instances/{name}/kill", s.instAction((*inst.Manager).Kill))
-	mux.HandleFunc("POST /api/instances/{name}/opendir", s.instAction((*inst.Manager).OpenDir))
+	mux.HandleFunc("POST /api/instances/{name}/opendir", s.handleOpenDir)
 	mux.HandleFunc("POST /api/instances/{name}/command", s.handleCommand)
 	mux.HandleFunc("DELETE /api/instances/{name}", s.handleDelete)
 	mux.HandleFunc("GET /api/instances/{name}/console", s.handleConsole)
@@ -700,12 +700,22 @@ type instSummary struct {
 	Dir       string `json:"dir"`
 	CreatedAt string `json:"createdAt"`
 	ConsoleEncoding string `json:"consoleEncoding"`
+	OnlineCount int      `json:"onlineCount"`
+	UptimeSec   int      `json:"uptimeSec"`
+	MaxPlayers  int      `json:"maxPlayers"`
+	ExtraJVM    []string `json:"extraJvm"`
 }
 
 func summarize(i *inst.Instance) instSummary {
 	motd := ""
+	maxP := 20
 	if p, err := inst.LoadProps(i.PropsPath()); err == nil {
 		motd, _ = p.Get("motd")
+		if v, ok := p.Get("max-players"); ok {
+			if n, e := strconv.Atoi(strings.TrimSpace(v)); e == nil && n > 0 {
+				maxP = n
+			}
+		}
 	}
 	enc := i.ConsoleEncoding
 	if enc == "" {
@@ -718,6 +728,8 @@ func summarize(i *inst.Instance) instSummary {
 		Port: i.Port(), Status: i.Status(), MOTD: motd, Dir: i.Dir,
 		CreatedAt: i.CreatedAt.Format("2006-01-02 15:04"),
 		ConsoleEncoding: enc,
+		OnlineCount: i.OnlineCount(), UptimeSec: i.UptimeSec(), MaxPlayers: maxP,
+		ExtraJVM: i.ExtraJVMSnapshot(),
 	}
 }
 
@@ -775,6 +787,15 @@ func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.mgr.Command(r.PathValue("name"), body.Cmd); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	writeJSON(w, "ok")
+}
+
+// handleOpenDir 在资源管理器打开实例目录或其白名单子目录（sub 查询参数）。
+func (s *Server) handleOpenDir(w http.ResponseWriter, r *http.Request) {
+	if err := s.mgr.OpenDir(r.PathValue("name"), r.URL.Query().Get("sub")); err != nil {
 		writeErr(w, 400, err)
 		return
 	}
@@ -978,15 +999,16 @@ func (s *Server) handleSetProps(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSetSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		XmxMB           int    `json:"xmxMb"`
-		XmsMB           int    `json:"xmsMb"`
-		ConsoleEncoding string `json:"consoleEncoding"`
+		XmxMB           int       `json:"xmxMb"`
+		XmsMB           int       `json:"xmsMb"`
+		ConsoleEncoding string    `json:"consoleEncoding"`
+		ExtraJVM        *[]string `json:"extraJvm"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeErr(w, 400, err)
 		return
 	}
-	if err := s.mgr.UpdateSettings(r.PathValue("name"), body.XmxMB, body.XmsMB, body.ConsoleEncoding); err != nil {
+	if err := s.mgr.UpdateSettings(r.PathValue("name"), body.XmxMB, body.XmsMB, body.ConsoleEncoding, body.ExtraJVM); err != nil {
 		writeErr(w, 400, err)
 		return
 	}
