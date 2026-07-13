@@ -123,6 +123,34 @@ const eyebrow = t => `<div class="eyebrow">${esc(t)}</div>`;
   paint();
 })();
 
+/* 无边框宿主：系统标题栏已去除，HUD 顶栏充当标题栏。窗口按钮 + 拖动经 WebView2 的 Bind 桥接驱动。
+   仅当宿主注入了 hostWin* 函数时启用（浏览器回退时保留系统窗口，什么都不做）。 */
+(function initHostChrome() {
+  if (typeof window.hostWinClose !== "function") return;
+  document.body.classList.add("has-host-chrome");
+  const call = fn => { try { window[fn](); } catch (e) {} };
+  const maxBtn = $("#wc-max");
+  const boxMax = `<svg viewBox="0 0 12 12" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1"><rect x="2" y="2" width="8" height="8"/></svg>`;
+  const boxRestore = `<svg viewBox="0 0 12 12" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1"><rect x="2.5" y="3.5" width="6" height="6"/><path d="M4.5 3.5V1.5h6v6H8"/></svg>`;
+  const refreshMax = async () => { try { maxBtn.innerHTML = (await window.hostWinIsMax()) ? boxRestore : boxMax; } catch (e) {} };
+  $("#wc-min").onclick = () => call("hostWinMin");
+  $("#wc-close").onclick = () => call("hostWinClose");
+  maxBtn.onclick = () => { call("hostWinMaxToggle"); setTimeout(refreshMax, 80); };
+  refreshMax();
+  // HUD 空白处按下 → 发起原生拖动；双击 → 最大化/还原。交互元素（按钮/链接/输入/控制键）除外。
+  const hud = $("#hud");
+  const onChrome = e => e.target.closest("button, a, input, select, .win-ctrls");
+  hud.addEventListener("mousedown", e => {
+    if (e.button !== 0 || onChrome(e)) return;
+    e.preventDefault();
+    call("hostWinDrag");
+  });
+  hud.addEventListener("dblclick", e => {
+    if (onChrome(e)) return;
+    call("hostWinMaxToggle"); setTimeout(refreshMax, 80);
+  });
+})();
+
 /* 快捷键：1-4 切换物品栏页签；T 或 / 聚焦控制台输入（MC 聊天习惯） */
 document.addEventListener("keydown", e => {
   if (e.ctrlKey || e.altKey || e.metaKey) return;
@@ -334,9 +362,12 @@ function navigate() {
 window.addEventListener("hashchange", navigate);
 
 /* 一键开服：Paper 最新正式版 + 推荐设置（空状态入口） */
+let quickBusy = false; // 防重入：代理慢时接口耗时较长，避免用户以为「没反应」而重复点击创建出多台
 async function quickStart() {
+  if (quickBusy) { toast("正在创建，请稍候…"); return; }
   const ok = await confirmModal({ title: "一键开服", okText: "同意并开始", body: "将创建一台 <b>Paper 最新正式版</b> 服务器，采用推荐设置（离线模式、允许飞行、默认端口 25565）。<br>继续即表示同意 <a href='https://aka.ms/MinecraftEULA' target='_blank'>Minecraft EULA</a>。" });
   if (!ok) return;
+  quickBusy = true;
   try {
     const app = await api("/api/app");
     const vers = await api("/api/mcversions?core=paper&snapshots=0");
@@ -354,6 +385,7 @@ async function quickStart() {
     toast(`正在部署 Paper ${mc}`);
     location.hash = `#/task/${r.taskId}`;
   } catch (e) { toast(e.message, true); }
+  finally { quickBusy = false; }
 }
 
 /* ---------- 视图：实例列表 ---------- */
@@ -747,7 +779,7 @@ async function renderTaskPage(taskId) {
     try { t = await api(`/api/tasks/${taskId}`); } catch (e) { $("#task-box").innerHTML = `<div class="err-box">${esc(e.message)}</div>`; clearInterval(pollTimer); return; }
     const pct = t.total > 0 ? Math.min(100, t.done / t.total * 100) : 0;
     $("#task-box").innerHTML = `
-      <div class="task-steps">${t.steps.map(s =>
+      <div class="task-steps">${(t.steps || []).map(s =>
         `<div class="task-step ${s.status}"><span class="ts-ico">${icons[s.status]}</span>${esc(s.name)}</div>`).join("")}</div>
       ${t.label ? `<div class="progress-wrap"><div class="progress-bar"><div style="width:${pct}%"></div></div>
         <div class="progress-text">${esc(t.label)} · ${fmtBytes(t.done)}${t.total > 0 ? " / " + fmtBytes(t.total) : ""}</div></div>` : ""}
@@ -758,7 +790,7 @@ async function renderTaskPage(taskId) {
         ${(w.items || []).length ? `<ul class="wc-list">${w.items.map(it =>
           `<li>${/^https?:\/\//i.test(it.url || "") ? `<a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.name)}</a>` : esc(it.name)}</li>`).join("")}</ul>` : ""}
       </div>`).join("")}
-      <div class="task-log" id="task-log">${t.log.map(esc).join("\n")}</div>
+      <div class="task-log" id="task-log">${(t.log || []).map(esc).join("\n")}</div>
       <div class="save-bar">
         ${t.ended && !t.error ? `<a class="btn primary" href="#/inst/${encodeURIComponent(t.result)}">✔ 完成，进入控制台</a>` : ""}
         ${t.ended && t.error ? `<a class="btn" href="#/create">← 返回重试</a>` : ""}
@@ -768,7 +800,8 @@ async function renderTaskPage(taskId) {
     lg.scrollTop = lg.scrollHeight;
     if (t.ended) { clearInterval(pollTimer); pollTimer = null; if (!t.error) toast("服务器创建成功 🎉"); }
   };
-  await draw();
+  // 首次 draw 若因任何原因抛错，也必须启动轮询——否则后续状态永远无法刷新，页面会永久停在「加载中…」。
+  try { await draw(); } catch (e) { console.warn("首次任务渲染失败，转由轮询接管：", e); }
   pollTimer = setInterval(draw, 800);
 }
 

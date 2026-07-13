@@ -98,7 +98,10 @@ type point struct{ X, Y int32 }
 // setupTray 子类化 webview 窗口过程并挂上托盘图标。须在创建窗口的 UI 线程调用。
 func setupTray(hwnd uintptr) {
 	trayHWND = hwnd
-	trayHIcon, _, _ = pLoadIcon.Call(0, _IDI_APPLICATION)
+	trayHIcon = loadAppIcon(16) // 品牌图标（16px 适配托盘）
+	if trayHIcon == 0 {
+		trayHIcon, _, _ = pLoadIcon.Call(0, _IDI_APPLICATION) // 兜底：通用应用图标
+	}
 	idx := _GWLP_WNDPROC // int(-4)；uintptr(idx) 在 64 位上正确符号扩展
 	origWndProc, _, _ = pSetWindowLongPtr.Call(hwnd, uintptr(idx), trayCallback)
 	if origWndProc == 0 {
@@ -121,6 +124,10 @@ func trayWndProc(hwnd, msg, wparam, lparam uintptr) (ret uintptr) {
 		addTrayIcon(hwnd)
 	}
 	switch msg {
+	case _WM_NCCALCSIZE:
+		if ret, handled := framelessNCCalcSize(hwnd, wparam, lparam); handled {
+			return ret // 去掉标题栏；未接管（wparam==0）则落到默认过程
+		}
 	case _WM_CLOSE:
 		if app.GetConfig().MinimizeToTray && trayActive {
 			pShowWindow.Call(hwnd, _SW_HIDE)

@@ -165,5 +165,13 @@ func (t *Task) Snapshot() Snapshot {
 	s.Steps = append(s.Steps, t.steps...)
 	s.Log = append(s.Log, t.log...)
 	s.Warnings = append(s.Warnings, t.warnings...)
+	// 空切片显式化为 []：任务刚创建、尚无日志时 nil 切片会被 JSON 编码成 null，
+	// 前端对其做 .map() 会抛错。此处从数据源头兜底，前端另有 (x||[]) 双保险。
+	if s.Steps == nil {
+		s.Steps = []Step{}
+	}
+	if s.Log == nil {
+		s.Log = []string{}
+	}
 	return s
 }
