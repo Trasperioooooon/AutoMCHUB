@@ -49,10 +49,11 @@ type Manager struct {
 	seq      int
 	running  map[string]*runState
 	consoles map[string]*procutil.Console
+	lastErr  map[string]string // 隧道ID → 最近一条 frpc 失败信息（运行态，不持久化）
 }
 
 func NewManager() *Manager {
-	m := &Manager{running: map[string]*runState{}, consoles: map[string]*procutil.Console{}}
+	m := &Manager{running: map[string]*runState{}, consoles: map[string]*procutil.Console{}, lastErr: map[string]string{}}
 	m.load()
 	return m
 }
@@ -86,7 +87,8 @@ func (m *Manager) save() {
 // Status 隧道运行状态。
 type Status struct {
 	Tunnel
-	Running bool `json:"running"`
+	Running   bool   `json:"running"`
+	LastError string `json:"lastError,omitempty"`
 }
 
 func (m *Manager) List() []Status {
@@ -94,11 +96,25 @@ func (m *Manager) List() []Status {
 	defer m.mu.Unlock()
 	out := make([]Status, 0, len(m.tunnels))
 	for _, t := range m.tunnels {
-		st := Status{Tunnel: *t, Running: m.running[t.ID] != nil}
+		st := Status{Tunnel: *t, Running: m.running[t.ID] != nil, LastError: m.lastErr[t.ID]}
 		st.Credential = "" // 凭据绝不下发（前端无需回显）
 		out = append(out, st)
 	}
 	return out
+}
+
+// setLastErr 记录/清除隧道最近一条失败信息（供前端行内提示）。
+func (m *Manager) setLastErr(id, msg string) {
+	m.mu.Lock()
+	if msg == "" {
+		delete(m.lastErr, id)
+	} else {
+		if len(msg) > 200 {
+			msg = msg[:200]
+		}
+		m.lastErr[id] = msg
+	}
+	m.mu.Unlock()
 }
 
 func (m *Manager) get(id string) *Tunnel {
@@ -301,6 +317,14 @@ func (m *Manager) handleLine(t *Tunnel, rs *runState, line string) {
 		if !strings.HasPrefix(hasAddr, "127.") && !strings.HasPrefix(hasAddr, "0.0.0.0") {
 			m.setPublicAddr(t, hasAddr)
 		}
+	}
+	// 失败信息捕获（供隧道行内红字提示）；成功则清除
+	if success {
+		m.setLastErr(t.ID, "")
+	} else if strings.Contains(low, "error") || strings.Contains(low, "fail") || strings.Contains(line, "失败") ||
+		strings.Contains(low, "shutdown") || strings.Contains(low, "rejected") || strings.Contains(low, "invalid") ||
+		strings.Contains(line, "错误") {
+		m.setLastErr(t.ID, strings.TrimSpace(line))
 	}
 }
 

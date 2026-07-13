@@ -1264,7 +1264,8 @@ async function renderTunnels() {
   Main().innerHTML = eyebrow("MULTIPLAYER") + `<h1>联机穿透</h1>
     <div class="sub">把本地服务器映射到公网，异地朋友直接连。基于 <b>OpenFrp OPENAPI</b>，并支持 SakuraFrp 与自建 frps。</div>
     <div id="tun-list">加载中…</div>
-    <h3 style="margin:26px 0 8px">＋ 添加隧道</h3>
+    <button class="btn" id="tn-toggle" style="margin:26px 0 10px">＋ 添加隧道…</button>
+    <div id="tn-form" hidden>
     <div class="hint" style="margin-bottom:12px;line-height:1.8">
       <b>OpenFrp</b>：到 <a href="https://console.openfrp.net" target="_blank" style="color:var(--accent)">OpenFrp 控制台</a> 创建 TCP 隧道（本地端口填 MC 端口）→「个人中心」复制用户密钥；<br>
       <b>樱花frp</b>：到 <a href="https://www.natfrp.com" target="_blank" style="color:var(--accent)">SakuraFrp</a> 创建隧道 → 复制访问密钥与隧道 ID（首次需手动放置其 frpc，按提示操作）；<br>
@@ -1287,7 +1288,8 @@ async function renderTunnels() {
       <div class="field"><label class="switch"><input type="checkbox" id="tn-auto" checked><span class="sw"></span>
         <span><span class="sw-label">跟随实例启动</span><div class="sw-desc">绑定的服务器启动时自动拉起隧道</div></span></label></div>
     </div>
-    <button class="btn primary" id="tn-add">＋ 添加隧道</button>`;
+    <button class="btn primary" id="tn-add">＋ 添加隧道</button>
+    </div>`;
 
   const PROV_NAMES = { openfrp: "OpenFrp", natfrp: "樱花frp", custom: "自定义" };
   const provSel = $("#tn-provider");
@@ -1299,6 +1301,7 @@ async function renderTunnels() {
   };
   provSel.onchange = applyFields;
   applyFields();
+  $("#tn-toggle").onclick = () => { const f = $("#tn-form"); f.hidden = !f.hidden; if (!f.hidden) f.scrollIntoView({ behavior: "smooth", block: "nearest" }); };
 
   let logOpen = false;
   const drawList = async () => {
@@ -1313,7 +1316,9 @@ async function renderTunnels() {
         <span class="badge core">${PROV_NAMES[t.provider] || t.provider}</span>
         ${t.boundInstance ? `<span class="badge">↔ ${esc(t.boundInstance)}${t.autoStart ? " · 跟随" : ""}</span>` : ""}
         ${t.publicAddr ? `<span class="jv" style="color:var(--accent)">${esc(t.publicAddr)}</span>
-          <button class="btn sm" data-copy="${esc(t.publicAddr)}">📋 复制</button>` : `<span class="jp">尚未获取公网地址</span>`}
+          <button class="btn sm" data-copy="${esc(t.publicAddr)}">📋 复制</button>`
+          : t.lastError ? `<span class="jp" style="color:var(--redstone)" title="${esc(t.lastError)}">⚠ ${esc(t.lastError.length > 46 ? t.lastError.slice(0, 46) + "…" : t.lastError)}</span>`
+          : `<span class="jp">${t.running ? "连接中…" : "尚未启动"}</span>`}
         <span class="grow"></span>
         ${t.running ? `<button class="btn sm" data-tstop="${t.id}">■ 停止</button>` : `<button class="btn sm primary" data-tstart="${t.id}">▶ 启动</button>`}
         <button class="btn sm" data-tlog="${t.id}">日志</button>
