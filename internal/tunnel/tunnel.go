@@ -48,12 +48,13 @@ type Manager struct {
 	tunnels  []*Tunnel
 	seq      int
 	running  map[string]*runState
+	starting map[string]bool // 正在启动中的隧道ID（登记进 running 前的占位，防并发/重复 Start 双启 frpc）
 	consoles map[string]*procutil.Console
 	lastErr  map[string]string // 隧道ID → 最近一条 frpc 失败信息（运行态，不持久化）
 }
 
 func NewManager() *Manager {
-	m := &Manager{running: map[string]*runState{}, consoles: map[string]*procutil.Console{}, lastErr: map[string]string{}}
+	m := &Manager{running: map[string]*runState{}, starting: map[string]bool{}, consoles: map[string]*procutil.Console{}, lastErr: map[string]string{}}
 	m.load()
 	return m
 }
@@ -224,11 +225,13 @@ func (m *Manager) Start(id string) error {
 		m.mu.Unlock()
 		return fmt.Errorf("隧道不存在")
 	}
-	if m.running[id] != nil {
+	if m.running[id] != nil || m.starting[id] {
 		m.mu.Unlock()
 		return fmt.Errorf("隧道已在运行")
 	}
+	m.starting[id] = true // 占位：慢速启动（EnsureFrpc 首次可能联网下载 frpc）期间挡住并发/重复 Start，避免双启 frpc 争同一公网端口
 	m.mu.Unlock()
+	defer func() { m.mu.Lock(); delete(m.starting, id); m.mu.Unlock() }()
 
 	con := m.Console(id)
 	p := providerOf(t.Provider)
@@ -282,7 +285,9 @@ func (m *Manager) Start(id string) error {
 		m.mu.Lock()
 		userStopped := rs.stopped
 		name := t.Name // 在锁内取名，避免 delete 后与并发 Update 的 *old=t 竞争读 t.Name
-		delete(m.running, id)
+		if m.running[id] == rs { // 身份判定：只清自己这次运行的登记，避免旧 goroutine 误删并发新运行（对齐 inst.Stop 的 i.proc==p）
+			delete(m.running, id)
+		}
 		m.mu.Unlock()
 		if userStopped {
 			con.Append("[AutoMCHUB] 隧道已停止")

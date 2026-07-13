@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -170,8 +171,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sum := sha256.Sum256([]byte(body.Password))
-	if hex.EncodeToString(sum[:]) != hash {
-		time.Sleep(700 * time.Millisecond) // 抑制暴力尝试
+	if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(sum[:])), []byte(hash)) != 1 {
+		time.Sleep(700 * time.Millisecond) // 抑制暴力尝试（常量时间比较避免计时侧信道）
 		writeErr(w, 401, fmt.Errorf("密码错误"))
 		return
 	}
@@ -182,12 +183,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, "ok")
 }
 
+// splitHostPort 拆分 Host 头，正确处理裸 IPv6（如 ::1 / [::1]，有无端口皆可），
+// 避免自写 LastIndex(":") 把 IPv6 环回地址切错导致 secure() 误判 403。
 func splitHostPort(hp string) (string, string, error) {
-	i := strings.LastIndex(hp, ":")
-	if i < 0 {
-		return hp, "", fmt.Errorf("no port")
+	if h, p, err := net.SplitHostPort(hp); err == nil {
+		return h, p, nil
 	}
-	return hp[:i], hp[i+1:], nil
+	return strings.Trim(hp, "[]"), "", nil // 无端口：裸主机名或裸 IPv6，去方括号
 }
 
 func noCache(next http.Handler) http.Handler {
@@ -751,6 +753,11 @@ func (s *Server) handleJavaScan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleJavaAdd(w http.ResponseWriter, r *http.Request) {
+	// 仅限本机：请求体 path 会被作为可执行文件运行（java -version），远程/局域网不得指定主机任意路径
+	if !isLoopbackReq(r) {
+		writeErr(w, 403, fmt.Errorf("添加本机 Java 仅支持在本机操作"))
+		return
+	}
 	var body struct {
 		Path string `json:"path"`
 	}
@@ -800,14 +807,14 @@ func summarize(i *inst.Instance) instSummary {
 			}
 		}
 	}
-	enc := i.ConsoleEncoding
+	xmx, xms, enc := i.MemSnapshot() // 加锁快照，避免与并发的 UpdateSettings 写入构成数据竞争
 	if enc == "" {
 		enc = "auto"
 	}
 	return instSummary{
 		Name: i.Name, Core: string(i.Core), Kind: string(mcsrc.KindOf(i.Core)),
 		MC: i.MC, Build: i.Build,
-		JavaMajor: i.JavaMajor, XmxMB: i.XmxMB, XmsMB: i.XmsMB,
+		JavaMajor: i.JavaMajor, XmxMB: xmx, XmsMB: xms,
 		Port: i.Port(), Status: i.Status(), MOTD: motd, Dir: i.Dir,
 		CreatedAt: i.CreatedAt.Format("2006-01-02 15:04"),
 		ConsoleEncoding: enc,
@@ -832,6 +839,9 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 	if err := readJSON(r, &req); err != nil {
 		writeErr(w, 400, err)
 		return
+	}
+	if !isLoopbackReq(r) {
+		req.Root = "" // 远程 / 局域网请求不得指定主机任意路径，强制落到默认根，防越界写入
 	}
 	id, err := s.mgr.CreateAsync(req)
 	if err != nil {
@@ -1076,7 +1086,7 @@ func (s *Server) handleSetProps(w http.ResponseWriter, r *http.Request) {
 		if key == "" || strings.ContainsAny(key, "=\n\r") {
 			continue
 		}
-		p.Set(key, strings.Trim(kv.Value, "\r\n"))
+		p.Set(key, strings.ReplaceAll(strings.ReplaceAll(kv.Value, "\r", " "), "\n", " ")) // 值内换行→空格，防拆行注入额外 key=value（如 enable-rcon）
 	}
 	if err := p.Save(i.PropsPath()); err != nil {
 		writeErr(w, 500, err)

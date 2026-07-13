@@ -240,9 +240,14 @@ func fromMojang(ctx context.Context, major int, logf func(string, ...any), prog 
 	var doneBytes atomic.Int64
 	sem := make(chan struct{}, 6)
 	var wg sync.WaitGroup
-	var firstErr atomic.Value
+	// 首个错误用互斥保护而非 atomic.Value：dl.Fetch 可返回异构 error 具体类型
+	// （*errorString / context.deadlineExceededError / *fmt.wrapError…），并发存入 atomic.Value 会 panic 整个进程
+	var errMu sync.Mutex
+	var firstErr error
+	setErr := func(e error) { errMu.Lock(); if firstErr == nil { firstErr = e }; errMu.Unlock() }
+	getErr := func() error { errMu.Lock(); defer errMu.Unlock(); return firstErr }
 	for _, j := range jobs {
-		if firstErr.Load() != nil {
+		if getErr() != nil {
 			break
 		}
 		wg.Add(1)
@@ -253,7 +258,7 @@ func fromMojang(ctx context.Context, major int, logf func(string, ...any), prog 
 			p := filepath.Join(dest, filepath.FromSlash(j.rel))
 			err := dl.Fetch(ctx, dl.Request{URLs: mcsrc.URLPair(j.url), Dest: p, SHA1: j.sha1}, nil)
 			if err != nil {
-				firstErr.CompareAndSwap(nil, err)
+				setErr(err)
 				return
 			}
 			if prog != nil {
@@ -262,8 +267,8 @@ func fromMojang(ctx context.Context, major int, logf func(string, ...any), prog 
 		}(j)
 	}
 	wg.Wait()
-	if e := firstErr.Load(); e != nil {
-		return e.(error)
+	if e := getErr(); e != nil {
+		return e
 	}
 	return nil
 }

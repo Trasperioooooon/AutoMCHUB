@@ -5,6 +5,8 @@ package update
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -16,10 +18,12 @@ import (
 )
 
 type Release struct {
-	Tag      string `json:"tag"`
-	Notes    string `json:"notes"`
-	AssetURL string `json:"-"`
-	Size     int64  `json:"sizeBytes"`
+	Tag         string `json:"tag"`
+	Notes       string `json:"notes"`
+	AssetURL    string `json:"-"`
+	Size        int64  `json:"sizeBytes"`
+	SHA256      string `json:"-"` // 官方发布的 exe SHA-256（自 checksums 资产直连 GitHub 解析）
+	checksumURL string
 }
 
 // ghMirrors 把 GitHub 直链包装为国内加速候选（顺序尝试）。
@@ -55,12 +59,43 @@ func Check(ctx context.Context, repo string) (*Release, bool, error) {
 	}
 	r := &Release{Tag: rel.TagName, Notes: rel.Body}
 	for _, a := range rel.Assets {
-		if strings.HasSuffix(strings.ToLower(a.Name), ".exe") {
+		low := strings.ToLower(a.Name)
+		if strings.HasSuffix(low, ".exe") {
 			r.AssetURL, r.Size = a.URL, a.Size
-			break
+		}
+		if low == "sha256sums" || strings.HasSuffix(low, ".sha256") {
+			r.checksumURL = a.URL
 		}
 	}
+	if r.AssetURL != "" && r.checksumURL != "" {
+		r.SHA256 = fetchChecksum(ctx, r.checksumURL, "AutoMCHUB.exe")
+	}
 	return r, newer(rel.TagName, app.Version), nil
+}
+
+// fetchChecksum 直连（绝不经镜像）拉取官方 checksums 资产并取出 filename 的 SHA-256。
+// 校验和必须来自可信源：若走第三方镜像，镜像可同时伪造 exe 与其校验和，防护形同虚设。
+func fetchChecksum(ctx context.Context, url, filename string) string {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return ""
+	}
+	resp, err := dl.Client.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	for _, line := range strings.Split(string(body), "\n") {
+		fields := strings.Fields(line) // 兼容 "<hash>  file" 与 "<hash> *file"
+		if len(fields) >= 2 && strings.TrimPrefix(strings.TrimSpace(fields[len(fields)-1]), "*") == filename {
+			return fields[0]
+		}
+	}
+	return ""
 }
 
 // newer 比较 "v1.2.3" 风格版本号。
@@ -94,6 +129,10 @@ func Apply(ctx context.Context, r *Release) error {
 	if r.AssetURL == "" {
 		return fmt.Errorf("该 Release 未附带 exe 文件")
 	}
+	if r.SHA256 == "" {
+		// 无官方校验和则拒绝：避免经第三方镜像下载并执行未经校验的 exe（供应链/MITM RCE）
+		return fmt.Errorf("无法获取该版本的官方校验和（SHA256SUMS 资产缺失或不可达），为安全起见已取消更新")
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -101,8 +140,9 @@ func Apply(ctx context.Context, r *Release) error {
 	newExe := filepath.Join(app.Base, "AutoMCHUB.new.exe")
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
+	// 经镜像下载但以官方 SHA-256 强校验：镜像被投毒/中间人返回的伪 exe 会校验失败、绝不落地执行
 	if err := dl.Fetch(cctx, dl.Request{
-		URLs: ghMirrors(r.AssetURL), Dest: newExe, MinSize: 4 << 20,
+		URLs: ghMirrors(r.AssetURL), Dest: newExe, MinSize: 4 << 20, SHA256: r.SHA256,
 	}, nil); err != nil {
 		return fmt.Errorf("下载新版本失败: %w", err)
 	}

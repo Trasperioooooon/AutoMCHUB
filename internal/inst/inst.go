@@ -230,6 +230,13 @@ func (i *Instance) consoleEnc() string {
 	return i.ConsoleEncoding
 }
 
+// MemSnapshot 加锁快照 UpdateSettings 会改写的三个字段（供 API 摘要读取，杜绝跨包裸读数据竞争）。
+func (i *Instance) MemSnapshot() (xmxMB, xmsMB int, enc string) {
+	i.procMu.Lock()
+	defer i.procMu.Unlock()
+	return i.XmxMB, i.XmsMB, i.ConsoleEncoding
+}
+
 // PoliciesSnapshot 加锁快照运维策略（供 API 读取）。
 func (i *Instance) PoliciesSnapshot() Policies {
 	i.procMu.Lock()

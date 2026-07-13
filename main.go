@@ -62,7 +62,13 @@ func main() {
 	addr := ln.Addr().(*net.TCPAddr)
 	url := fmt.Sprintf("http://127.0.0.1:%d/?token=%s", addr.Port, web.Token)
 	go func() {
-		if err := http.Serve(ln, web.New(mgr, tun, addr.Port)); err != nil {
+		// 显式 http.Server 以设 ReadHeaderTimeout，防局域网模式下的 slowloris 半开连接；
+		// 不设 WriteTimeout，以兼容控制台 SSE 长连接。
+		srv := &http.Server{
+			Handler:           web.New(mgr, tun, addr.Port),
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+		if err := srv.Serve(ln); err != nil {
 			log.Println("HTTP 服务退出:", err)
 		}
 	}()

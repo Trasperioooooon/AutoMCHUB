@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -133,9 +134,35 @@ func parseMrpack(zipPath string, f *zip.File) (*Pack, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := validateDownloads(fl.Downloads); err != nil {
+			return nil, err
+		}
+		if fl.Hashes.SHA1 == "" {
+			return nil, fmt.Errorf("整合包文件缺少 SHA1 校验值: %s", fl.Path)
+		}
 		p.Files = append(p.Files, File{Path: rel, SHA1: fl.Hashes.SHA1, URLs: fl.Downloads, Size: fl.FileSize})
 	}
 	return p, nil
+}
+
+// modrinthHosts 是 Modrinth 整合包规范允许的下载主机白名单，防用户构造的 .mrpack 借直链 SSRF 打内网/云元数据端点。
+var modrinthHosts = map[string]bool{
+	"cdn.modrinth.com": true, "github.com": true, "raw.githubusercontent.com": true,
+	"objects.githubusercontent.com": true, "gitlab.com": true,
+}
+
+// validateDownloads 校验 mrpack 文件下载直链：必须 https 且主机在白名单内，否则拒绝整个整合包。
+func validateDownloads(urls []string) error {
+	if len(urls) == 0 {
+		return fmt.Errorf("整合包文件缺少下载地址")
+	}
+	for _, raw := range urls {
+		u, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || u.Scheme != "https" || !modrinthHosts[strings.ToLower(u.Hostname())] {
+			return fmt.Errorf("整合包含不受信任的下载地址（仅允许 https 的 Modrinth / GitHub / GitLab 源）: %s", raw)
+		}
+	}
+	return nil
 }
 
 // ---------- CurseForge ----------
