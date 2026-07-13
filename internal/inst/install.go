@@ -538,20 +538,29 @@ func launchArgs(i *Instance) []string {
 	return args
 }
 
+// batEscapeTitle 转义 title 行中的 cmd 元字符（title 命令无法用引号包裹，只能逐字符转义）。
+func batEscapeTitle(s string) string {
+	return strings.NewReplacer(
+		"%", "%%", "^", "^^", "&", "^&", "|", "^|",
+		"<", "^<", ">", "^>", "(", "^(", ")", "^)",
+	).Replace(s)
+}
+
+// batQuoteArg 参数一律加引号并把 % 翻倍，防实例名 / JVM 参数含 cmd 元字符时用户双击 run.bat 触发命令注入。
+func batQuoteArg(s string) string {
+	return `"` + strings.ReplaceAll(s, "%", "%%") + `"`
+}
+
 // writeRunBat 生成可手动双击的启动脚本（与 GUI 内启动等效）。
 func writeRunBat(i *Instance) error {
 	var sb strings.Builder
 	sb.WriteString("@echo off\r\n")
 	sb.WriteString("chcp 65001 >nul\r\n")
-	sb.WriteString(fmt.Sprintf("title %s - AutoMCHUB\r\n", i.Name))
+	sb.WriteString(fmt.Sprintf("title %s - AutoMCHUB\r\n", batEscapeTitle(i.Name)))
 	sb.WriteString("cd /d \"%~dp0\"\r\n")
-	sb.WriteString(fmt.Sprintf("\"%s\"", i.JavaPath))
+	sb.WriteString(batQuoteArg(i.JavaPath))
 	for _, a := range launchArgs(i) {
-		if strings.ContainsAny(a, " \t") {
-			sb.WriteString(fmt.Sprintf(" \"%s\"", a))
-		} else {
-			sb.WriteString(" " + a)
-		}
+		sb.WriteString(" " + batQuoteArg(a))
 	}
 	sb.WriteString("\r\npause\r\n")
 	// 现代 Forge/NeoForge 同步维护 user_jvm_args.txt，便于手动使用官方 run.bat 的用户

@@ -54,7 +54,7 @@ func (m *Manager) ListBackups(name string) ([]BackupInfo, error) {
 		}
 		return nil, err
 	}
-	var out []BackupInfo
+	out := []BackupInfo{} // 显式非 nil：空目录时避免 JSON 编成 null 致前端备份页 .map 崩溃
 	for _, e := range ents {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".zip") {
 			continue

@@ -60,7 +60,20 @@ function toast(msg, isErr = false) {
   d.className = "toast" + (isErr ? " error" : "");
   d.textContent = msg;
   $("#toasts").appendChild(d);
-  setTimeout(() => d.remove(), isErr ? 6500 : 3500);
+  const kill = () => { d.classList.add("leaving"); d.addEventListener("animationend", () => d.remove(), { once: true }); setTimeout(() => d.remove(), 400); };
+  setTimeout(kill, isErr ? 6500 : 3500);
+}
+/* 复制到剪贴板：优先 navigator.clipboard；非安全上下文（http 局域网）下其为 undefined，回退 execCommand */
+async function copy(text, okMsg = "已复制") {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); toast(okMsg); return; }
+  } catch (e) { /* 落到回退 */ }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    document.execCommand("copy"); ta.remove(); toast(okMsg);
+  } catch (e) { toast("复制失败，请手动复制", true); }
 }
 function fmtBytes(n) {
   if (n <= 0) return "";
@@ -72,19 +85,29 @@ function fmtBytes(n) {
 function confirmModal({ title, body, okText = "确定", danger = false, extra = "" }) {
   return new Promise(resolve => {
     const root = $("#modal-root");
-    root.innerHTML = `<div class="modal-mask"><div class="modal">
-      <h3>${esc(title)}</h3><div class="m-body">${body}</div>${extra}
+    const prev = document.activeElement; // 关闭后归还焦点
+    root.innerHTML = `<div class="modal-mask"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <h3 id="modal-title">${esc(title)}</h3><div class="m-body">${body}</div>${extra}
       <div class="m-actions">
         <button class="btn" data-x="cancel">取消</button>
         <button class="btn ${danger ? "danger" : "primary"}" data-x="ok">${esc(okText)}</button>
       </div></div></div>`;
-    root.querySelector('[data-x="cancel"]').onclick = () => { root.innerHTML = ""; resolve(null); };
+    const close = val => {
+      root.innerHTML = "";
+      document.removeEventListener("keydown", onKey);
+      if (prev && prev.focus) prev.focus();
+      resolve(val);
+    };
+    const onKey = e => { if (e.key === "Escape") close(null); };
+    document.addEventListener("keydown", onKey);
+    root.querySelector(".modal-mask").addEventListener("mousedown", e => { if (e.target === e.currentTarget) close(null); });
+    root.querySelector('[data-x="cancel"]').onclick = () => close(null);
     root.querySelector('[data-x="ok"]').onclick = () => {
       const checks = {};
       root.querySelectorAll("input[type=checkbox][data-k]").forEach(c => checks[c.dataset.k] = c.checked);
-      root.innerHTML = "";
-      resolve(checks);
+      close(checks);
     };
+    root.querySelector('[data-x="ok"]').focus();
   });
 }
 
@@ -351,7 +374,13 @@ function navigate() {
   const m = hash.match(/^#\/([a-z]+)(?:\/(.+))?$/);
   const view = m ? m[1] : "instances";
   const arg = m && m[2] ? decodeURIComponent(m[2]) : null;
-  document.querySelectorAll("nav a").forEach(a => a.classList.toggle("active", a.dataset.nav === view));
+  // 底部物品栏高亮：详情归「服务器」、任务页归「合成」，避免进入详情时四格全熄灭失去方位感
+  const navKey = view === "inst" ? "instances" : view === "task" ? "create" : view;
+  document.querySelectorAll("nav a").forEach(a => a.classList.toggle("active", a.dataset.nav === navKey));
+  const mainEl = Main();
+  mainEl.classList.remove("center");
+  mainEl.classList.remove("view-enter"); void mainEl.offsetWidth; // 重触发跨页淡入
+  mainEl.classList.add("view-enter");
   if (view === "create") renderCreate();
   else if (view === "inst" && arg) { const sl = arg.indexOf("/"); sl >= 0 ? renderDetail(arg.slice(0, sl), arg.slice(sl + 1)) : renderDetail(arg); }
   else if (view === "settings") renderSettings(arg);
@@ -490,11 +519,13 @@ async function renderInstances() {
     const online = list.reduce((s, i) => s + (i.onlineCount || 0), 0);
     $("#inst-summary").textContent = list.length ? `共 ${list.length} 台 · 运行中 ${running}${online ? ` · 在线 ${online} 人` : ""}` : "";
     if (!list.length) {
+      Main().classList.add("center");
       $("#inst-cards").innerHTML = `<div class="empty"><div class="big">⛏</div>这里空空如也<br>一键开一台推荐配置的服务器，或用向导自定义<br><br>
         <button class="btn primary" id="quick-start">⚡ 一键开服（Paper 最新正式版）</button>
         <a class="btn" href="#/create" style="margin-left:8px">⚒ 自定义合成（按 2）</a></div>`;
       $("#quick-start").onclick = quickStart; lastSig = "empty"; return;
     }
+    Main().classList.remove("center");
     const sig = list.map(i => `${i.name}:${i.status}:${i.status === "running" ? Math.floor(i.uptimeSec / 60) + "/" + i.onlineCount : ""}`).join("|") + "#" + $("#inst-q").value + "#" + $("#inst-sort").value;
     if (sig === lastSig) return; // 数据无实质变化则跳过重绘，消除周期性闪烁与焦点丢失
     lastSig = sig;
@@ -511,8 +542,9 @@ const wiz = { step: 0, core: null, mc: null, build: null, snapshots: false, root
 
 async function renderCreate() {
   wiz.step = 0; wiz.core = null; wiz.mc = null; wiz.build = null; wiz.root = "";
-  Main().innerHTML = eyebrow("CRAFTING") + `<h1>合成新服务器</h1><div class="sub">两种配方</div>
-    <div class="core-grid" style="max-width:720px">
+  Main().classList.add("center"); // 模式选择页稀疏，竖向居中消除留白
+  Main().innerHTML = eyebrow("CRAFTING") + `<h1>合成新服务器</h1><div class="sub">选择一种方式开始</div>
+    <div class="recipe-grid">
       <div class="core-card" id="mode-new"><div><div class="cn">⚒ 全新合成</div><div class="cd">选择核心与版本，从零搭建服务器</div></div></div>
       <div class="core-card" id="mode-import"><div><div class="cn">📦 导入整合包</div><div class="cd">Modrinth (.mrpack) / CurseForge (zip) 整合包一键开服</div></div></div>
     </div>`;
@@ -522,6 +554,7 @@ async function renderCreate() {
 
 /* ---------- 视图：整合包导入 ---------- */
 async function drawImport() {
+  Main().classList.remove("center");
   const app = await api("/api/app").catch(() => ({ ramMb: 8192, availRamMb: 4096, config: {} }));
   const maxMem = Math.max(2048, app.ramMb - 2048);
   const defMem = Math.min(6144, maxMem);
@@ -594,6 +627,7 @@ function wizardShell(inner) {
 }
 
 async function drawWizard() {
+  Main().classList.remove("center"); // 向导内容稠密，取消模式选择页的竖向居中
   if (wiz.step === 0) {
     wizardShell(`<div id="core-grid">加载中…</div>
       <div class="wizard-foot"><button class="btn" id="wback0">← 返回</button><button class="btn primary" id="wnext" disabled>下一步 →</button></div>`);
@@ -898,7 +932,7 @@ async function renderDetail(name, tab = "console") {
     $("#con-fs-dn").onclick = () => { conFS = Math.max(9, conFS - 1); localStorage.setItem("amh_con_fs", conFS); applyFS(); };
     $("#con-fs-up").onclick = () => { conFS = Math.min(22, conFS + 1); localStorage.setItem("amh_con_fs", conFS); applyFS(); };
     const conText = () => [...con.childNodes].map(d => d.textContent).join("\n");
-    $("#con-copy").onclick = () => navigator.clipboard.writeText(conText()).then(() => toast("已复制控制台内容")).catch(() => toast("复制失败", true));
+    $("#con-copy").onclick = () => copy(conText(), "已复制控制台内容");
     $("#con-export").onclick = () => {
       const a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([conText()], { type: "text/plain;charset=utf-8" }));
@@ -1042,7 +1076,7 @@ async function renderDetail(name, tab = "console") {
           <div class="badges">${items.map(p =>
             `<span class="badge">${esc(p.name)}<a class="p-x" data-act="${removeAction}" data-p="${esc(p.name)}" title="移除">✕</a></span>`).join("") || `<span class="sub">空</span>`}</div>
         </div>`;
-      body.innerHTML = `
+      body.innerHTML = `<div class="players-grid">
         <div class="p-sec">
           <div class="p-sec-head"><b>在线玩家</b>（${pl.online.length}）<button class="btn sm" id="pl-refresh">🔄 刷新</button></div>
           <div class="badges">${pl.online.map(n => `<span class="badge core">${esc(n)}
@@ -1051,7 +1085,8 @@ async function renderDetail(name, tab = "console") {
         </div>
         ${section("白名单", pl.whitelist, "whitelist-add", "whitelist-remove", "需在常用设置开启 white-list 才生效")}
         ${section("管理员 OP", pl.ops, "op", "deop", "")}
-        ${section("封禁名单", pl.banned, "ban", "pardon", "")}`;
+        ${section("封禁名单", pl.banned, "ban", "pardon", "")}
+      </div>`;
       $("#pl-refresh").onclick = draw;
       body.querySelectorAll("input[data-add]").forEach(inp => inp.onkeydown = e => {
         if (e.key === "Enter" && inp.value.trim()) { act(inp.dataset.add, inp.value.trim()); inp.value = ""; }
@@ -1076,7 +1111,7 @@ async function renderDetail(name, tab = "console") {
           <button class="btn sm" id="bk-keep-save">保存</button>
         </div>
         <div class="hint" style="margin-bottom:14px">运行中自动热备（save-off → 压缩 → save-on）；备份数超过保留份数时自动滚动删除最旧的；删除实例不影响已有备份。保留份数为全局设置，对所有实例生效。</div>
-        <table class="raw">${list.map(b => `
+        <table class="raw">${(list || []).map(b => `
           <tr><td>${esc(b.file)}</td><td>${b.sizeMb.toFixed(1)} MB · ${esc(b.time)}</td>
           <td style="text-align:right;white-space:nowrap">
             <button class="btn sm" data-restore="${esc(b.file)}">⏪ 还原</button>
@@ -1172,7 +1207,7 @@ async function renderDetail(name, tab = "console") {
       $("#res-list").textContent = "搜索中…";
       try {
         const r = await api(`/api/instances/${encodeURIComponent(name)}/resources/search?q=${encodeURIComponent($("#res-q").value.trim())}`);
-        $("#res-list").innerHTML = r.hits.map(h => `
+        $("#res-list").innerHTML = (r.hits || []).map(h => `
           <div class="java-row" style="max-width:880px">
             ${h.icon_url ? `<img src="${esc(h.icon_url)}" width="34" height="34" style="border-radius:7px;flex:none" onerror="this.remove()">` : `<span style="font-size:22px">📦</span>`}
             <div style="flex:1;min-width:0"><b>${esc(h.title)}</b>
@@ -1427,7 +1462,7 @@ async function renderTunnels() {
     if (logOpen) return; // 日志展开时暂停列表刷新，避免打断 SSE 显示
     let list;
     try { list = await api("/api/tunnels"); } catch (e) { $("#tun-list").innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
-    if (!list.length) { $("#tun-list").innerHTML = `<div class="empty" style="padding:34px 0">还没有隧道 —— 在下方添加一条，开服后一键映射到公网</div>`; return; }
+    if (!list.length) { $("#tun-list").innerHTML = `<div class="empty"><div class="big">🧭</div>还没有隧道<br>在下方添加一条，开服后一键把本地服务器映射到公网</div>`; return; }
     $("#tun-list").innerHTML = list.map(t => `
       <div class="java-row" style="max-width:980px">
         <span class="dot ${t.running ? "running" : ""}"></span>
@@ -1445,7 +1480,7 @@ async function renderTunnels() {
       </div>
       <div class="task-log" id="tlog-${t.id}" style="display:none;height:150px;max-width:980px;margin:-2px 0 8px"></div>`).join("");
     $("#tun-list").querySelectorAll("[data-copy]").forEach(b => b.onclick = () => {
-      navigator.clipboard.writeText(b.dataset.copy).then(() => toast("已复制公网地址：" + b.dataset.copy));
+      copy(b.dataset.copy, "已复制公网地址：" + b.dataset.copy);
     });
     $("#tun-list").querySelectorAll("[data-tstart]").forEach(b => b.onclick = async () => {
       b.disabled = true;
@@ -1518,12 +1553,12 @@ async function renderSettings(section) {
   if (!SETTINGS_SECTIONS.some(s => s.id === section)) section = "download";
   let info;
   try { info = await api("/api/app"); } catch (e) { Main().innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
-  Main().innerHTML = eyebrow("OPTIONS") + `<h1>全局设置</h1>
+  Main().innerHTML = `<div class="settings-page">` + eyebrow("OPTIONS") + `<h1>全局设置</h1>
     <div class="settings-layout">
       <nav class="settings-nav">${SETTINGS_SECTIONS.map(s => `
         <a class="set-nav ${s.id === section ? "cur" : ""}" href="#/settings/${s.id}"><span class="sn-ico">${s.icon}</span>${s.label}</a>`).join("")}</nav>
       <div class="settings-body" id="set-body"><div class="sub">加载中…</div></div>
-    </div>`;
+    </div></div>`;
   const body = $("#set-body");
   ({ download: setDownload, storage: setStorage, java: setJava, remote: setRemote, notify: setNotify, startup: setStartup, about: setAbout }[section])(body, info);
 }
@@ -1672,8 +1707,8 @@ function setRemote(body, info) {
       <input type="password" id="lan-pw" placeholder="${info.lanSet ? "已设置密码（留空则不修改）" : "设置访问密码（必填）"}" style="max-width:260px">
       <button class="btn" id="lan-save">保存</button>
     </div>
-    ${info.config.listenLan ? `<div class="hint">手机访问：${(info.ips || []).map(ip => `<b style="color:var(--accent-text)">http://${ip}:${lanPort}</b>`).join(" 或 ")}</div>` : ""}
-    <div class="hint">若无法访问，请以管理员运行一次放行防火墙：<code>netsh advfirewall firewall add rule name="AutoMCHUB" dir=in action=allow protocol=TCP localport=${lanPort}</code></div>`;
+    ${info.config.listenLan ? `<div class="hint">手机访问：${(info.ips || []).map(ip => `<b style="color:var(--accent-text)">http://${esc(ip)}:${esc(String(lanPort))}</b>`).join(" 或 ")}</div>` : ""}
+    <div class="hint">若无法访问，请以管理员运行一次放行防火墙：<code>netsh advfirewall firewall add rule name="AutoMCHUB" dir=in action=allow protocol=TCP localport=${esc(String(lanPort))}</code></div>`;
   $("#lan-save").onclick = async () => {
     const b = { listenLan: $("#lan-on").checked };
     if ($("#lan-pw").value) b.lanPassword = $("#lan-pw").value;

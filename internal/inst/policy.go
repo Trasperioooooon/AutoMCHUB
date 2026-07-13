@@ -48,16 +48,18 @@ func (m *Manager) UpdatePolicies(name string, p Policies) error {
 // 停掉的服务器又拉起来。
 func (m *Manager) crashRestart(i *Instance, gen int64) {
 	i.procMu.Lock()
-	stale := i.runGen != gen
+	if i.runGen != gen {
+		// 期间已有新的运行发生（用户手动启停/上次退避重启），本次作废：
+		// 在自增计数与清零之前就返回，避免污染当前运行的连崩计数与清零时基。
+		i.procMu.Unlock()
+		return
+	}
 	if time.Since(i.startedAt) > 10*time.Minute {
 		i.crashCount = 0
 	}
 	i.crashCount++
 	n := i.crashCount
 	i.procMu.Unlock()
-	if stale {
-		return // 期间已有新的运行发生，放弃本次重启
-	}
 	if n > 3 {
 		i.Console.Append("[AutoMCHUB] ⚠ 连续崩溃 3 次，已停止自动重启。请检查上方日志排查原因。")
 		return

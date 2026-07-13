@@ -17,8 +17,15 @@ jobs:
           go-version: "1.25"
       - name: Build
         run: go build -trimpath -ldflags="-s -w -H windowsgui" -o AutoMCHUB.exe .
+      - name: Checksums
+        shell: pwsh
+        run: |
+          $h = (Get-FileHash AutoMCHUB.exe -Algorithm SHA256).Hash.ToLower()
+          "$h *AutoMCHUB.exe" | Out-File -Encoding ascii SHA256SUMS
       - name: Release
         uses: softprops/action-gh-release@v3
         with:
-          files: AutoMCHUB.exe
+          files: |
+            AutoMCHUB.exe
+            SHA256SUMS
           generate_release_notes: true

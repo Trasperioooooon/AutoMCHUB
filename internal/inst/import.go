@@ -30,6 +30,9 @@ func (m *Manager) ImportModpackAsync(pack *modpack.Pack, req CreateReq, cfKey st
 	t, ctx := m.Tasks.New(fmt.Sprintf("导入整合包 %s（%s %s）", title, req.Core, req.MC), steps)
 	go func() {
 		defer m.releaseCreating(req.Name)
+		if pack.ZipPath != "" {
+			defer os.Remove(pack.ZipPath) // 导入结束（成功/失败）后删除缓存 zip 副本，避免每次导入累积 100-500MB
+		}
 		if err := m.runImport(ctx, t, pack, req, dir, cfKey); err != nil {
 			t.Fail(err)
 			_ = m.Delete(req.Name, false) // 从列表移除（可能已注册）
@@ -83,9 +86,13 @@ func (m *Manager) runImport(ctx context.Context, t *tasks.Task, pack *modpack.Pa
 	var done atomic.Int64
 	sem := make(chan struct{}, 6)
 	var wg sync.WaitGroup
-	var firstErr atomic.Value
+	// 首个错误用互斥保护而非 atomic.Value：并发存入异构 error 具体类型会令 atomic.Value panic（连带整个进程）
+	var errMu sync.Mutex
+	var firstErr error
+	setErr := func(e error) { errMu.Lock(); if firstErr == nil { firstErr = e }; errMu.Unlock() }
+	getErr := func() error { errMu.Lock(); defer errMu.Unlock(); return firstErr }
 	for _, f := range files {
-		if firstErr.Load() != nil {
+		if getErr() != nil {
 			break
 		}
 		wg.Add(1)
@@ -95,15 +102,15 @@ func (m *Manager) runImport(ctx context.Context, t *tasks.Task, pack *modpack.Pa
 			defer func() { <-sem }()
 			dest := filepath.Join(dir, filepath.FromSlash(f.Path))
 			if err := dl.Fetch(ctx, dl.Request{URLs: f.URLs, Dest: dest, SHA1: f.SHA1}, nil); err != nil {
-				firstErr.CompareAndSwap(nil, fmt.Errorf("下载 %s 失败: %w", f.Path, err))
+				setErr(fmt.Errorf("下载 %s 失败: %w", f.Path, err))
 				return
 			}
 			prog(done.Add(f.Size), total)
 		}(f)
 	}
 	wg.Wait()
-	if e := firstErr.Load(); e != nil {
-		return e.(error)
+	if e := getErr(); e != nil {
+		return e
 	}
 	t.Logf("整合包文件下载完成（%d 个）", len(files))
 
