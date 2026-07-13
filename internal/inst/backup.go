@@ -14,8 +14,6 @@ import (
 	"automchub/internal/events"
 )
 
-const backupKeep = 10 // 每实例保留的备份数量
-
 type BackupInfo struct {
 	File   string  `json:"file"`
 	SizeMB float64 `json:"sizeMb"`
@@ -158,7 +156,7 @@ func (m *Manager) pruneBackups(name string) {
 	if err != nil {
 		return
 	}
-	for i := backupKeep; i < len(list); i++ {
+	for i := app.BackupKeep(); i < len(list); i++ {
 		// 自动清理最旧的（保留手动标签“还原前自动”同样计入总数）
 		_ = os.Remove(filepath.Join(backupDirOf(name), list[i].File))
 	}

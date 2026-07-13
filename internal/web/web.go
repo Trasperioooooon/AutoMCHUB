@@ -65,8 +65,10 @@ func New(mgr *inst.Manager, tun *tunnel.Manager, port int) http.Handler {
 	sub, _ := fs.Sub(uiFS, "ui")
 	fileServer := http.FileServer(http.FS(sub))
 	mux.Handle("GET /", noCache(fileServer))
+	mux.HandleFunc("GET /bg/{name}", s.handleBGImage) // 用户壁纸（程序旁 bg/ 目录），免 token 供 CSS url() 引用
 
 	mux.HandleFunc("GET /api/app", s.handleApp)
+	mux.HandleFunc("GET /api/bg", s.handleBGList)
 	mux.HandleFunc("POST /api/pickdir", s.handlePickDir)
 	mux.HandleFunc("POST /api/openpath", s.handleOpenPath)
 	mux.HandleFunc("POST /api/login", s.handleLogin)
@@ -307,6 +309,58 @@ func localIPs() []string {
 	return out
 }
 
+// ---------- 壁纸个性化（程序旁 bg/ 目录） ----------
+
+var bgExt = map[string]string{
+	".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+	".webp": "image/webp", ".gif": "image/gif", ".avif": "image/avif", ".bmp": "image/bmp",
+}
+
+func bgDir() string { return filepath.Join(app.Base, "bg") }
+
+// handleBGList 列出 bg/ 目录内的图片文件名（前端随机取一张作背景）。
+func (s *Server) handleBGList(w http.ResponseWriter, r *http.Request) {
+	var imgs []string
+	if ents, err := os.ReadDir(bgDir()); err == nil {
+		for _, e := range ents {
+			if e.IsDir() {
+				continue
+			}
+			if _, ok := bgExt[strings.ToLower(filepath.Ext(e.Name()))]; ok {
+				imgs = append(imgs, e.Name())
+			}
+		}
+	}
+	if imgs == nil {
+		imgs = []string{}
+	}
+	writeJSON(w, map[string]any{"images": imgs})
+}
+
+// handleBGImage 提供 bg/ 目录内的单张图片（filepath.Base 去除路径成分防穿越）。
+func (s *Server) handleBGImage(w http.ResponseWriter, r *http.Request) {
+	name := filepath.Base(r.PathValue("name"))
+	ct, ok := bgExt[strings.ToLower(filepath.Ext(name))]
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := os.Open(filepath.Join(bgDir(), name))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil || st.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Cache-Control", "max-age=3600")
+	http.ServeContent(w, r, name, st.ModTime(), f)
+}
+
 func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, "ok")
 	if OnShutdown != nil {
@@ -326,6 +380,8 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		CheckUpdateOnStart *bool   `json:"checkUpdateOnStart"`
 		ServersDir         *string `json:"serversDir"`
 		BackupsDir         *string `json:"backupsDir"`
+		BackupKeep         *int    `json:"backupKeep"`
+		Onboarded          *bool   `json:"onboarded"`
 		ListenLAN          *bool   `json:"listenLan"`
 		LanPassword        *string `json:"lanPassword"` // 明文仅在本次请求中出现，存储为 SHA-256
 	}
@@ -373,6 +429,18 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		c.BackupsDir = d
+	}
+	if body.BackupKeep != nil {
+		k := *body.BackupKeep
+		if k < 1 {
+			k = 1
+		} else if k > 1000 {
+			k = 1000
+		}
+		c.BackupKeep = k
+	}
+	if body.Onboarded != nil {
+		c.Onboarded = *body.Onboarded
 	}
 	if body.LanPassword != nil && *body.LanPassword != "" {
 		sum := sha256.Sum256([]byte(*body.LanPassword))

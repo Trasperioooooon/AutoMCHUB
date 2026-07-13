@@ -34,6 +34,7 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, .35);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, .3);
   --term-bg: #101412;        /* 终端（双主题恒深） */
+  --bg-veil: rgba(18, 23, 21, .88); /* 壁纸铺底蒙版：仅露约 12% 图，保证文字对比度 */
   --mono: "Cascadia Mono", Consolas, monospace;
   --brand: "Cascadia Code", "Cascadia Mono", Consolas, monospace;
 }
@@ -64,6 +65,7 @@
   --hotbar-fade: rgba(231, 226, 214, .82);
   --shadow-sm: 0 1px 2px rgba(60, 50, 28, .08);
   --shadow-md: 0 8px 24px rgba(60, 50, 28, .11);
+  --bg-veil: rgba(239, 236, 226, .86);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -76,6 +78,14 @@ body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow: hidden;
+}
+/* 用户壁纸：蒙版渐变叠在图上（固定不随内容滚动）；卡片自带实底，文字始终落在实色面上 */
+body.has-bg {
+  background-image: linear-gradient(var(--bg-veil), var(--bg-veil)), var(--bg-image);
+  background-size: cover;
+  background-position: center center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
 }
 #app { position: relative; display: flex; flex-direction: column; height: 100vh; }
 .px { font-family: var(--brand); }
@@ -419,8 +429,21 @@ input[type=file]::file-selector-button {
 .console .lv-warn { color: #d9b23f; }
 .console .lv-err { color: #ff8574; }
 .console-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
-.console-input { display: flex; gap: 8px; margin-top: 10px; }
+.console-input { display: flex; gap: 8px; margin-top: 10px; position: relative; }
 .console-input input { flex: 1; font-family: var(--mono); }
+/* 命令补全下拉（浮在输入框上方） */
+.cmd-suggest {
+  display: none; position: absolute; bottom: calc(100% + 4px); left: 0;
+  min-width: 200px; max-width: 340px; max-height: 220px; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: 8px; box-shadow: var(--shadow-md); padding: 4px; z-index: 30;
+}
+.cs-item {
+  padding: 5px 10px; border-radius: 5px; cursor: pointer; font-family: var(--mono);
+  font-size: 12.5px; color: var(--text); white-space: nowrap;
+}
+.cs-item:hover { background: var(--sunken); }
+.cs-item.sel { background: var(--accent-solid); color: #fff; }
 
 .props-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 11px 24px; max-width: 1050px; }
 .prop-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 15px; }
@@ -462,6 +485,26 @@ table.raw input { padding: 5px 8px; font-size: 13px; }
 .modal h3 { font-size: 16px; margin-bottom: 10px; }
 .modal .m-body { color: var(--muted); font-size: 13px; margin-bottom: 18px; line-height: 1.7; }
 .modal .m-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+/* 首次运行引导卡 */
+.modal.onboard { width: 500px; }
+.ob-sec { margin-top: 16px; }
+.ob-label { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 8px; letter-spacing: .3px; }
+.ob-radio { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; cursor: pointer; font-size: 13px; color: var(--text); }
+.ob-radio:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.ob-radio input { accent-color: var(--accent-solid); }
+.ob-path { font-family: var(--mono); font-size: 12.5px; color: var(--text); background: var(--sunken); border: 1px solid var(--border); border-radius: 7px; padding: 8px 11px; word-break: break-all; }
+
+/* 任务完成页告警卡（CF 未解析模组等） */
+.warn-card {
+  margin: 14px 0; padding: 14px 16px; border-radius: 10px;
+  background: color-mix(in srgb, var(--gold) 14%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--gold) 50%, var(--border-strong));
+}
+.wc-title { font-weight: 700; font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.wc-note { font-size: 12.5px; color: var(--muted); line-height: 1.7; margin-bottom: 8px; }
+.wc-list { margin: 0; padding-left: 20px; font-size: 12.5px; line-height: 1.9; }
+.wc-list a { color: var(--diamond); word-break: break-all; }
 
 /* ---------- MOTD / Java 行 / 玩家区 ---------- */
 .motd-palette { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 8px; }

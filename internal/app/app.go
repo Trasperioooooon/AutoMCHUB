@@ -34,7 +34,12 @@ type Config struct {
 	ServersDir string   `json:"serversDir,omitempty"` // 自定义实例存放根目录（空=内置 servers/），仅对新建生效
 	BackupsDir string   `json:"backupsDir,omitempty"` // 自定义备份根目录（空=内置 backups/）
 	Roots      []string `json:"roots,omitempty"`      // 曾放置实例的其它根目录（多根扫描用）
+	BackupKeep int      `json:"backupKeep,omitempty"` // 每实例保留的备份份数（0=默认 10）
+	Onboarded  bool     `json:"onboarded,omitempty"`  // 首次运行引导卡是否已完成
 }
+
+// DefaultBackupKeep 未配置时每实例保留的备份份数。
+const DefaultBackupKeep = 10
 
 var (
 	cfgMu sync.RWMutex
@@ -109,6 +114,18 @@ func ServersRoot() string {
 		return filepath.Clean(d)
 	}
 	return ServersDir
+}
+
+// BackupKeep 返回每实例保留的备份份数（配置优先，缺省 DefaultBackupKeep，范围 1~1000）。
+func BackupKeep() int {
+	k := GetConfig().BackupKeep
+	if k <= 0 {
+		return DefaultBackupKeep
+	}
+	if k > 1000 {
+		return 1000
+	}
+	return k
 }
 
 // BackupsRoot 返回备份根目录（配置优先，否则程序内置 backups/）。

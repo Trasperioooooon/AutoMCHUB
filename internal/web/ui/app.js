@@ -750,6 +750,12 @@ async function renderTaskPage(taskId) {
       ${t.label ? `<div class="progress-wrap"><div class="progress-bar"><div style="width:${pct}%"></div></div>
         <div class="progress-text">${esc(t.label)} · ${fmtBytes(t.done)}${t.total > 0 ? " / " + fmtBytes(t.total) : ""}</div></div>` : ""}
       ${t.error ? `<div class="err-box"><b>创建失败：</b>${esc(t.error)}<br><br>可返回重试（已下载的文件有缓存，重试很快）。</div>` : ""}
+      ${(t.warnings || []).map(w => `<div class="warn-card">
+        <div class="wc-title">⚠ ${esc(w.title)}</div>
+        ${w.note ? `<div class="wc-note">${esc(w.note)}</div>` : ""}
+        ${(w.items || []).length ? `<ul class="wc-list">${w.items.map(it =>
+          `<li>${it.url ? `<a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.name)}</a>` : esc(it.name)}</li>`).join("")}</ul>` : ""}
+      </div>`).join("")}
       <div class="task-log" id="task-log">${t.log.map(esc).join("\n")}</div>
       <div class="save-bar">
         ${t.ended && !t.error ? `<a class="btn primary" href="#/inst/${encodeURIComponent(t.result)}">✔ 完成，进入控制台</a>` : ""}
@@ -837,11 +843,19 @@ async function renderDetail(name, tab = "console") {
       </div>
       <div class="console" id="console"></div>
       <div class="console-input">
-        <input type="text" id="cmd-in" placeholder="输入服务器命令（回车发送，↑↓ 翻历史），如 op 玩家名 / say 大家好">
+        <div class="cmd-suggest" id="cmd-suggest"></div>
+        <input type="text" id="cmd-in" autocomplete="off" placeholder="输入服务器命令（回车发送，Tab 补全，↑↓ 翻历史），如 op 玩家名 / say 大家好">
         <button class="btn" id="cmd-send">发送</button>
       </div>`;
     const con = $("#console");
     const filterEl = $("#con-filter");
+    // 命令补全用：在线玩家名（进出游戏时刷新）
+    let onlinePlayers = [];
+    const refreshPlayers = () => api(`/api/instances/${encodeURIComponent(name)}/players`)
+      .then(pl => { onlinePlayers = pl.online || []; }).catch(() => {});
+    let prTimer = null;
+    const schedulePlayerRefresh = () => { clearTimeout(prTimer); prTimer = setTimeout(refreshPlayers, 600); };
+    refreshPlayers();
     // 字号（localStorage 记忆）+ 复制 / 导出
     let conFS = +(localStorage.getItem("amh_con_fs") || 12.5);
     const applyFS = () => { con.style.fontSize = conFS + "px"; };
@@ -873,6 +887,7 @@ async function renderDetail(name, tab = "console") {
       con.appendChild(d);
       while (con.childNodes.length > 3000) con.removeChild(con.firstChild);
       if ($("#con-scroll").checked) con.scrollTop = con.scrollHeight;
+      if (/ (joined|left) the game/.test(line)) schedulePlayerRefresh();
     };
     filterEl.oninput = () => {
       const q = filterEl.value.trim().toLowerCase();
@@ -895,15 +910,74 @@ async function renderDetail(name, tab = "console") {
       const v = $("#cmd-in").value.trim();
       if (!v) return;
       $("#cmd-in").value = "";
+      closeSugg();
       if (hist[0] !== v) { hist.unshift(v); hist = hist.slice(0, 50); localStorage.setItem(histKey, JSON.stringify(hist)); }
       histIdx = -1;
       try { await api(`/api/instances/${encodeURIComponent(name)}/command`, { method: "POST", body: { cmd: v } }); }
       catch (e) { toast(e.message, true); }
     };
     $("#cmd-send").onclick = send;
+
+    /* ---- 命令补全（常用命令 + 在线玩家名，Tab / 点击补全） ---- */
+    const COMMON_CMDS = [
+      "say ", "tell ", "op ", "deop ", "kick ", "ban ", "ban-ip ", "pardon ", "tp ", "give ",
+      "gamemode ", "defaultgamemode ", "difficulty ", "time set day", "time set night",
+      "weather clear", "weather rain", "whitelist ", "gamerule ", "kill ", "xp ", "effect ",
+      "title ", "setworldspawn", "list", "save-all", "save-off", "save-on", "seed", "reload", "stop",
+    ];
+    const PLAYER_CMDS = new Set(["op", "deop", "kick", "ban", "ban-ip", "pardon", "tp", "kill", "give", "gamemode", "xp", "effect", "tell", "title"]);
+    const WL_SUB = ["add", "remove", "on", "off", "list", "reload"];
+    const suggEl = $("#cmd-suggest");
+    let sugg = [], suggIdx = -1;
+    const closeSugg = () => { sugg = []; suggIdx = -1; suggEl.style.display = "none"; suggEl.innerHTML = ""; };
+    const computeSugg = val => {
+      if (!val) return [];
+      const words = val.split(/\s+/).filter(Boolean);
+      const trailingSpace = /\s$/.test(val);
+      const first = (words[0] || "").toLowerCase();
+      const lastSpace = val.lastIndexOf(" ");
+      const head = val.slice(0, lastSpace + 1);
+      const token = val.slice(lastSpace + 1).toLowerCase();
+      const players = t => onlinePlayers.filter(n => n.toLowerCase().startsWith(t)).slice(0, 8).map(n => ({ label: n, insert: head + n }));
+      if (words.length <= 1 && !trailingSpace) {
+        const p = val.toLowerCase();
+        return COMMON_CMDS.filter(c => c.toLowerCase().startsWith(p) && c.trim().toLowerCase() !== p)
+          .slice(0, 8).map(c => ({ label: c.trim(), insert: c }));
+      }
+      if (first === "whitelist") {
+        if (words.length === 1 || (words.length === 2 && !trailingSpace)) {
+          return WL_SUB.filter(s => s.startsWith(token)).map(s => ({ label: s, insert: head + s + " " }));
+        }
+        if (words[1] === "add" || words[1] === "remove") return players(token);
+        return [];
+      }
+      if (PLAYER_CMDS.has(first)) return players(token);
+      return [];
+    };
+    const renderSugg = () => {
+      if (!sugg.length) { closeSugg(); return; }
+      suggEl.innerHTML = sugg.map((s, i) => `<div class="cs-item${i === suggIdx ? " sel" : ""}" data-i="${i}">${esc(s.label)}</div>`).join("");
+      suggEl.style.display = "block";
+      suggEl.querySelectorAll(".cs-item").forEach(el => { el.onmousedown = ev => { ev.preventDefault(); applySugg(+el.dataset.i); }; });
+    };
+    const applySugg = i => {
+      const s = sugg[i]; if (!s) return;
+      const inp = $("#cmd-in");
+      inp.value = s.insert; inp.focus();
+      updateSugg();
+    };
+    const updateSugg = () => { sugg = computeSugg($("#cmd-in").value); suggIdx = -1; renderSugg(); };
+    $("#cmd-in").oninput = updateSugg;
+    $("#cmd-in").onblur = () => setTimeout(closeSugg, 120);
     $("#cmd-in").onkeydown = e => {
-      if (e.key === "Enter") send();
-      else if (e.key === "ArrowUp") {
+      const open = suggEl.style.display === "block" && sugg.length;
+      if (open && e.key === "Tab") { e.preventDefault(); applySugg(suggIdx < 0 ? 0 : suggIdx); return; }
+      if (open && e.key === "ArrowDown") { e.preventDefault(); suggIdx = (suggIdx + 1) % sugg.length; renderSugg(); return; }
+      if (open && e.key === "ArrowUp") { e.preventDefault(); suggIdx = (suggIdx - 1 + sugg.length) % sugg.length; renderSugg(); return; }
+      if (open && e.key === "Escape") { e.preventDefault(); closeSugg(); return; }
+      if (open && e.key === "Enter" && suggIdx >= 0) { e.preventDefault(); applySugg(suggIdx); return; }
+      if (e.key === "Enter") { send(); return; }
+      if (e.key === "ArrowUp") {
         e.preventDefault();
         if (histIdx < hist.length - 1) { if (histIdx === -1) draft = $("#cmd-in").value; histIdx++; $("#cmd-in").value = hist[histIdx]; }
       } else if (e.key === "ArrowDown") {
@@ -952,16 +1026,21 @@ async function renderDetail(name, tab = "console") {
     await draw();
 
   } else if (tab === "backups") {
+    const appInfo = await api("/api/app").catch(() => ({ config: {} }));
+    let keep = (appInfo.config && appInfo.config.backupKeep) || 10;
     const draw = async () => {
       let list;
       try { list = await api(`/api/instances/${encodeURIComponent(name)}/backups`); }
       catch (e) { body.innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
       body.innerHTML = `
-        <div class="row" style="margin-bottom:14px;flex-wrap:wrap">
+        <div class="row" style="margin-bottom:10px;flex-wrap:wrap">
           <input type="text" id="bk-label" placeholder="备份标签（可选，如：打龙前）" style="max-width:240px">
           <button class="btn primary" id="bk-create">📸 立即备份世界</button>
-          <span class="hint">运行中自动热备（save-off → 压缩 → save-on）· 每实例保留最近 10 份 · 删除实例不影响已有备份</span>
+          <span class="grow"></span>
+          <label class="hint" style="display:flex;align-items:center;gap:6px;margin:0">保留最近 <input type="number" id="bk-keep" min="1" max="1000" value="${keep}" style="width:64px"> 份</label>
+          <button class="btn sm" id="bk-keep-save">保存</button>
         </div>
+        <div class="hint" style="margin-bottom:14px">运行中自动热备（save-off → 压缩 → save-on）；备份数超过保留份数时自动滚动删除最旧的；删除实例不影响已有备份。保留份数为全局设置，对所有实例生效。</div>
         <table class="raw">${list.map(b => `
           <tr><td>${esc(b.file)}</td><td>${b.sizeMb.toFixed(1)} MB · ${esc(b.time)}</td>
           <td style="text-align:right;white-space:nowrap">
@@ -975,6 +1054,11 @@ async function renderDetail(name, tab = "console") {
           toast(`备份完成：${r.file}`);
         } catch (e) { toast(e.message, true); }
         draw();
+      };
+      $("#bk-keep-save").onclick = async () => {
+        const n = Math.max(1, Math.min(1000, Math.round(+$("#bk-keep").value) || 10));
+        try { await api("/api/config", { method: "PUT", body: { backupKeep: n } }); keep = n; toast(`已设置保留最近 ${n} 份（下次备份时生效）`); }
+        catch (e) { toast(e.message, true); }
       };
       body.querySelectorAll("[data-restore]").forEach(b => b.onclick = async () => {
         const r = await confirmModal({
@@ -1607,10 +1691,50 @@ function setAbout(body, info) {
   };
 }
 
+/* 首次运行引导卡（选下载源 + 存放位置说明；写 config.onboarded 后不再出现） */
+function showOnboarding(info) {
+  const root = $("#modal-root");
+  const SRC = { auto: "自动（推荐）— 国内镜像优先，失败自动回退官方源", mirror: "镜像优先 — 国内下载更快", official: "仅官方源 — 网络直连国外" };
+  const cur = (info.config && info.config.source) || "auto";
+  root.innerHTML = `<div class="modal-mask"><div class="modal onboard">
+    <h3>👋 欢迎使用 AutoMCHUB</h3>
+    <div class="m-body">
+      开始前先确认两项设置，之后都能在「设置」里随时更改：
+      <div class="ob-sec"><div class="ob-label">下载源</div>
+        <div id="ob-src">${Object.entries(SRC).map(([v, label]) =>
+    `<label class="ob-radio"><input type="radio" name="ob-src" value="${v}" ${v === cur ? "checked" : ""}><span>${esc(label)}</span></label>`).join("")}</div>
+      </div>
+      <div class="ob-sec"><div class="ob-label">你的服务器将存放在</div>
+        <div class="ob-path">${esc(info.serversRoot || "程序目录\\servers")}</div>
+        <div class="hint" style="margin-top:6px">每台服务器一个子文件夹。想放到 D 盘等大容量分区，可到「设置 → 存储位置」更改。</div>
+      </div>
+    </div>
+    <div class="m-actions"><button class="btn primary" id="ob-go">开始使用 ⛏</button></div>
+  </div></div>`;
+  root.querySelector("#ob-go").onclick = async () => {
+    const sel = root.querySelector('input[name="ob-src"]:checked');
+    try { await api("/api/config", { method: "PUT", body: { source: sel ? sel.value : cur, onboarded: true } }); }
+    catch (e) { toast(e.message, true); }
+    root.innerHTML = "";
+  };
+}
+
+/* 壁纸个性化：程序旁 bg/ 目录有图则随机取一张作低透明度铺底（双主题各自蒙版） */
+async function applyBackground() {
+  try {
+    const bg = await api("/api/bg");
+    if (!bg.images || !bg.images.length) return;
+    const pick = bg.images[Math.floor(Math.random() * bg.images.length)];
+    document.documentElement.style.setProperty("--bg-image", `url("/bg/${encodeURIComponent(pick)}")`);
+    document.body.classList.add("has-bg");
+  } catch {}
+}
+
 /* ---------- 启动 ---------- */
 (async function boot() {
+  let info;
   try {
-    const info = await api("/api/app");
+    info = await api("/api/app");
     $("#app-ver").textContent = info.version;
     $("#hud-status").textContent = `内存 ${(info.ramMb / 1024).toFixed(0)} GB · 下载源 ${{ auto: "自动", mirror: "镜像", official: "官方" }[info.config.source] || "自动"}`;
     const cores = await api("/api/cores").catch(() => []);
@@ -1620,4 +1744,6 @@ function setAbout(body, info) {
     return;
   }
   navigate();
+  applyBackground();
+  if (!info.config || !info.config.onboarded) showOnboarding(info);
 })();

@@ -59,6 +59,19 @@ func (m *Manager) runImport(ctx context.Context, t *tasks.Task, pack *modpack.Pa
 		if len(unresolved) > 0 {
 			writeUnresolvedReport(dir, unresolved)
 			t.Logf("⚠ %d 个模组无法自动下载（未配 API Key 或作者禁止分发），清单已写入实例目录「未解析模组清单.txt」，需手动放入 mods 目录", len(unresolved))
+			items := make([]tasks.WarnItem, 0, len(unresolved))
+			for _, r := range unresolved {
+				items = append(items, tasks.WarnItem{
+					Name: fmt.Sprintf("CurseForge 项目 #%d（文件 %d）", r.ProjectID, r.FileID),
+					URL:  fmt.Sprintf("https://www.curseforge.com/minecraft/mc-mods/projects/%d", r.ProjectID),
+				})
+			}
+			t.AddWarning(tasks.Warning{
+				Kind:  "cf-unresolved",
+				Title: fmt.Sprintf("%d 个模组需手动补装", len(unresolved)),
+				Note:  "以下模组因作者禁止第三方分发或未配置 CurseForge API Key 而无法自动下载，请从链接手动下载对应文件后放入实例的 mods 目录（清单也已保存到实例目录「未解析模组清单.txt」）。",
+				Items: items,
+			})
 		}
 	}
 	var total int64
