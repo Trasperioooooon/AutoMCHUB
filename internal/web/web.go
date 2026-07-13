@@ -3,6 +3,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -15,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -65,6 +67,8 @@ func New(mgr *inst.Manager, tun *tunnel.Manager, port int) http.Handler {
 	mux.Handle("GET /", noCache(fileServer))
 
 	mux.HandleFunc("GET /api/app", s.handleApp)
+	mux.HandleFunc("POST /api/pickdir", s.handlePickDir)
+	mux.HandleFunc("POST /api/openpath", s.handleOpenPath)
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("POST /api/shutdown", s.handleShutdown)
 	mux.HandleFunc("PUT /api/config", s.handleSetConfig)
@@ -215,12 +219,78 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 		"version":    app.Version,
 		"base":       app.Base,
 		"ramMb":      app.TotalRAMMB(),
-		"availRamMb": app.AvailRAMMB(),
-		"port":       s.port,
-		"config":     cfg,
+		"availRamMb":  app.AvailRAMMB(),
+		"port":        s.port,
+		"serversRoot": app.ServersRoot(),
+		"backupsRoot": app.BackupsRoot(),
+		"config":      cfg,
 		"lanSet":     app.GetConfig().AccessPasswordHash != "",
 		"ips":        localIPs(),
 	})
+}
+
+// isLoopbackReq 判断请求是否来自本机（限制仅本机可弹系统对话框 / 开资源管理器）。
+func isLoopbackReq(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return host == "localhost"
+}
+
+// handlePickDir 弹出系统文件夹选择对话框，返回所选目录（取消则 path 为空）。仅本机可用。
+func (s *Server) handlePickDir(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackReq(r) {
+		writeErr(w, 403, fmt.Errorf("文件夹选择仅支持在本机操作（远程管理时请手动填写路径）"))
+		return
+	}
+	path, err := pickFolder()
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	writeJSON(w, map[string]string{"path": path})
+}
+
+// handleOpenPath 在资源管理器中打开指定目录。仅本机可用。
+func (s *Server) handleOpenPath(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackReq(r) {
+		writeErr(w, 403, fmt.Errorf("打开目录仅支持在本机操作"))
+		return
+	}
+	var body struct {
+		Path string `json:"path"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	p := filepath.Clean(strings.TrimSpace(body.Path))
+	if st, err := os.Stat(p); err != nil || !st.IsDir() {
+		writeErr(w, 400, fmt.Errorf("目录不存在"))
+		return
+	}
+	_ = exec.Command("explorer.exe", p).Start()
+	writeJSON(w, "ok")
+}
+
+// pickFolder 通过 PowerShell 调用系统 FolderBrowserDialog（-STA），返回所选目录。
+func pickFolder() (string, error) {
+	const ps = "Add-Type -AssemblyName System.Windows.Forms | Out-Null; " +
+		"$f = New-Object System.Windows.Forms.FolderBrowserDialog; " +
+		"$f.Description = 'Choose a folder for AutoMCHUB'; $f.ShowNewFolderButton = $true; " +
+		"if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($f.SelectedPath) }"
+	cmd := exec.Command("powershell", "-STA", "-NoProfile", "-NonInteractive", "-Command", ps)
+	cmd.Env = procutil.CleanEnv()
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("打开文件夹对话框失败: %w", err)
+	}
+	return strings.TrimSpace(out.String()), nil
 }
 
 func localIPs() []string {
@@ -254,6 +324,8 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		WebhookURL  *string `json:"webhookUrl"`
 		UpdateRepo         *string `json:"updateRepo"`
 		CheckUpdateOnStart *bool   `json:"checkUpdateOnStart"`
+		ServersDir         *string `json:"serversDir"`
+		BackupsDir         *string `json:"backupsDir"`
 		ListenLAN          *bool   `json:"listenLan"`
 		LanPassword        *string `json:"lanPassword"` // 明文仅在本次请求中出现，存储为 SHA-256
 	}
@@ -281,6 +353,26 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.CheckUpdateOnStart != nil {
 		c.CheckUpdateOnStart = *body.CheckUpdateOnStart
+	}
+	if body.ServersDir != nil {
+		d := strings.TrimSpace(*body.ServersDir)
+		if d != "" {
+			if err := os.MkdirAll(d, 0o755); err != nil {
+				writeErr(w, 400, fmt.Errorf("存放目录不可用: %w", err))
+				return
+			}
+		}
+		c.ServersDir = d
+	}
+	if body.BackupsDir != nil {
+		d := strings.TrimSpace(*body.BackupsDir)
+		if d != "" {
+			if err := os.MkdirAll(d, 0o755); err != nil {
+				writeErr(w, 400, fmt.Errorf("备份目录不可用: %w", err))
+				return
+			}
+		}
+		c.BackupsDir = d
 	}
 	if body.LanPassword != nil && *body.LanPassword != "" {
 		sum := sha256.Sum256([]byte(*body.LanPassword))

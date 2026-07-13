@@ -398,10 +398,10 @@ async function renderInstances() {
 }
 
 /* ---------- 视图：新建向导 ---------- */
-const wiz = { step: 0, core: null, mc: null, build: null, snapshots: false };
+const wiz = { step: 0, core: null, mc: null, build: null, snapshots: false, root: "" };
 
 async function renderCreate() {
-  wiz.step = 0; wiz.core = null; wiz.mc = null; wiz.build = null;
+  wiz.step = 0; wiz.core = null; wiz.mc = null; wiz.build = null; wiz.root = "";
   Main().innerHTML = eyebrow("CRAFTING") + `<h1>合成新服务器</h1><div class="sub">两种配方</div>
     <div class="core-grid" style="max-width:720px">
       <div class="core-card" id="mode-new"><div><div class="cn">⚒ 全新合成</div><div class="cd">选择核心与版本，从零搭建服务器</div></div></div>
@@ -561,6 +561,13 @@ async function drawWizard() {
         <label class="field"><span>实例名称</span><input type="text" id="f-name" value="我的${coreName(wiz.core)}服务器" maxlength="40"></label>
         ${isProxy ? "" : `<label class="field"><span>端口（默认 25565）</span><input type="number" id="f-port" value="25565" min="1" max="65535"></label>`}
         <div class="field full" id="mem-mount"></div>
+        <label class="field full"><span>存放位置</span>
+          <div class="row" style="gap:8px">
+            <input type="text" id="f-root" readonly style="flex:1;cursor:default;background:var(--surface-2)">
+            <button type="button" class="btn" id="f-browse">📁 浏览…</button>
+          </div>
+          <div class="hint" id="f-path"></div>
+        </label>
         ${isProxy ? "" : `
         <label class="field full"><span>服务器介绍 MOTD（支持中文与 § 色码）</span><input type="text" id="f-motd" value="AutoMCHUB 开服 · 一起来玩！"></label>
         <div class="field"><label class="switch"><input type="checkbox" id="f-online"><span class="sw"></span>
@@ -580,6 +587,19 @@ async function drawWizard() {
       </div>`);
     $("#wback").onclick = () => { wiz.step = wiz.core === "vanilla" ? 1 : 2; drawWizard(); };
     renderMemoryControl($("#mem-mount"), { sliderId: "f-mem", min: 512, max: maxMem, value: defMem, totalMb: app.ramMb, availMb: app.availRamMb, hint: isProxy ? "代理端很省内存，1GB 通常足够" : "模组服建议 4GB 以上；纯净小队游玩 2~4GB 足够" });
+    // 存放位置：目标路径跟随实例名，可浏览改到其它盘（中文名会自动生成英文目录）
+    const clientSlug = s => { let o = ""; for (const c of (s || "")) { if (/[0-9A-Za-z_-]/.test(c)) o += c; else if (c === " " || c === ".") o += "-"; } o = o.replace(/^[-_]+|[-_]+$/g, ""); return o || "server-（自动）"; };
+    const curRoot = () => wiz.root || app.serversRoot || "程序目录\\servers";
+    const updateRoot = () => {
+      $("#f-root").value = curRoot();
+      $("#f-path").innerHTML = `将创建于：<b>${esc(curRoot())}\\${esc(clientSlug($("#f-name").value.trim()))}</b>${wiz.root ? "" : "（可点「浏览」改到其它盘）"}`;
+    };
+    $("#f-name").oninput = updateRoot;
+    $("#f-browse").onclick = async () => {
+      try { const r = await api("/api/pickdir", { method: "POST" }); if (r.path) { wiz.root = r.path; updateRoot(); toast("已选择：" + r.path); } }
+      catch (e) { toast(e.message, true); }
+    };
+    updateRoot();
     $("#wcreate").onclick = async () => {
       if (!isProxy && !$("#f-eula").checked) { toast("需要勾选同意 Minecraft EULA 才能开服", true); return; }
       $("#wcreate").disabled = true;
@@ -589,6 +609,7 @@ async function drawWizard() {
           body: {
             name: $("#f-name").value.trim(),
             core: wiz.core, mc: wiz.mc, build: wiz.build || "",
+            root: wiz.root || "",
             xmxMb: +$("#f-mem").value,
             port: isProxy ? 25565 : +$("#f-port").value,
             eula: !isProxy,
@@ -1260,17 +1281,52 @@ function setDownload(body, info) {
   };
 }
 
-/* — 存储位置（阶段5 将开放自定义目录；此处先透明化当前根目录） — */
+/* — 存储位置 — */
+function storageRow(title, path, desc, pick) {
+  return `<div class="row-item"><div class="ri-head"><div class="ri-main">
+      <div class="ri-title">${esc(title)}</div><div class="ri-sub">${esc(desc)}</div><div class="ri-key">${esc(path || "")}</div></div>
+    <div class="ri-right">
+      <button class="btn sm" data-open="${esc(path || "")}">📁 打开</button>
+      <button class="btn sm" data-pick="${pick}">更改…</button>
+      <button class="btn sm" data-reset="${pick}" title="恢复默认目录">↺</button>
+    </div></div></div>`;
+}
 function setStorage(body, info) {
-  body.innerHTML = settingsHead("存储位置", "服务器实例、备份与缓存的存放位置。") +
-    `<div class="row-list">
-      <div class="row-item"><div class="ri-head"><div class="ri-main">
-        <div class="ri-title">数据根目录</div>
-        <div class="ri-sub">所有服务器、备份、缓存与配置默认存放于此</div>
-        <div class="ri-key">${esc(info.base)}</div>
-      </div></div></div>
-    </div>
-    <div class="hint" style="margin-top:12px">自定义存放目录（放到大容量分区、每个实例独立选址）将在后续版本开放；当前数据自包含于程序目录，便携可整体迁移。</div>`;
+  const draw = () => {
+    body.innerHTML = settingsHead("存储位置", "服务器实例与备份的存放根目录。更改仅对之后新建的实例 / 备份生效，已有实例不会自动搬家。") +
+      `<div class="row-list">
+        ${storageRow("服务器存放目录", info.serversRoot, "新实例默认创建于此目录下（每个实例一个子文件夹，中文名自动生成英文目录）", "servers")}
+        ${storageRow("备份存放目录", info.backupsRoot, "世界热备份的存放位置", "backups")}
+        <div class="row-item"><div class="ri-head"><div class="ri-main">
+          <div class="ri-title">程序数据目录</div><div class="ri-sub">程序自身、Java 运行时与下载缓存所在（便携，随程序整体迁移）</div><div class="ri-key">${esc(info.base)}</div></div>
+          <div class="ri-right"><button class="btn sm" data-open="${esc(info.base)}">📁 打开</button></div></div></div>
+      </div>
+      <div class="hint" style="margin-top:12px">建议放到大容量分区（如 D 盘）以免占满系统盘；点「更改…」会弹出系统文件夹选择框（仅本机可用，手机远程管理时请在主机操作）。</div>`;
+    body.querySelectorAll("[data-open]").forEach(b => b.onclick = () =>
+      api("/api/openpath", { method: "POST", body: { path: b.dataset.open } }).catch(e => toast(e.message, true)));
+    body.querySelectorAll("[data-pick]").forEach(b => b.onclick = async () => {
+      try {
+        const r = await api("/api/pickdir", { method: "POST" });
+        if (!r.path) return;
+        const key = b.dataset.pick === "servers" ? "serversDir" : "backupsDir";
+        await api("/api/config", { method: "PUT", body: { [key]: r.path } });
+        if (b.dataset.pick === "servers") info.serversRoot = r.path; else info.backupsRoot = r.path;
+        toast("已更新目录（对新建生效）");
+        draw();
+      } catch (e) { toast(e.message, true); }
+    });
+    body.querySelectorAll("[data-reset]").forEach(b => b.onclick = async () => {
+      try {
+        const key = b.dataset.reset === "servers" ? "serversDir" : "backupsDir";
+        await api("/api/config", { method: "PUT", body: { [key]: "" } });
+        const fresh = await api("/api/app");
+        info.serversRoot = fresh.serversRoot; info.backupsRoot = fresh.backupsRoot;
+        toast("已恢复默认目录");
+        draw();
+      } catch (e) { toast(e.message, true); }
+    });
+  };
+  draw();
 }
 
 /* — Java 运行时 — */

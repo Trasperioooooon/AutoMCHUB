@@ -29,6 +29,7 @@ type CreateReq struct {
 	OnlineMode  bool       `json:"onlineMode"`
 	AllowFlight bool       `json:"allowFlight"`
 	MOTD        string     `json:"motd"`
+	Root        string     `json:"root"` // 自定义存放根目录（空=全局默认），仅创建时使用
 }
 
 // createSteps 创建流水线的步骤名（整合包导入在其后追加额外步骤）。
@@ -50,9 +51,11 @@ func (m *Manager) validateCreate(req *CreateReq) (string, error) {
 	if !req.EULA && mcsrc.KindOf(req.Core) != mcsrc.KindProxy {
 		return "", fmt.Errorf("需要同意 Minecraft EULA 才能开服")
 	}
-	// Mohist/Banner 的 javaagent 自举对非 ASCII 路径不兼容（实测中文实例名必崩）
-	if (req.Core == mcsrc.CoreMohist || req.Core == mcsrc.CoreBanner) && !isASCII(req.Name) {
-		return "", fmt.Errorf("Mohist/Banner 核心与中文路径不兼容，请使用纯英文实例名（如 my-server）")
+	m.mu.Lock()
+	_, exists := m.insts[req.Name]
+	m.mu.Unlock()
+	if exists {
+		return "", fmt.Errorf("实例名已存在: %s", req.Name)
 	}
 	if req.Port <= 0 || req.Port > 65535 {
 		req.Port = 25565
@@ -60,17 +63,51 @@ func (m *Manager) validateCreate(req *CreateReq) (string, error) {
 	if req.XmxMB < 512 {
 		req.XmxMB = 2048
 	}
-	dir := filepath.Join(app.ServersDir, req.Name)
-	m.mu.Lock()
-	_, exists := m.insts[req.Name]
-	m.mu.Unlock()
-	if exists {
-		return "", fmt.Errorf("实例名已存在: %s", req.Name)
+	// 目标根目录：请求指定 > 全局默认
+	root := strings.TrimSpace(req.Root)
+	if root == "" {
+		root = app.ServersRoot()
 	}
-	if _, err := os.Stat(dir); err == nil {
-		return "", fmt.Errorf("目录已存在: %s", dir)
+	root = filepath.Clean(root)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return "", fmt.Errorf("存放目录不可用: %w", err)
+	}
+	// 目录名用 slug（与中文显示名解耦）；同名自动追加序号
+	slug := slugify(req.Name)
+	dir := filepath.Join(root, slug)
+	for n := 2; ; n++ {
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			break
+		}
+		if n > 999 {
+			return "", fmt.Errorf("无法为实例分配目录（同名目录过多）")
+		}
+		dir = filepath.Join(root, fmt.Sprintf("%s-%d", slug, n))
+	}
+	// Mohist/Banner 的 javaagent 自举对非 ASCII 路径不兼容——校验最终路径而非实例名，
+	// 因此中文实例名在纯英文路径下也可正常使用。
+	if (req.Core == mcsrc.CoreMohist || req.Core == mcsrc.CoreBanner) && !isASCII(dir) {
+		return "", fmt.Errorf("Mohist/Banner 与非英文路径不兼容，请把存放目录设为纯英文路径（当前将创建于：%s）", dir)
 	}
 	return dir, nil
+}
+
+// slugify 把实例显示名转为 ASCII 安全的目录名；全非 ASCII 时回退带时间戳。
+func slugify(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		switch {
+		case r == '-' || r == '_' || (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z'):
+			b.WriteRune(r)
+		case r == ' ' || r == '.':
+			b.WriteRune('-')
+		}
+	}
+	s := strings.Trim(b.String(), "-_")
+	if s == "" {
+		s = "server-" + time.Now().Format("20060102-150405")
+	}
+	return s
 }
 
 // CreateAsync 校验请求并启动后台创建任务，返回任务 ID。
@@ -289,6 +326,7 @@ func (m *Manager) runCreate(ctx context.Context, t *tasks.Task, req CreateReq, d
 	if err := m.saveInstance(inst); err != nil {
 		return err
 	}
+	app.RememberRoot(filepath.Dir(dir)) // 记录自定义根，重启后仍能扫描到
 	m.mu.Lock()
 	m.insts[req.Name] = inst
 	m.mu.Unlock()

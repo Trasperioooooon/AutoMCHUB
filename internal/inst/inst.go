@@ -4,6 +4,7 @@ package inst
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -82,24 +83,31 @@ type Manager struct {
 
 func NewManager() (*Manager, error) {
 	m := &Manager{insts: map[string]*Instance{}, Tasks: tasks.NewManager()}
-	ents, err := os.ReadDir(app.ServersDir)
-	if err != nil {
-		return nil, err
-	}
-	for _, e := range ents {
-		if !e.IsDir() {
-			continue
-		}
-		dir := filepath.Join(app.ServersDir, e.Name())
-		b, err := os.ReadFile(filepath.Join(dir, "instance.json"))
+	// 多根扫描：内置默认根 + 配置默认根 + 历史自定义根（支持实例散落于不同盘符/目录）
+	for _, root := range app.InstanceRoots() {
+		ents, err := os.ReadDir(root)
 		if err != nil {
-			continue
+			continue // 根目录不存在/不可读则跳过，不再因默认根缺失整体失败
 		}
-		var s Settings
-		if json.Unmarshal(b, &s) != nil || s.Name == "" {
-			continue
+		for _, e := range ents {
+			if !e.IsDir() {
+				continue
+			}
+			dir := filepath.Join(root, e.Name())
+			b, err := os.ReadFile(filepath.Join(dir, "instance.json"))
+			if err != nil {
+				continue
+			}
+			var s Settings
+			if json.Unmarshal(b, &s) != nil || s.Name == "" {
+				continue
+			}
+			if _, dup := m.insts[s.Name]; dup {
+				log.Printf("实例名冲突，已跳过重复目录：%s（%s）", s.Name, dir)
+				continue
+			}
+			m.insts[s.Name] = &Instance{Settings: s, Dir: dir, Console: newConsole()}
 		}
-		m.insts[s.Name] = &Instance{Settings: s, Dir: dir, Console: newConsole()}
 	}
 	m.startScheduler()
 	return m, nil
@@ -144,17 +152,34 @@ func (m *Manager) Delete(name string, files bool) error {
 		return fmt.Errorf("请先停止服务器再删除")
 	}
 	if files {
-		rel, err := filepath.Rel(app.ServersDir, i.Dir)
-		if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
-			return fmt.Errorf("实例目录异常，已拒绝删除: %s", i.Dir)
-		}
-		if err := os.RemoveAll(i.Dir); err != nil {
-			return fmt.Errorf("删除文件失败: %w", err)
+		if err := safeRemoveInstanceDir(i); err != nil {
+			return err
 		}
 	}
 	m.mu.Lock()
 	delete(m.insts, name)
 	m.mu.Unlock()
+	return nil
+}
+
+// safeRemoveInstanceDir 仅当目录内的 instance.json 确属本实例时才整目录删除，
+// 从而支持任意自定义位置（不再依赖是否位于默认 servers 根下）。
+func safeRemoveInstanceDir(i *Instance) error {
+	dir := filepath.Clean(i.Dir)
+	if dir == "" || dir == filepath.Dir(dir) || dir == filepath.Clean(app.Base) {
+		return fmt.Errorf("实例目录异常，已拒绝删除: %s", dir)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "instance.json"))
+	if err != nil {
+		return fmt.Errorf("找不到实例标识文件，已拒绝删除: %s", dir)
+	}
+	var s Settings
+	if json.Unmarshal(b, &s) != nil || s.Name != i.Name {
+		return fmt.Errorf("目录归属校验失败，已拒绝删除: %s", dir)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("删除文件失败: %w", err)
+	}
 	return nil
 }
 

@@ -22,7 +22,7 @@ type BackupInfo struct {
 	Time   string  `json:"time"`
 }
 
-func backupDirOf(name string) string { return filepath.Join(app.BackupsDir, name) }
+func backupDirOf(name string) string { return filepath.Join(app.BackupsRoot(), name) }
 
 // worldDirs 返回实例的世界存档目录（vanilla 单目录 / bukkit 三目录）。
 func (i *Instance) worldDirs() []string {
