@@ -42,9 +42,13 @@ type Config struct {
 // DefaultBackupKeep 未配置时每实例保留的备份份数。
 const DefaultBackupKeep = 10
 
+// DefaultUpdateRepo 内置自动更新源：用户未在「设置 → 更新」另填时使用，
+// 让 GitHub 自动更新开箱即用（仍需用户手动点检查或开启启动时检查，不主动联网）。
+const DefaultUpdateRepo = "Trasperioooooon/AutoMCHUB"
+
 var (
 	cfgMu sync.RWMutex
-	cfg   = Config{Source: "auto"}
+	cfg   = Config{Source: "auto", UpdateRepo: DefaultUpdateRepo}
 )
 
 func Init() error {
@@ -82,6 +86,9 @@ func loadConfig() {
 	}
 	var c Config
 	if json.Unmarshal(b, &c) == nil && c.Source != "" {
+		if c.UpdateRepo == "" {
+			c.UpdateRepo = DefaultUpdateRepo // 老配置未填过更新仓库时补上内置源
+		}
 		cfgMu.Lock()
 		cfg = c
 		cfgMu.Unlock()
