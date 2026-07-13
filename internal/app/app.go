@@ -30,6 +30,7 @@ type Config struct {
 	CheckUpdateOnStart bool   `json:"checkUpdateOnStart,omitempty"` // 启动时后台静默检查更新
 	ListenLAN          bool   `json:"listenLan,omitempty"`          // 允许局域网访问（需设置密码，重启生效）
 	AccessPasswordHash string `json:"accessPasswordHash,omitempty"` // 远程访问密码的 SHA-256
+	MinimizeToTray     bool   `json:"minimizeToTray,omitempty"`     // 关闭窗口时最小化到托盘（服务器不停），默认关
 
 	ServersDir string   `json:"serversDir,omitempty"` // 自定义实例存放根目录（空=内置 servers/），仅对新建生效
 	BackupsDir string   `json:"backupsDir,omitempty"` // 自定义备份根目录（空=内置 backups/）

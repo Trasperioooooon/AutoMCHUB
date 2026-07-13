@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"automchub/internal/app"
+	"automchub/internal/autostart"
 	"automchub/internal/inst"
 	"automchub/internal/java"
 	"automchub/internal/mcsrc"
@@ -227,6 +228,7 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 		"backupsRoot": app.BackupsRoot(),
 		"config":      cfg,
 		"lanSet":     app.GetConfig().AccessPasswordHash != "",
+		"autoStart":  autostart.Enabled(), // 开机自启真值以注册表为准
 		"ips":        localIPs(),
 	})
 }
@@ -382,6 +384,8 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		BackupsDir         *string `json:"backupsDir"`
 		BackupKeep         *int    `json:"backupKeep"`
 		Onboarded          *bool   `json:"onboarded"`
+		MinimizeToTray     *bool   `json:"minimizeToTray"`
+		AutoStart          *bool   `json:"autoStart"`
 		ListenLAN          *bool   `json:"listenLan"`
 		LanPassword        *string `json:"lanPassword"` // 明文仅在本次请求中出现，存储为 SHA-256
 	}
@@ -441,6 +445,16 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Onboarded != nil {
 		c.Onboarded = *body.Onboarded
+	}
+	if body.MinimizeToTray != nil {
+		c.MinimizeToTray = *body.MinimizeToTray
+	}
+	if body.AutoStart != nil {
+		// 开机自启真值落在注册表（非 config.json），写失败即报错、不改其它配置
+		if err := autostart.Set(*body.AutoStart); err != nil {
+			writeErr(w, 500, fmt.Errorf("设置开机自启失败: %w", err))
+			return
+		}
 	}
 	if body.LanPassword != nil && *body.LanPassword != "" {
 		sum := sha256.Sum256([]byte(*body.LanPassword))

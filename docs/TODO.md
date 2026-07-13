@@ -151,10 +151,10 @@
 
 ## 阶段 10 · 托盘与自启
 
-- [ ] **10.1 最小化到托盘**：关窗改为收入托盘（服务器不停）；托盘菜单：打开面板 / 全部停止并退出；设置内开关（默认关，保持现有语义）。
-  验收：开关开启后关窗服务器仍在跑、托盘可唤回窗口；开关关闭时行为与现在一致。
-- [ ] **10.2 开机自启**：设置开关，写/删 `HKCU\...\Run`（带 `-minimized` 参数配合 10.1）。
-  验收：开启后注册表键正确、注销重登自动driving到托盘；关闭后键删除。
+- [x] **10.1 最小化到托盘**：关窗改为收入托盘（服务器不停）；托盘菜单：打开面板 / 全部停止并退出；设置内开关（默认关，保持现有语义）。
+  验收：开关开启后关窗服务器仍在跑、托盘可唤回窗口；开关关闭时行为与现在一致。—— tray_windows.go 子类化 go-webview2 窗口过程拦 WM_CLOSE（MinimizeToTray 时 SW_HIDE 吞掉、否则原逻辑退出）；Shell_NotifyIcon 常驻托盘图标 + 左键恢复/右键菜单（打开面板/全部停止并退出）；shutdown 改 PostMessage(WM_APP_QUIT) 线程安全退出 + runtime.LockOSThread。设置「启动与托盘」分区开关，双主题截图 + GUI -minimized 冒烟不崩验。**托盘实际关窗/恢复/菜单需真机手验**。
+- [x] **10.2 开机自启**：设置开关，写/删 `HKCU\...\Run`（带 `-minimized` 参数配合 10.1）。
+  验收：开启后注册表键正确、注销重登自动driving到托盘；关闭后键删除。—— internal/autostart（+非 Windows 桩）Enabled/Set 读写 HKCU\...\Run\AutoMCHUB=`"<exe>" -minimized`；main.go 加 -minimized 启动即 hideTrayWindow；web autoStart 真值以注册表为准。真机 E2E：ON→注册表现值/api 真、OFF→键删/api 假、无残留。
 
 ## 阶段 11 · 收尾与回归
 

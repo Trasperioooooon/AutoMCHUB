@@ -1475,6 +1475,7 @@ const SETTINGS_SECTIONS = [
   { id: "java", label: "Java 运行时", icon: "☕" },
   { id: "remote", label: "远程访问", icon: "📱" },
   { id: "notify", label: "通知与集成", icon: "🔔" },
+  { id: "startup", label: "启动与托盘", icon: "🖥" },
   { id: "about", label: "更新与关于", icon: "ℹ️" },
 ];
 
@@ -1489,12 +1490,39 @@ async function renderSettings(section) {
       <div class="settings-body" id="set-body"><div class="sub">加载中…</div></div>
     </div>`;
   const body = $("#set-body");
-  ({ download: setDownload, storage: setStorage, java: setJava, remote: setRemote, notify: setNotify, about: setAbout }[section])(body, info);
+  ({ download: setDownload, storage: setStorage, java: setJava, remote: setRemote, notify: setNotify, startup: setStartup, about: setAbout }[section])(body, info);
 }
 
 /* 分区标题；sub 允许富文本（调用方自负安全，标题走 esc） */
 function settingsHead(t, sub) {
   return `<div class="set-sec-head"><h2>${esc(t)}</h2>${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
+}
+
+/* 行式开关（标题 + 副标题 + 右侧开关），data-cfg 携带配置键 */
+function switchRow(title, desc, key, on) {
+  return `<div class="row-item"><div class="ri-head"><div class="ri-main">
+      <div class="ri-title">${esc(title)}</div><div class="ri-sub">${esc(desc)}</div></div>
+    <div class="ri-right"><label class="switch"><input type="checkbox" data-cfg="${key}" ${on ? "checked" : ""}><span class="sw"></span></label></div>
+  </div></div>`;
+}
+
+/* — 启动与托盘 — */
+function setStartup(body, info) {
+  const c = info.config || {};
+  body.innerHTML = settingsHead("启动与托盘", "控制关闭窗口的行为与开机自启。托盘图标在程序运行时始终显示，右键可「打开面板 / 全部停止并退出」，左键点击恢复窗口。") +
+    `<div class="row-list">
+      ${switchRow("最小化到系统托盘", "开启后点窗口关闭按钮不退出程序，而是收进托盘、服务器继续运行；点托盘图标即可恢复窗口。关闭则保持现状——点关闭即停服退出。", "minimizeToTray", c.minimizeToTray)}
+      ${switchRow("开机自动启动", "登录 Windows 后自动在后台（托盘）启动 AutoMCHUB。写入当前用户启动项（HKCU\\…\\Run，免管理员）；程序换目录后重新开关一次即修正路径。", "autoStart", info.autoStart)}
+    </div>
+    <div class="hint" style="margin-top:12px">开机自启以「静默进托盘」方式启动（附加 -minimized 参数），配合上面的托盘开关体验最佳。</div>`;
+  body.querySelectorAll("input[data-cfg]").forEach(inp => inp.onchange = async () => {
+    const key = inp.dataset.cfg;
+    try {
+      await api("/api/config", { method: "PUT", body: { [key]: inp.checked } });
+      if (key === "minimizeToTray") c.minimizeToTray = inp.checked; else info.autoStart = inp.checked;
+      toast(inp.checked ? "已开启" : "已关闭");
+    } catch (e) { toast(e.message, true); inp.checked = !inp.checked; }
+  });
 }
 
 /* — 下载与网络 — */

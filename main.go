@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"time"
 
 	"automchub/internal/app"
@@ -29,6 +30,7 @@ import (
 func main() {
 	setDPIAware() // 高 DPI 屏清晰渲染：必须在任何窗口创建前声明 DPI 感知
 	nogui := flag.Bool("nogui", false, "仅启动本地服务，不打开窗口")
+	minimized := flag.Bool("minimized", false, "启动后隐藏窗口到托盘（配合开机自启）")
 	port := flag.Int("port", 27333, "本地 Web 端口（被占用时自动改用随机端口）")
 	flag.Parse()
 
@@ -88,7 +90,7 @@ func main() {
 
 	if *nogui {
 		<-sig
-	} else if !openWebView(url, sig) {
+	} else if !openWebView(url, sig, *minimized) {
 		log.Println("WebView2 不可用，使用默认浏览器打开界面")
 		_ = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 		<-sig
@@ -100,12 +102,14 @@ func main() {
 }
 
 // openWebView 尝试以原生窗口运行界面；窗口关闭或收到中断信号时返回。
-func openWebView(url string, sig chan os.Signal) (ok bool) {
+func openWebView(url string, sig chan os.Signal, minimized bool) (ok bool) {
 	defer func() {
 		if recover() != nil {
 			ok = false
 		}
 	}()
+	// Win32 窗口线程亲和：建窗与消息循环须固定在同一 OS 线程
+	runtime.LockOSThread()
 	scale := systemDPIScale() // 窗口尺寸按 DPI 放大，保持高分屏上的视觉大小
 	w := webview2.NewWithOptions(webview2.WebViewOptions{
 		Debug:     false,
@@ -121,9 +125,15 @@ func openWebView(url string, sig chan os.Signal) (ok bool) {
 		return false
 	}
 	defer w.Destroy()
+	hwnd := uintptr(w.Window())
+	setupTray(hwnd)          // 子类化窗口过程 + 挂托盘图标（关窗最小化 / 右键菜单）
+	if minimized {
+		hideTrayWindow(hwnd) // 随开机自启静默进托盘
+	}
+	// 退出信号（Ctrl-C / 「退出程序」按钮）线程安全地投递到窗口线程，避免跨线程 Terminate
 	go func() {
 		<-sig
-		w.Terminate()
+		postTrayQuit(hwnd)
 	}()
 	w.Navigate(url)
 	w.Run()
