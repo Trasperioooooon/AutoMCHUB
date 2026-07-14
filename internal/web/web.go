@@ -395,74 +395,87 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err)
 		return
 	}
-	c := app.GetConfig()
-	if body.Source != nil {
-		c.Source = *body.Source
-	}
-	if body.CFApiKey != nil {
-		c.CFApiKey = strings.TrimSpace(*body.CFApiKey)
-	}
+	// 可失败的校验与 I/O（建目录、算哈希）在锁外先做完，锁内只做字段套用
 	if body.WebhookURL != nil {
 		u := strings.TrimSpace(*body.WebhookURL)
 		if u != "" && !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
 			writeErr(w, 400, fmt.Errorf("Webhook 地址需以 http(s):// 开头"))
 			return
 		}
-		c.WebhookURL = u
-	}
-	if body.UpdateRepo != nil {
-		c.UpdateRepo = strings.TrimSpace(*body.UpdateRepo)
-	}
-	if body.CheckUpdateOnStart != nil {
-		c.CheckUpdateOnStart = *body.CheckUpdateOnStart
 	}
 	if body.ServersDir != nil {
-		d := strings.TrimSpace(*body.ServersDir)
-		if d != "" {
+		if d := strings.TrimSpace(*body.ServersDir); d != "" {
 			if err := os.MkdirAll(d, 0o755); err != nil {
 				writeErr(w, 400, fmt.Errorf("存放目录不可用: %w", err))
 				return
 			}
 		}
-		c.ServersDir = d
 	}
 	if body.BackupsDir != nil {
-		d := strings.TrimSpace(*body.BackupsDir)
-		if d != "" {
+		if d := strings.TrimSpace(*body.BackupsDir); d != "" {
 			if err := os.MkdirAll(d, 0o755); err != nil {
 				writeErr(w, 400, fmt.Errorf("备份目录不可用: %w", err))
 				return
 			}
 		}
-		c.BackupsDir = d
 	}
-	if body.BackupKeep != nil {
-		k := *body.BackupKeep
-		if k < 1 {
-			k = 1
-		} else if k > 1000 {
-			k = 1000
-		}
-		c.BackupKeep = k
-	}
-	if body.Onboarded != nil {
-		c.Onboarded = *body.Onboarded
-	}
-	if body.MinimizeToTray != nil {
-		c.MinimizeToTray = *body.MinimizeToTray
-	}
+	var newPassHash string
 	if body.LanPassword != nil && *body.LanPassword != "" {
 		sum := sha256.Sum256([]byte(*body.LanPassword))
-		c.AccessPasswordHash = hex.EncodeToString(sum[:])
+		newPassHash = hex.EncodeToString(sum[:])
 	}
-	if body.ListenLAN != nil {
-		if *body.ListenLAN && c.AccessPasswordHash == "" {
-			writeErr(w, 400, fmt.Errorf("开启局域网访问前请先设置访问密码"))
-			return
+	// 读-改-写在 UpdateConfig 的锁内一次完成，避免并发保存互相丢字段
+	if _, err := app.UpdateConfig(func(c *app.Config) error {
+		if body.Source != nil {
+			c.Source = *body.Source
 		}
-		c.ListenLAN = *body.ListenLAN
+		if body.CFApiKey != nil {
+			c.CFApiKey = strings.TrimSpace(*body.CFApiKey)
+		}
+		if body.WebhookURL != nil {
+			c.WebhookURL = strings.TrimSpace(*body.WebhookURL)
+		}
+		if body.UpdateRepo != nil {
+			c.UpdateRepo = strings.TrimSpace(*body.UpdateRepo)
+		}
+		if body.CheckUpdateOnStart != nil {
+			c.CheckUpdateOnStart = *body.CheckUpdateOnStart
+		}
+		if body.ServersDir != nil {
+			c.ServersDir = strings.TrimSpace(*body.ServersDir)
+		}
+		if body.BackupsDir != nil {
+			c.BackupsDir = strings.TrimSpace(*body.BackupsDir)
+		}
+		if body.BackupKeep != nil {
+			k := *body.BackupKeep
+			if k < 1 {
+				k = 1
+			} else if k > 1000 {
+				k = 1000
+			}
+			c.BackupKeep = k
+		}
+		if body.Onboarded != nil {
+			c.Onboarded = *body.Onboarded
+		}
+		if body.MinimizeToTray != nil {
+			c.MinimizeToTray = *body.MinimizeToTray
+		}
+		if newPassHash != "" {
+			c.AccessPasswordHash = newPassHash
+		}
+		if body.ListenLAN != nil {
+			if *body.ListenLAN && c.AccessPasswordHash == "" {
+				return fmt.Errorf("开启局域网访问前请先设置访问密码")
+			}
+			c.ListenLAN = *body.ListenLAN
+		}
+		return nil
+	}); err != nil {
+		writeErr(w, 400, err)
+		return
 	}
-	app.SetConfig(c)
 	// 开机自启是注册表副作用（不落 config.json）：放在所有校验与配置保存成功之后再执行，
 	// 避免上面任一校验失败提前 return 时已经改动了注册表（否则会「报错却已悄悄改了自启」）
 	if body.AutoStart != nil {

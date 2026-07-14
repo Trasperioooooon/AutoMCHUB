@@ -101,14 +101,26 @@ func GetConfig() Config {
 	return cfg
 }
 
-func SetConfig(c Config) {
+// UpdateConfig 在同一把锁内完成配置的读-改-写并持久化，避免并发处理器各自
+// GetConfig→改→整体覆盖时互相丢更新。mutate 返回错误则放弃本次修改（配置不变、不落盘）。
+func UpdateConfig(mutate func(*Config) error) (Config, error) {
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
+	c := cfg
+	if err := mutate(&c); err != nil {
+		return cfg, err
+	}
 	if c.Source != "mirror" && c.Source != "official" {
 		c.Source = "auto"
 	}
-	cfgMu.Lock()
 	cfg = c
-	cfgMu.Unlock()
-	b, _ := json.MarshalIndent(c, "", "  ")
+	saveLocked()
+	return c, nil
+}
+
+// saveLocked 持久化当前配置，调用方须已持有 cfgMu。
+func saveLocked() {
+	b, _ := json.MarshalIndent(cfg, "", "  ")
 	_ = os.WriteFile(configPath(), b, 0o644)
 }
 
@@ -185,8 +197,7 @@ func RememberRoot(dir string) {
 		}
 	}
 	cfg.Roots = append(cfg.Roots, dir)
-	b, _ := json.MarshalIndent(cfg, "", "  ")
-	_ = os.WriteFile(configPath(), b, 0o644)
+	saveLocked()
 }
 
 type memoryStatusEx struct {
