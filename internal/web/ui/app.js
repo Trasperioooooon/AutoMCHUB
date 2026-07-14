@@ -31,7 +31,7 @@ function showLogin() {
   const d = document.createElement("div");
   d.className = "modal-mask";
   d.id = "login-mask";
-  d.innerHTML = `<div class="modal"><h3>🔐 AutoMCHUB 远程访问</h3>
+  d.innerHTML = `<div class="modal"><h3>${icon("lock")} AutoMCHUB 远程访问</h3>
     <div class="m-body">请输入访问密码（在主机的全局设置中配置）</div>
     <input type="password" id="login-pw" style="width:100%;margin-bottom:16px" autofocus>
     <div class="m-actions"><button class="btn primary" id="login-go">登录</button></div></div>`;
@@ -125,16 +125,67 @@ const CORE_COLORS = {
 const cubeOf = id => `<div class="cube" style="--c:${CORE_COLORS[id] || "#8fa08e"}"><i></i></div>`;
 const eyebrow = t => `<div class="eyebrow">${esc(t)}</div>`;
 
+/* ---------- 内联 SVG 图标 ----------
+   对齐 win-ctrls 风格：16 视框、细线 currentColor、圆角端点。icon(name) 返回字符串供模板拼接；
+   颜色继承文字色（双主题自动成立），默认尺寸 1em（随字号缩放），故按钮/文本内无需另设色与尺寸。
+   界面图标一律走这里，禁止 emoji（用户内容如 MOTD/控制台输出不受限）。 */
+const ICON = {
+  // 导航 / 主题
+  map: '<path d="M2.6 4.3l3.8-1.5 3.2 1.5 3.8-1.5v9.4l-3.8 1.5-3.2-1.5-3.8 1.5z"/><path d="M6.4 2.9v9.4M9.6 4.3v9.4"/>',
+  craft: '<rect x="2.6" y="2.6" width="10.8" height="10.8" rx="1.2"/><path d="M6.2 2.8v10.4M9.8 2.8v10.4M2.8 6.2h10.4M2.8 9.8h10.4"/>',
+  compass: '<circle cx="8" cy="8" r="5.8"/><path d="M10.4 5.6L8.7 8.7 5.6 10.4 7.3 7.3z" fill="currentColor" stroke="none"/>',
+  gear: '<circle cx="8" cy="8" r="2.3"/><path d="M8 1.6v1.9M8 12.5v1.9M14.4 8h-1.9M3.5 8H1.6M12.5 3.5l-1.3 1.3M4.8 11.2l-1.3 1.3M12.5 12.5l-1.3-1.3M4.8 4.8L3.5 3.5"/>',
+  sun: '<circle cx="8" cy="8" r="3.1"/><path d="M8 1.6v1.7M8 12.7v1.7M14.4 8h-1.7M3.3 8H1.6M12.5 3.5l-1.2 1.2M4.7 11.3l-1.2 1.2M12.5 12.5l-1.2-1.2M4.7 4.7L3.5 3.5"/>',
+  moon: '<path d="M13 9.6A5.6 5.6 0 016.4 3 5.6 5.6 0 1013 9.6z"/>',
+  monitor: '<rect x="2.4" y="3" width="11.2" height="7.4" rx="1"/><path d="M6 13h4M8 10.4V13"/>',
+  // 状态 / 数据
+  search: '<circle cx="7" cy="7" r="4.3"/><path d="M10.3 10.3l3.2 3.2"/>',
+  clock: '<circle cx="8" cy="8" r="5.8"/><path d="M8 4.7V8l2.4 1.5"/>',
+  player: '<circle cx="8" cy="5.4" r="2.6"/><path d="M3.5 12.9c0-2.5 2-4.2 4.5-4.2s4.5 1.7 4.5 4.2"/>',
+  // 动作
+  play: '<path d="M6 4l6 4-6 4z" fill="currentColor"/>',
+  stop: '<rect x="4.6" y="4.6" width="6.8" height="6.8" rx="1.3" fill="currentColor"/>',
+  folder: '<path d="M2.4 12.6V4.6h3.4l1.4 1.6h6.4v6.4z"/>',
+  bolt: '<path d="M9 2.2L4.2 9.2H7.3L6.6 13.8 11.8 6.6H8.4z" fill="currentColor"/>',
+  // 文件夹直达菜单 / 状态
+  package: '<path d="M8 1.9l5.4 2.9v6.4L8 14.1 2.6 11.2V4.8z"/><path d="M2.7 4.9L8 7.7l5.3-2.8M8 7.7v6.3"/>',
+  plug: '<path d="M6 2.2v2.6M10 2.2v2.6M4.6 4.8h6.8v2.4a3.4 3.4 0 01-6.8 0zM8 10.6v3.2"/>',
+  globe: '<circle cx="8" cy="8" r="5.9"/><path d="M2.1 8h11.8M8 2.1c1.7 1.7 2.5 3.8 2.5 5.9S9.7 12.2 8 13.9C6.3 12.2 5.5 10.1 5.5 8S6.3 3.8 8 2.1z"/>',
+  doc: '<path d="M4.2 2.3h4.6l3 3v8.4H4.2z"/><path d="M8.6 2.4v3h3M6.2 8.6h3.6M6.2 10.9h3.6"/>',
+  warn: '<path d="M8 2.5L14.3 13.2H1.7z"/><path d="M8 6.4v3.2M8 11.4v.01"/>',
+  arrowLeft: '<path d="M12.5 8H4M7 4.5L3.5 8 7 11.5"/>',
+  arrowRight: '<path d="M3.5 8H12M9 4.5L12.5 8 9 11.5"/>',
+  check: '<path d="M3.4 8.4l3 3 6.2-6.6"/>',
+  x: '<path d="M4 4l8 8M12 4l-8 8"/>',
+  plus: '<path d="M8 3v10M3 8h10"/>',
+  copy: '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V4A1.5 1.5 0 009 2.5H4A1.5 1.5 0 002.5 4v5A1.5 1.5 0 004 10.5h1.5"/>',
+  download: '<path d="M8 2.5v7.5M4.7 6.8L8 10l3.3-3.2M3 13h10"/>',
+  refresh: '<path d="M12.4 5.5A5 5 0 103.6 5.5"/><path d="M12.8 2.3V5.6H9.5"/>',
+  camera: '<path d="M2.6 5.6h2.1l1-1.5h4.6l1 1.5h2.1v7.4h-10.8z"/><circle cx="8" cy="9" r="2.2"/>',
+  restore: '<path d="M7.5 4.6 3 8l4.5 3.4zM13 4.6 8.5 8l4.5 3.4z" fill="currentColor"/>',
+  save: '<path d="M3.4 2.6h7l3 3v7.8h-10z"/><path d="M5.4 2.6v3.2h4.4V2.6M5.4 13.4V9.2h5.2v4.2"/>',
+  coffee: '<path d="M3 5.6h8.5v2.9a3.4 3.4 0 01-3.4 3.4H6.4A3.4 3.4 0 013 8.5z"/><path d="M11.5 6.3h1.2a1.6 1.6 0 010 3.1h-1.2"/><path d="M5.4 2.6v1.4M8 2.6v1.4"/>',
+  phone: '<rect x="4.5" y="2.5" width="7" height="11" rx="1.4"/><path d="M7 11.4h2"/>',
+  bell: '<path d="M4.6 7a3.4 3.4 0 016.8 0c0 2.4 1 3.4 1.3 3.9H3.3c.3-.5 1.3-1.5 1.3-3.9z"/><path d="M6.7 12.9a1.4 1.4 0 002.6 0"/>',
+  info: '<circle cx="8" cy="8" r="5.8"/><path d="M8 7.3v3.5M8 5.2v.01"/>',
+  power: '<path d="M8 2.2v5.6"/><path d="M5.1 4.7a4.6 4.6 0 105.8 0"/>',
+  arrowUp: '<path d="M8 13V3.4M4.4 7 8 3.4 11.6 7"/>',
+  lock: '<rect x="3.5" y="7" width="9" height="6.5" rx="1.4"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2"/>',
+  chevronDown: '<path d="M4 6.5 8 10.5l4-4"/>',
+  link: '<path d="M6.6 9.4 9.4 6.6"/><path d="M7 4.6 8.2 3.4a2.6 2.6 0 013.7 3.7L10.7 8.3"/><path d="M9 11.4 7.8 12.6a2.6 2.6 0 01-3.7-3.7L5.3 7.7"/>',
+};
+const icon = (name, cls = "") => `<svg class="ico${cls ? " " + cls : ""}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[name] || ""}</svg>`;
+
 /* 浅色 / 深色主题切换（index.html 已在样式生效前预置 data-theme） */
 (function initTheme() {
   const btn = $("#theme-btn");
   const root = document.documentElement;
   const sysLight = () => matchMedia("(prefers-color-scheme: light)").matches;
   const pref = () => root.dataset.themePref || "auto";
-  const ICONS = { light: "☀️", dark: "🌙", auto: "🖥" };
+  const ICONS = { light: icon("sun"), dark: icon("moon"), auto: icon("monitor") };
   const NEXT = { light: "dark", dark: "auto", auto: "light" };
   const LABEL = { light: "浅色", dark: "深色", auto: "跟随系统" };
-  const paint = () => { btn.textContent = ICONS[pref()] || "☀️"; btn.title = `主题：${LABEL[pref()]}（点击切换）`; };
+  const paint = () => { btn.innerHTML = ICONS[pref()] || ICONS.light; btn.title = `主题：${LABEL[pref()]}（点击切换）`; };
   const apply = p => {
     root.dataset.themePref = p;
     localStorage.setItem("amh_theme", p);
@@ -290,7 +341,7 @@ function rowControl(opts) {
     if (opts.summary instanceof Node) sum.appendChild(opts.summary);
     else sum.textContent = opts.summary ?? "";
     const chev = document.createElement("span");
-    chev.className = "ri-chev"; chev.textContent = "▾";
+    chev.className = "ri-chev"; chev.innerHTML = icon("chevronDown");
     right.append(sum, chev);
   } else if (opts.control) {
     right.appendChild(opts.control);
@@ -345,8 +396,8 @@ function renderMemoryControl(mount, o) {
     const over = v > availMb;
     alloc.classList.toggle("over", over);
     let note = "";
-    if (over) note = ` <span class="mem-warn">⚠ 超过当前可用 ${g(availMb)} GB，可能触发频繁 GC 或分配失败</span>`;
-    else if (v > 16384) note = ` <span class="mem-warn">⚠ 过大的堆可能增加 GC 停顿</span>`;
+    if (over) note = ` <span class="mem-warn">${icon("warn")} 超过当前可用 ${g(availMb)} GB，可能触发频繁 GC 或分配失败</span>`;
+    else if (v > 16384) note = ` <span class="mem-warn">${icon("warn")} 过大的堆可能增加 GC 停顿</span>`;
     stat.innerHTML = totalMb
       ? `已用 ${g(usedMb)} GB · 本服分配 <b>${g(v)} GB</b> / 共 ${g(totalMb)} GB${note}`
       : `本服分配 <b>${g(v)} GB</b>`;
@@ -433,14 +484,14 @@ function folderMenu(anchor, info) {
   const isProxy = info.kind === "proxy";
   const hasMods = ["fabric", "forge", "neoforge", "mohist", "banner"].includes(info.core);
   const hasPlugins = ["paper", "purpur", "leaves", "folia", "mohist", "banner", "velocity", "waterfall"].includes(info.core);
-  const items = [["", "📂 实例目录"]];
-  if (hasMods) items.push(["mods", "🧩 模组 mods"]);
-  if (hasPlugins) items.push(["plugins", "🔌 插件 plugins"]);
-  if (!isProxy) items.push(["world", "🌍 世界存档"], ["logs", "📜 日志 logs"], ["crash-reports", "💥 崩溃报告"]);
-  else items.push(["logs", "📜 日志 logs"]);
+  const items = [["", "folder", "实例目录"]];
+  if (hasMods) items.push(["mods", "package", "模组 mods"]);
+  if (hasPlugins) items.push(["plugins", "plug", "插件 plugins"]);
+  if (!isProxy) items.push(["world", "globe", "世界存档"], ["logs", "doc", "日志 logs"], ["crash-reports", "warn", "崩溃报告"]);
+  else items.push(["logs", "doc", "日志 logs"]);
   const m = document.createElement("div");
   m.className = "dropmenu";
-  m.innerHTML = items.map(([sub, label]) => `<button data-sub="${sub}">${label}</button>`).join("");
+  m.innerHTML = items.map(([sub, ic, label]) => `<button data-sub="${sub}">${icon(ic)}<span>${label}</span></button>`).join("");
   document.body.appendChild(m);
   const r = anchor.getBoundingClientRect();
   m.style.left = Math.max(8, Math.min(r.left, innerWidth - m.offsetWidth - 8)) + "px";
@@ -454,35 +505,52 @@ function folderMenu(anchor, info) {
   setTimeout(() => document.addEventListener("click", function off(e) { if (!m.contains(e.target)) { m.remove(); document.removeEventListener("click", off); } }), 0);
 }
 
+/* 列表骨架占位：首屏加载态（reduced-motion 下由全局关停微光，静态显示凹陷块）。 */
+const skeletonCards = (n = 6) => `<div class="cards">` + Array.from({ length: n }, () => `
+  <div class="sk-card" aria-hidden="true">
+    <div class="sk sk-line" style="width:52%"></div>
+    <div class="sk-badges"><span class="sk sk-chip"></span><span class="sk sk-chip" style="width:76px"></span></div>
+    <div class="sk sk-line" style="width:64%;height:11px"></div>
+    <div class="sk-actions"><span class="sk sk-btn"></span><span class="sk sk-btn" style="width:96px"></span></div>
+  </div>`).join("") + `</div>`;
+
+/* 紧凑单列表（版本/构建）行骨架 */
+const skeletonRows = (n = 7) => Array.from({ length: n }, () =>
+  `<div class="sk-row"><span class="sk" style="width:38%;height:13px"></span><span class="sk" style="width:52px;height:12px"></span></div>`).join("");
+
 async function renderInstances() {
   Main().innerHTML = eyebrow("SERVER LIST") + `<h1>我的服务器</h1>
-    <div class="row" style="margin-bottom:14px;flex-wrap:wrap;gap:10px">
-      <input type="text" id="inst-q" placeholder="🔍 搜索实例名" style="max-width:220px">
+    <div class="row" style="margin-bottom:16px;flex-wrap:wrap;gap:10px">
+      <div class="search-field" style="max-width:240px">${icon("search", "sf-ico")}<input type="text" id="inst-q" placeholder="搜索实例名"></div>
       <select id="inst-sort" style="width:170px"><option value="recent">排序：最近创建</option><option value="running">排序：运行中优先</option><option value="name">排序：名称</option></select>
       <span class="grow"></span><span class="sub" id="inst-summary" style="margin:0"></span>
     </div>
-    <div id="inst-cards">加载中…</div>`;
+    <div id="inst-cards">${skeletonCards()}</div>`;
   let lastSig = "", curList = [];
-  const cardHTML = i => `
+  const cardHTML = i => {
+    const proxy = i.kind === "proxy";
+    const gb = (i.xmxMb / 1024).toFixed(1) + "G";
+    const cfg = proxy ? `Java ${i.javaMajor} · ${gb}` : `Java ${i.javaMajor} · :${i.port} · ${gb}`;
+    return `
     <div class="card st-${i.status}" data-name="${esc(i.name)}">
       <div class="inst-head">${cubeOf(i.core)}<span class="inst-name grow">${esc(i.name)}</span><span class="dot ${i.status}"></span></div>
       <div class="badges">
         <span class="badge core">${coreName(i.core)}</span>
-        <span class="badge">${i.kind === "proxy" ? "v" : "MC "}${esc(i.mc)}</span>
-        <span class="badge">Java ${i.javaMajor}</span>
-        ${i.kind === "proxy" ? `<span class="badge">代理端</span>` : `<span class="badge">端口 ${i.port}</span>`}
-        <span class="badge">${(i.xmxMb / 1024).toFixed(1)}G</span>
+        <span class="badge">${proxy ? "v" : "MC "}${esc(i.mc)}</span>
+        ${proxy ? `<span class="badge">代理端</span>` : ""}
       </div>
-      ${i.status === "running" ? `<div class="inst-stat">⏱ ${fmtDur(i.uptimeSec)}${i.kind !== "proxy" ? ` · 👥 ${i.onlineCount}/${i.maxPlayers}` : ""}</div>` : ""}
+      <div class="inst-config">${cfg}</div>
+      ${i.status === "running" ? `<div class="inst-stat">${icon("clock")} ${fmtDur(i.uptimeSec)}${!proxy ? ` · ${icon("player")} ${i.onlineCount}/${i.maxPlayers}` : ""}</div>` : ""}
       <div class="inst-meta" data-motd="${esc(i.motd || "")}"></div>
       <div class="inst-actions">
-        ${i.status === "stopped" ? `<button class="btn sm primary" data-act="start">▶ 启动</button>` : `<button class="btn sm" data-act="stop">■ 停止</button>`}
+        ${i.status === "stopped" ? `<button class="btn sm primary" data-act="start">${icon("play")} 启动</button>` : `<button class="btn sm" data-act="stop">${icon("stop")} 停止</button>`}
         <a class="btn sm" href="#/inst/${encodeURIComponent(i.name)}">控制台 / 设置</a>
-        <button class="btn sm" data-act="opendir" title="打开目录">📁</button>
+        <button class="btn sm" data-act="opendir" title="打开目录" aria-label="打开实例目录">${icon("folder")}</button>
         <button class="btn sm danger" data-act="del">删除</button>
       </div>
       <div class="dur"><i></i></div>
     </div>`;
+  };
   const applyView = () => {
     const q = ($("#inst-q").value || "").trim().toLowerCase();
     const sort = $("#inst-sort").value;
@@ -520,9 +588,9 @@ async function renderInstances() {
     $("#inst-summary").textContent = list.length ? `共 ${list.length} 台 · 运行中 ${running}${online ? ` · 在线 ${online} 人` : ""}` : "";
     if (!list.length) {
       Main().classList.add("center");
-      $("#inst-cards").innerHTML = `<div class="empty"><div class="big">⛏</div>这里空空如也<br>一键开一台推荐配置的服务器，或用向导自定义<br><br>
-        <button class="btn primary" id="quick-start">⚡ 一键开服（Paper 最新正式版）</button>
-        <a class="btn" href="#/create" style="margin-left:8px">⚒ 自定义合成（按 2）</a></div>`;
+      $("#inst-cards").innerHTML = `<div class="empty"><div class="cube-hero">${cubeOf("vanilla")}</div>这里空空如也<br>一键开一台推荐配置的服务器，或用向导自定义<br><br>
+        <button class="btn primary" id="quick-start">${icon("bolt")} 一键开服（Paper 最新正式版）</button>
+        <a class="btn" href="#/create" style="margin-left:8px">${icon("craft")} 自定义合成（按 2）</a></div>`;
       $("#quick-start").onclick = quickStart; lastSig = "empty"; return;
     }
     Main().classList.remove("center");
@@ -545,8 +613,8 @@ async function renderCreate() {
   Main().classList.add("center"); // 模式选择页稀疏，竖向居中消除留白
   Main().innerHTML = eyebrow("CRAFTING") + `<h1>合成新服务器</h1><div class="sub">选择一种方式开始</div>
     <div class="recipe-grid">
-      <div class="core-card" id="mode-new"><div><div class="cn">⚒ 全新合成</div><div class="cd">选择核心与版本，从零搭建服务器</div></div></div>
-      <div class="core-card" id="mode-import"><div><div class="cn">📦 导入整合包</div><div class="cd">Modrinth (.mrpack) / CurseForge (zip) 整合包一键开服</div></div></div>
+      <div class="core-card" id="mode-new"><span class="recipe-ico">${icon("craft")}</span><div><div class="cn">全新合成</div><div class="cd">选择核心与版本，从零搭建服务器</div></div></div>
+      <div class="core-card" id="mode-import"><span class="recipe-ico">${icon("package")}</span><div><div class="cn">导入整合包</div><div class="cd">Modrinth (.mrpack) / CurseForge (zip) 整合包一键开服</div></div></div>
     </div>`;
   $("#mode-new").onclick = () => drawWizard();
   $("#mode-import").onclick = () => drawImport();
@@ -569,7 +637,7 @@ async function drawImport() {
       <label class="field full"><span>存放位置</span>
         <div class="row" style="gap:8px">
           <input type="text" id="im-root" readonly style="flex:1;cursor:default;background:var(--surface-2)">
-          <button type="button" class="btn" id="im-browse">📁 浏览…</button>
+          <button type="button" class="btn" id="im-browse">${icon("folder")} 浏览…</button>
         </div></label>
       <div class="field"><label class="switch"><input type="checkbox" id="im-online"><span class="sw"></span>
         <span><span class="sw-label">正版验证</span><div class="sw-desc">默认关闭</div></span></label></div>
@@ -582,8 +650,8 @@ async function drawImport() {
         <span class="sw-label">我已阅读并同意 <a href="https://aka.ms/MinecraftEULA" target="_blank">Minecraft EULA</a></span></label>
     </div>
     <div class="wizard-foot">
-      <button class="btn" id="im-back">← 返回</button>
-      <button class="btn primary" id="im-go">⚒ 导入并部署</button>
+      <button class="btn" id="im-back">${icon("arrowLeft")} 返回</button>
+      <button class="btn primary" id="im-go">${icon("bolt")} 导入并部署</button>
     </div>`;
   $("#im-back").onclick = () => renderCreate(); // 直接重绘（hash 相同不会触发路由，不能用 location.hash）
   renderMemoryControl($("#im-mem-mount"), { sliderId: "im-mem", min: 2048, max: maxMem, value: defMem, totalMb: app.ramMb, availMb: app.availRamMb, hint: "整合包服建议 6GB 以上" });
@@ -614,7 +682,7 @@ async function drawImport() {
       if (!j.ok) throw new Error(j.error || "导入失败");
       toast(`已识别：${j.data.pack.core} ${j.data.pack.mc}（${j.data.pack.files} 个文件）`);
       location.hash = `#/task/${j.data.taskId}`;
-    } catch (e) { toast(e.message, true); $("#im-go").disabled = false; $("#im-go").textContent = "🚀 导入并部署"; }
+    } catch (e) { toast(e.message, true); $("#im-go").disabled = false; $("#im-go").innerHTML = icon("bolt") + " 导入并部署"; }
   };
 }
 
@@ -629,8 +697,8 @@ function wizardShell(inner) {
 async function drawWizard() {
   Main().classList.remove("center"); // 向导内容稠密，取消模式选择页的竖向居中
   if (wiz.step === 0) {
-    wizardShell(`<div id="core-grid">加载中…</div>
-      <div class="wizard-foot"><button class="btn" id="wback0">← 返回</button><button class="btn primary" id="wnext" disabled>下一步 →</button></div>`);
+    wizardShell(`<div id="core-grid">${skeletonRows(6)}</div>
+      <div class="wizard-foot"><button class="btn" id="wback0">${icon("arrowLeft")} 返回</button><button class="btn primary" id="wnext" disabled>下一步 ${icon("arrowRight")}</button></div>`);
     $("#wback0").onclick = () => renderCreate();
     let cores;
     try { cores = await api("/api/cores"); } catch (e) { $("#core-grid").innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
@@ -670,11 +738,11 @@ async function drawWizard() {
   } else if (wiz.step === 1) {
     wizardShell(`
       <div class="row" style="margin-bottom:12px">
-        <input type="text" id="ver-search" placeholder="搜索版本号，如 1.20.1 / 26.2" style="max-width:280px">
+        <div class="search-field">${icon("search", "sf-ico")}<input type="text" id="ver-search" placeholder="搜索版本号，如 1.20.1 / 26.2" style="width:280px"></div>
         ${wiz.core === "vanilla" ? `<label class="switch"><input type="checkbox" id="snap-toggle" ${wiz.snapshots ? "checked" : ""}><span class="sw"></span><span class="sw-label">显示快照版</span></label>` : ""}
       </div>
-      <div class="ver-list" id="ver-list">正在获取版本列表（镜像源）…</div>
-      <div class="wizard-foot"><button class="btn" id="wback">← 上一步</button><button class="btn primary" id="wnext" ${wiz.mc ? "" : "disabled"}>下一步 →</button></div>`);
+      <div class="ver-list" id="ver-list">${skeletonRows(8)}</div>
+      <div class="wizard-foot"><button class="btn" id="wback">${icon("arrowLeft")} 上一步</button><button class="btn primary" id="wnext" ${wiz.mc ? "" : "disabled"}>下一步 ${icon("arrowRight")}</button></div>`);
     $("#wback").onclick = () => { wiz.step = 0; drawWizard(); };
     $("#wnext").onclick = () => { wiz.step = 2; wiz.build = null; drawWizard(); };
     const snapEl = $("#snap-toggle");
@@ -685,7 +753,7 @@ async function drawWizard() {
       const items = all.filter(v => !q || v.id.includes(q)).slice(0, 300);
       $("#ver-list").innerHTML = items.length ? items.map(v => `
         <div class="ver-item ${wiz.mc === v.id ? "sel" : ""}" data-id="${esc(v.id)}">
-          <span>${esc(v.id)} ${v.latest ? "🌟" : ""}</span><span class="vt">${v.type === "snapshot" ? "快照" : "正式版"}</span>
+          <span>${esc(v.id)}${v.latest ? `<span class="ver-tag">最新</span>` : ""}</span><span class="vt">${v.type === "snapshot" ? "快照" : "正式版"}</span>
         </div>`).join("") : `<div class="ver-item">没有匹配的版本</div>`;
       $("#ver-list").querySelectorAll(".ver-item[data-id]").forEach(el => el.onclick = () => {
         wiz.mc = el.dataset.id;
@@ -694,7 +762,7 @@ async function drawWizard() {
       });
     };
     const loadVersions = async () => {
-      $("#ver-list").textContent = "正在获取版本列表…";
+      $("#ver-list").innerHTML = skeletonRows(8);
       try {
         all = await api(`/api/mcversions?core=${wiz.core}&snapshots=${wiz.snapshots ? 1 : 0}`);
         drawList();
@@ -706,8 +774,8 @@ async function drawWizard() {
   } else if (wiz.step === 2) {
     if (wiz.core === "vanilla") { wiz.step = 3; wiz.build = ""; drawWizard(); return; }
     wizardShell(`<div class="sub">为 ${coreKind(wiz.core) === "proxy" ? "" : "MC "}${esc(wiz.mc)} 选择 ${coreName(wiz.core)} 构建（默认推荐最新稳定）</div>
-      <div class="ver-list" id="build-list">正在获取构建列表…</div>
-      <div class="wizard-foot"><button class="btn" id="wback">← 上一步</button><button class="btn primary" id="wnext" disabled>下一步 →</button></div>`);
+      <div class="ver-list" id="build-list">${skeletonRows(6)}</div>
+      <div class="wizard-foot"><button class="btn" id="wback">${icon("arrowLeft")} 上一步</button><button class="btn primary" id="wnext" disabled>下一步 ${icon("arrowRight")}</button></div>`);
     $("#wback").onclick = () => { wiz.step = 1; drawWizard(); };
     $("#wnext").onclick = () => { wiz.step = 3; drawWizard(); };
     try {
@@ -716,7 +784,7 @@ async function drawWizard() {
       if (!wiz.build) wiz.build = (builds.find(b => b.recommended) || builds[0]).id;
       $("#build-list").innerHTML = builds.slice(0, 200).map(b => `
         <div class="ver-item ${wiz.build === b.id ? "sel" : ""}" data-id="${esc(b.id)}">
-          <span>${esc(b.id)} ${b.recommended ? "✅ 推荐" : ""}</span><span class="vt">${esc(b.label || "")}</span>
+          <span>${esc(b.id)}${b.recommended ? `<span class="ver-tag">推荐</span>` : ""}</span><span class="vt">${esc(b.label || "")}</span>
         </div>`).join("");
       $("#build-list").querySelectorAll(".ver-item").forEach(el => el.onclick = () => {
         wiz.build = el.dataset.id;
@@ -738,7 +806,7 @@ async function drawWizard() {
         <label class="field full"><span>存放位置</span>
           <div class="row" style="gap:8px">
             <input type="text" id="f-root" readonly style="flex:1;cursor:default;background:var(--surface-2)">
-            <button type="button" class="btn" id="f-browse">📁 浏览…</button>
+            <button type="button" class="btn" id="f-browse">${icon("folder")} 浏览…</button>
           </div>
           <div class="hint" id="f-path"></div>
         </label>
@@ -759,8 +827,8 @@ async function drawWizard() {
           <span class="sw-label">我已阅读并同意 <a href="https://aka.ms/MinecraftEULA" target="_blank">Minecraft 最终用户许可协议 (EULA)</a></span></label>
       </div>`}
       <div class="wizard-foot">
-        <button class="btn" id="wback">← 上一步</button>
-        <button class="btn primary" id="wcreate">⚒ 开始部署</button>
+        <button class="btn" id="wback">${icon("arrowLeft")} 上一步</button>
+        <button class="btn primary" id="wcreate">${icon("bolt")} 开始部署</button>
       </div>`);
     $("#wback").onclick = () => { wiz.step = wiz.core === "vanilla" ? 1 : 2; drawWizard(); };
     renderMemoryControl($("#mem-mount"), { sliderId: "f-mem", min: 512, max: maxMem, value: defMem, totalMb: app.ramMb, availMb: app.availRamMb, hint: isProxy ? "代理端很省内存，1GB 通常足够" : "模组服建议 4GB 以上；纯净小队游玩 2~4GB 足够" });
@@ -819,15 +887,15 @@ async function renderTaskPage(taskId) {
         <div class="progress-text">${esc(t.label)} · ${fmtBytes(t.done)}${t.total > 0 ? " / " + fmtBytes(t.total) : ""}</div></div>` : ""}
       ${t.error ? `<div class="err-box"><b>创建失败：</b>${esc(t.error)}<br><br>可返回重试（已下载的文件有缓存，重试很快）。</div>` : ""}
       ${(t.warnings || []).map(w => `<div class="warn-card">
-        <div class="wc-title">⚠ ${esc(w.title)}</div>
+        <div class="wc-title">${icon("warn")} ${esc(w.title)}</div>
         ${w.note ? `<div class="wc-note">${esc(w.note)}</div>` : ""}
         ${(w.items || []).length ? `<ul class="wc-list">${w.items.map(it =>
           `<li>${/^https?:\/\//i.test(it.url || "") ? `<a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.name)}</a>` : esc(it.name)}</li>`).join("")}</ul>` : ""}
       </div>`).join("")}
       <div class="task-log" id="task-log">${(t.log || []).map(esc).join("\n")}</div>
       <div class="save-bar">
-        ${t.ended && !t.error ? `<a class="btn primary" href="#/inst/${encodeURIComponent(t.result)}">✔ 完成，进入控制台</a>` : ""}
-        ${t.ended && t.error ? `<a class="btn" href="#/create">← 返回重试</a>` : ""}
+        ${t.ended && !t.error ? `<a class="btn primary" href="#/inst/${encodeURIComponent(t.result)}">${icon("check")} 完成，进入控制台</a>` : ""}
+        ${t.ended && t.error ? `<a class="btn" href="#/create">${icon("arrowLeft")} 返回重试</a>` : ""}
         ${!t.ended ? `<span class="warn-text">部署中，请勿关闭程序…</span>` : ""}
       </div>`;
     const lg = $("#task-log");
@@ -858,9 +926,9 @@ async function renderDetail(name, tab = "console") {
       <span class="badge">${info.kind === "proxy" ? "v" : "MC "}${esc(info.mc)}</span>
       <span class="badge">Java ${info.javaMajor}</span>
       <span class="grow"></span>
-      <button class="btn primary" id="d-start" ${info.status !== "stopped" ? "disabled" : ""}>▶ 启动</button>
-      <button class="btn" id="d-stop" ${info.status === "stopped" ? "disabled" : ""}>■ 停止</button>
-      <button class="btn" id="d-dir">📁 打开目录</button>
+      <button class="btn primary" id="d-start" ${info.status !== "stopped" ? "disabled" : ""}>${icon("play")} 启动</button>
+      <button class="btn" id="d-stop" ${info.status === "stopped" ? "disabled" : ""}>${icon("stop")} 停止</button>
+      <button class="btn" id="d-dir">${icon("folder")} 打开目录</button>
     </div>
     <div class="tabs">${(() => {
       const isProxy = info.kind === "proxy";
@@ -899,7 +967,7 @@ async function renderDetail(name, tab = "console") {
   if (tab === "console") {
     body.innerHTML = `
       <div class="console-bar">
-        <input type="text" id="con-filter" placeholder="🔍 过滤日志（如 ERROR / 玩家名）" style="max-width:280px">
+        <div class="search-field">${icon("search", "sf-ico")}<input type="text" id="con-filter" placeholder="过滤日志（如 ERROR / 玩家名）" style="width:280px"></div>
         <label class="switch"><input type="checkbox" id="con-scroll" checked><span class="sw"></span><span class="sw-label">自动滚动</span></label>
         <span class="grow"></span>
         <span class="hint">编码</span>
@@ -908,8 +976,8 @@ async function renderDetail(name, tab = "console") {
         </select>
         <button class="btn sm" id="con-fs-dn" title="缩小字号">A-</button>
         <button class="btn sm" id="con-fs-up" title="放大字号">A+</button>
-        <button class="btn sm" id="con-copy" title="复制全部">📋</button>
-        <button class="btn sm" id="con-export" title="导出为 txt">⬇</button>
+        <button class="btn sm" id="con-copy" title="复制全部" aria-label="复制全部">${icon("copy")}</button>
+        <button class="btn sm" id="con-export" title="导出为 txt" aria-label="导出为 txt">${icon("download")}</button>
       </div>
       <div class="console" id="console"></div>
       <div class="console-input">
@@ -1074,11 +1142,11 @@ async function renderDetail(name, tab = "console") {
             ${hint ? `<span class="hint">${hint}</span>` : ""}
           </div>
           <div class="badges">${items.map(p =>
-            `<span class="badge">${esc(p.name)}<a class="p-x" data-act="${removeAction}" data-p="${esc(p.name)}" title="移除">✕</a></span>`).join("") || `<span class="sub">空</span>`}</div>
+            `<span class="badge">${esc(p.name)}<a class="p-x" data-act="${removeAction}" data-p="${esc(p.name)}" title="移除" aria-label="移除">${icon("x")}</a></span>`).join("") || `<span class="sub">空</span>`}</div>
         </div>`;
       body.innerHTML = `<div class="players-grid">
         <div class="p-sec">
-          <div class="p-sec-head"><b>在线玩家</b>（${pl.online.length}）<button class="btn sm" id="pl-refresh">🔄 刷新</button></div>
+          <div class="p-sec-head"><b>在线玩家</b>（${pl.online.length}）<button class="btn sm" id="pl-refresh">${icon("refresh")} 刷新</button></div>
           <div class="badges">${pl.online.map(n => `<span class="badge core">${esc(n)}
             <a class="p-x" data-act="op" data-p="${esc(n)}" title="设为管理员">OP</a>
             <a class="p-x" data-act="kick" data-p="${esc(n)}" title="踢出">踢</a></span>`).join("") || `<span class="sub">暂无玩家在线</span>`}</div>
@@ -1105,7 +1173,7 @@ async function renderDetail(name, tab = "console") {
       body.innerHTML = `
         <div class="row" style="margin-bottom:10px;flex-wrap:wrap">
           <input type="text" id="bk-label" placeholder="备份标签（可选，如：打龙前）" style="max-width:240px">
-          <button class="btn primary" id="bk-create">📸 立即备份世界</button>
+          <button class="btn primary" id="bk-create">${icon("camera")} 立即备份世界</button>
           <span class="grow"></span>
           <label class="hint" style="display:flex;align-items:center;gap:6px;margin:0">保留最近 <input type="number" id="bk-keep" min="1" max="1000" value="${keep}" style="width:64px"> 份</label>
           <button class="btn sm" id="bk-keep-save">保存</button>
@@ -1114,7 +1182,7 @@ async function renderDetail(name, tab = "console") {
         <table class="raw">${(list || []).map(b => `
           <tr><td>${esc(b.file)}</td><td>${b.sizeMb.toFixed(1)} MB · ${esc(b.time)}</td>
           <td style="text-align:right;white-space:nowrap">
-            <button class="btn sm" data-restore="${esc(b.file)}">⏪ 还原</button>
+            <button class="btn sm" data-restore="${esc(b.file)}">${icon("restore")} 还原</button>
             <button class="btn sm danger" data-del="${esc(b.file)}">删除</button></td></tr>`).join("") ||
           `<tr><td class="sub">暂无备份</td></tr>`}</table>`;
       $("#bk-create").onclick = async () => {
@@ -1167,9 +1235,9 @@ async function renderDetail(name, tab = "console") {
         <select id="sc-type" style="width:130px"><option value="restart">定时重启</option><option value="command">定时命令</option><option value="backup">定时备份</option></select>
         <input type="time" id="sc-at" value="04:00" style="width:130px">
         <input type="text" id="sc-args" placeholder="命令内容（仅定时命令需要），如 say 大家好" style="max-width:300px">
-        <button class="btn" id="sc-add">＋ 添加</button>
+        <button class="btn" id="sc-add">${icon("plus")} 添加</button>
       </div>
-      <button class="btn primary" id="pol-save">💾 保存策略</button>`;
+      <button class="btn primary" id="pol-save">${icon("save")} 保存策略</button>`;
     const drawScheds = () => {
       $("#sched-list").innerHTML = scheds.map((s, i) => `
         <div class="java-row"><span class="badge core">${esc(TYPE_NAMES[s.type] || s.type)}</span>
@@ -1198,8 +1266,8 @@ async function renderDetail(name, tab = "console") {
   } else if (tab === "res") {
     body.innerHTML = `
       <div class="row" style="margin-bottom:12px;flex-wrap:wrap">
-        <input type="text" id="res-q" placeholder="搜索 Modrinth 模组/插件（英文名效果更好）" style="max-width:340px">
-        <button class="btn" id="res-go">🔍 搜索</button>
+        <div class="search-field">${icon("search", "sf-ico")}<input type="text" id="res-q" placeholder="搜索 Modrinth 模组/插件（英文名效果更好）" style="width:340px"></div>
+        <button class="btn" id="res-go">${icon("search")} 搜索</button>
         <span class="hint">已按当前核心与版本过滤兼容资源 · 数据来自 Modrinth（免费开放）</span>
       </div>
       <div id="res-list"><div class="sub">输入关键词搜索，或直接点搜索看热门资源</div></div>`;
@@ -1209,11 +1277,11 @@ async function renderDetail(name, tab = "console") {
         const r = await api(`/api/instances/${encodeURIComponent(name)}/resources/search?q=${encodeURIComponent($("#res-q").value.trim())}`);
         $("#res-list").innerHTML = (r.hits || []).map(h => `
           <div class="java-row" style="max-width:880px">
-            ${h.icon_url ? `<img src="${esc(h.icon_url)}" width="34" height="34" style="border-radius:7px;flex:none" onerror="this.remove()">` : `<span style="font-size:22px">📦</span>`}
+            ${h.icon_url ? `<img src="${esc(h.icon_url)}" width="34" height="34" style="border-radius:7px;flex:none" onerror="this.remove()">` : `<span class="res-noicon">${icon("package")}</span>`}
             <div style="flex:1;min-width:0"><b>${esc(h.title)}</b>
               <div class="jp" style="white-space:normal;max-height:32px;overflow:hidden">${esc(h.description)}</div></div>
-            <span class="jv" style="color:var(--muted)">${h.downloads >= 1e6 ? (h.downloads / 1e6).toFixed(1) + "M" : Math.round(h.downloads / 1e3) + "k"} ↓</span>
-            <button class="btn sm primary" data-rid="${esc(h.project_id)}" data-rt="${esc(h.title)}">⬇ 安装</button>
+            <span class="jv" style="color:var(--muted);display:inline-flex;align-items:center;gap:4px">${h.downloads >= 1e6 ? (h.downloads / 1e6).toFixed(1) + "M" : Math.round(h.downloads / 1e3) + "k"}${icon("download")}</span>
+            <button class="btn sm primary" data-rid="${esc(h.project_id)}" data-rt="${esc(h.title)}">${icon("download")} 安装</button>
           </div>`).join("") || `<div class="sub">没有找到兼容 ${esc(info.mc)} 的资源，换个关键词试试</div>`;
         $("#res-list").querySelectorAll("[data-rid]").forEach(b => b.onclick = async () => {
           b.disabled = true;
@@ -1221,8 +1289,8 @@ async function renderDetail(name, tab = "console") {
           try {
             const res = await api(`/api/instances/${encodeURIComponent(name)}/resources/install`, { method: "POST", body: { projectId: b.dataset.rid } });
             toast(`已安装 ${b.dataset.rt} → ${res.file}（重启服务器生效）`);
-            b.textContent = "✔ 已安装";
-          } catch (e) { toast(e.message, true); b.disabled = false; b.textContent = "⬇ 安装"; }
+            b.innerHTML = icon("check") + " 已安装";
+          } catch (e) { toast(e.message, true); b.disabled = false; b.innerHTML = icon("download") + " 安装"; }
         });
       } catch (e) { $("#res-list").innerHTML = `<div class="err-box">${esc(e.message)}</div>`; }
     };
@@ -1231,7 +1299,7 @@ async function renderDetail(name, tab = "console") {
 
   } else if (tab === "common") {
     if (info.kind === "proxy") {
-      body.innerHTML = `<div class="sub">代理端的监听端口、后端服务器列表等配置位于实例目录内其自带的配置文件（Velocity: velocity.toml；Waterfall: config.yml），首次启动后自动生成，用「📁 打开目录」编辑即可。</div>`;
+      body.innerHTML = `<div class="sub">代理端的监听端口、后端服务器列表等配置位于实例目录内其自带的配置文件（Velocity: velocity.toml；Waterfall: config.yml），首次启动后自动生成，用「打开目录」按钮编辑即可。</div>`;
       return;
     }
     let data;
@@ -1271,18 +1339,18 @@ async function renderDetail(name, tab = "console") {
     };
     body.innerHTML = `
       <div class="common-bar">
-        <input type="text" id="cp-search" placeholder="🔍 搜索设置项（中文名 / 键名，如 视距 / rcon）" style="max-width:320px">
+        <div class="search-field">${icon("search", "sf-ico")}<input type="text" id="cp-search" placeholder="搜索设置项（中文名 / 键名，如 视距 / rcon）" style="width:320px"></div>
         <div class="cp-chips">${GROUPS.map((g, i) => inGroup(g).length ? `<button class="cp-chip" data-g="${i}">${g}</button>` : "").join("")}</div>
       </div>
-      ${data.pairs.length === 0 ? `<div class="sub">⚠ 服务器还未首次启动，部分配置项将在首次启动后由服务端补全；现在设置的值会被保留。</div>` : ""}
+      ${data.pairs.length === 0 ? `<div class="warn-text" style="margin-bottom:12px;display:flex;align-items:flex-start;gap:7px;line-height:1.7">${icon("warn")}<span>服务器还未首次启动，部分配置项将在首次启动后由服务端补全；现在设置的值会被保留。</span></div>` : ""}
       <div id="cp-list">${GROUPS.map((g, i) => {
         const gi = inGroup(g);
         return gi.length ? `<div class="cp-group" id="cpg-${i}"><h3 class="cp-gh">${g}<span class="cp-gn">${gi.length}</span></h3>
           <div class="props-grid">${gi.map(rowHTML).join("")}</div></div>` : "";
       }).join("")}</div>
       <div class="save-bar">
-        <button class="btn primary" id="props-save">💾 保存设置</button>
-        ${running ? `<span class="warn-text">⚠ 运行中：属性类修改需重启生效（游戏规则即时生效）</span>` : ""}
+        <button class="btn primary" id="props-save">${icon("save")} 保存设置</button>
+        ${running ? `<span class="warn-text">${icon("warn")} 运行中：属性类修改需重启生效（游戏规则即时生效）</span>` : ""}
       </div>`;
     body.querySelectorAll(".cp-chip").forEach(c => c.onclick = () => $("#cpg-" + c.dataset.g, body)?.scrollIntoView({ behavior: "smooth", block: "start" }));
     $("#cp-search").oninput = () => {
@@ -1361,8 +1429,8 @@ async function renderDetail(name, tab = "console") {
     body.innerHTML = `<div class="sub">server.properties 全部键值（高级）。改完点保存。已知项附中文名。</div>
       <table class="raw">${data.pairs.map(p =>
         `<tr><td>${esc(p.key)}</td><td class="raw-cn">${LABELS[p.key] ? esc(LABELS[p.key]) : ""}</td><td><input type="text" data-k="${esc(p.key)}" value="${esc(p.value)}"></td></tr>`).join("")}</table>
-      <div class="save-bar"><button class="btn primary" id="raw-save">💾 保存全部</button>
-      ${data.running ? `<span class="warn-text">⚠ 运行中，重启后生效</span>` : ""}</div>`;
+      <div class="save-bar"><button class="btn primary" id="raw-save">${icon("save")} 保存全部</button>
+      ${data.running ? `<span class="warn-text">${icon("warn")} 运行中，重启后生效</span>` : ""}</div>`;
     $("#raw-save").onclick = async () => {
       const pairs = [...body.querySelectorAll("input[data-k]")].map(el => ({ key: el.dataset.k, value: el.value }));
       try { await api(`/api/instances/${encodeURIComponent(name)}/properties`, { method: "PUT", body: { pairs } }); toast("已保存"); }
@@ -1392,11 +1460,11 @@ async function renderDetail(name, tab = "console") {
         <label class="field"><span>自定义 JVM 参数（每行一个或空格分隔；-Xmx/-Xms 由上方内存自动生成，无需在此填写）</span>
           <textarea id="jm-jvm" rows="5" spellcheck="false" placeholder="如：-XX:+UseG1GC">${esc((info.extraJvm || []).join("\n"))}</textarea></label>
         <div class="row" style="margin-bottom:12px;flex-wrap:wrap">
-          <button class="btn sm" id="jm-aikar">⚡ 套用 Aikar's Flags（G1GC 优化）</button>
+          <button class="btn sm" id="jm-aikar">${icon("bolt")} 套用 Aikar's Flags（G1GC 优化）</button>
           <button class="btn sm" id="jm-clear">清空</button>
         </div>
         <div class="hint" style="margin-bottom:14px">Java ${info.javaMajor}（便携运行时，独立管理，不影响系统）<br>实例目录：${esc(info.dir)}<br>手动启动：双击实例目录中的 run.bat（与此处配置同步）</div>
-        <button class="btn primary" id="jm-save">💾 保存（重启后生效）</button>
+        <button class="btn primary" id="jm-save">${icon("save")} 保存（重启后生效）</button>
       </div>`;
     renderMemoryControl($("#jm-mem-mount"), { sliderId: "jm-mem", min: 1024, max: maxMem, value: Math.min(info.xmxMb, maxMem), totalMb: appInfo.ramMb, availMb: appInfo.availRamMb });
     $("#jm-aikar").onclick = () => { $("#jm-jvm").value = aikarsFlags(+$("#jm-mem").value).join("\n"); toast("已填入 Aikar's Flags，点保存生效"); };
@@ -1417,15 +1485,15 @@ async function renderTunnels() {
   try { insts = await api("/api/instances"); } catch {}
   Main().innerHTML = eyebrow("MULTIPLAYER") + `<h1>联机穿透</h1>
     <div class="sub">把本地服务器映射到公网，异地朋友直接连。基于 <b>OpenFrp OPENAPI</b>，并支持 SakuraFrp 与自建 frps。</div>
-    <div id="tun-list">加载中…</div>
-    <button class="btn" id="tn-toggle" style="margin:26px 0 10px">＋ 添加隧道…</button>
+    <div id="tun-list">${skeletonRows(4)}</div>
+    <button class="btn" id="tn-toggle" style="margin:24px 0 10px">${icon("plus")} 添加隧道…</button>
     <div id="tn-form" hidden>
     <div class="hint" style="margin-bottom:12px;line-height:1.8">
       <b>OpenFrp</b>：到 <a href="https://console.openfrp.net" target="_blank" style="color:var(--accent)">OpenFrp 控制台</a> 创建 TCP 隧道（本地端口填 MC 端口）→「个人中心」复制用户密钥；<br>
       <b>樱花frp</b>：到 <a href="https://www.natfrp.com" target="_blank" style="color:var(--accent)">SakuraFrp</a> 创建隧道 → 复制访问密钥与隧道 ID（首次需手动放置其 frpc，按提示操作）；<br>
       <b>自定义</b>：填自己 frps 服务器的地址、端口与 token。
     </div>
-    <div class="form-grid" style="max-width:880px">
+    <div class="form-grid">
       <label class="field"><span>服务商</span><select id="tn-provider">
         <option value="openfrp">OpenFrp（免费公益）</option>
         <option value="natfrp">樱花frp SakuraFrp</option>
@@ -1442,7 +1510,7 @@ async function renderTunnels() {
       <div class="field"><label class="switch"><input type="checkbox" id="tn-auto" checked><span class="sw"></span>
         <span><span class="sw-label">跟随实例启动</span><div class="sw-desc">绑定的服务器启动时自动拉起隧道</div></span></label></div>
     </div>
-    <button class="btn primary" id="tn-add">＋ 添加隧道</button>
+    <button class="btn primary" id="tn-add">${icon("plus")} 添加隧道</button>
     </div>`;
 
   const PROV_NAMES = { openfrp: "OpenFrp", natfrp: "樱花frp", custom: "自定义" };
@@ -1462,19 +1530,19 @@ async function renderTunnels() {
     if (logOpen) return; // 日志展开时暂停列表刷新，避免打断 SSE 显示
     let list;
     try { list = await api("/api/tunnels"); } catch (e) { $("#tun-list").innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
-    if (!list.length) { $("#tun-list").innerHTML = `<div class="empty"><div class="big">🧭</div>还没有隧道<br>在下方添加一条，开服后一键把本地服务器映射到公网</div>`; return; }
+    if (!list.length) { $("#tun-list").innerHTML = `<div class="empty"><div class="empty-ico">${icon("compass", "ico-xl")}</div>还没有隧道<br>在下方添加一条，开服后一键把本地服务器映射到公网</div>`; return; }
     $("#tun-list").innerHTML = list.map(t => `
       <div class="java-row" style="max-width:980px">
         <span class="dot ${t.running ? "running" : ""}"></span>
         <b style="min-width:110px">${esc(t.name)}</b>
         <span class="badge core">${esc(PROV_NAMES[t.provider] || t.provider)}</span>
-        ${t.boundInstance ? `<span class="badge">↔ ${esc(t.boundInstance)}${t.autoStart ? " · 跟随" : ""}</span>` : ""}
+        ${t.boundInstance ? `<span class="badge">${icon("link")} ${esc(t.boundInstance)}${t.autoStart ? " · 跟随" : ""}</span>` : ""}
         ${t.publicAddr ? `<span class="jv" style="color:var(--accent)">${esc(t.publicAddr)}</span>
-          <button class="btn sm" data-copy="${esc(t.publicAddr)}">📋 复制</button>`
-          : t.lastError ? `<span class="jp" style="color:var(--redstone)" title="${esc(t.lastError)}">⚠ ${esc(t.lastError.length > 46 ? t.lastError.slice(0, 46) + "…" : t.lastError)}</span>`
+          <button class="btn sm" data-copy="${esc(t.publicAddr)}">${icon("copy")} 复制</button>`
+          : t.lastError ? `<span class="jp" style="color:var(--redstone);display:inline-flex;align-items:center;gap:5px" title="${esc(t.lastError)}">${icon("warn")} ${esc(t.lastError.length > 46 ? t.lastError.slice(0, 46) + "…" : t.lastError)}</span>`
           : `<span class="jp">${t.running ? "连接中…" : "尚未启动"}</span>`}
         <span class="grow"></span>
-        ${t.running ? `<button class="btn sm" data-tstop="${t.id}">■ 停止</button>` : `<button class="btn sm primary" data-tstart="${t.id}">▶ 启动</button>`}
+        ${t.running ? `<button class="btn sm" data-tstop="${t.id}">${icon("stop")} 停止</button>` : `<button class="btn sm primary" data-tstart="${t.id}">${icon("play")} 启动</button>`}
         <button class="btn sm" data-tlog="${t.id}">日志</button>
         <button class="btn sm danger" data-tdel="${t.id}">删除</button>
       </div>
@@ -1540,13 +1608,13 @@ async function renderTunnels() {
 
 /* ---------- 视图：全局设置 ---------- */
 const SETTINGS_SECTIONS = [
-  { id: "download", label: "下载与网络", icon: "🌐" },
-  { id: "storage", label: "存储位置", icon: "📁" },
-  { id: "java", label: "Java 运行时", icon: "☕" },
-  { id: "remote", label: "远程访问", icon: "📱" },
-  { id: "notify", label: "通知与集成", icon: "🔔" },
-  { id: "startup", label: "启动与托盘", icon: "🖥" },
-  { id: "about", label: "更新与关于", icon: "ℹ️" },
+  { id: "download", label: "下载与网络", icon: "globe" },
+  { id: "storage", label: "存储位置", icon: "folder" },
+  { id: "java", label: "Java 运行时", icon: "coffee" },
+  { id: "remote", label: "远程访问", icon: "phone" },
+  { id: "notify", label: "通知与集成", icon: "bell" },
+  { id: "startup", label: "启动与托盘", icon: "monitor" },
+  { id: "about", label: "更新与关于", icon: "info" },
 ];
 
 async function renderSettings(section) {
@@ -1556,7 +1624,7 @@ async function renderSettings(section) {
   Main().innerHTML = `<div class="settings-page">` + eyebrow("OPTIONS") + `<h1>全局设置</h1>
     <div class="settings-layout">
       <nav class="settings-nav">${SETTINGS_SECTIONS.map(s => `
-        <a class="set-nav ${s.id === section ? "cur" : ""}" href="#/settings/${s.id}"><span class="sn-ico">${s.icon}</span>${s.label}</a>`).join("")}</nav>
+        <a class="set-nav ${s.id === section ? "cur" : ""}" href="#/settings/${s.id}"><span class="sn-ico">${icon(s.icon)}</span>${s.label}</a>`).join("")}</nav>
       <div class="settings-body" id="set-body"><div class="sub">加载中…</div></div>
     </div></div>`;
   const body = $("#set-body");
@@ -1626,9 +1694,9 @@ function storageRow(title, path, desc, pick) {
   return `<div class="row-item"><div class="ri-head"><div class="ri-main">
       <div class="ri-title">${esc(title)}</div><div class="ri-sub">${esc(desc)}</div><div class="ri-key">${esc(path || "")}</div></div>
     <div class="ri-right">
-      <button class="btn sm" data-open="${esc(path || "")}">📁 打开</button>
+      <button class="btn sm" data-open="${esc(path || "")}">${icon("folder")} 打开</button>
       <button class="btn sm" data-pick="${pick}">更改…</button>
-      <button class="btn sm" data-reset="${pick}" title="恢复默认目录">↺</button>
+      <button class="btn sm" data-reset="${pick}" title="恢复默认目录" aria-label="恢复默认目录">${icon("refresh")}</button>
     </div></div></div>`;
 }
 function setStorage(body, info) {
@@ -1639,7 +1707,7 @@ function setStorage(body, info) {
         ${storageRow("备份存放目录", info.backupsRoot, "世界热备份的存放位置", "backups")}
         <div class="row-item"><div class="ri-head"><div class="ri-main">
           <div class="ri-title">程序数据目录</div><div class="ri-sub">程序自身、Java 运行时与下载缓存所在（便携，随程序整体迁移）</div><div class="ri-key">${esc(info.base)}</div></div>
-          <div class="ri-right"><button class="btn sm" data-open="${esc(info.base)}">📁 打开</button></div></div></div>
+          <div class="ri-right"><button class="btn sm" data-open="${esc(info.base)}">${icon("folder")} 打开</button></div></div></div>
       </div>
       <div class="hint" style="margin-top:12px">建议放到大容量分区（如 D 盘）以免占满系统盘；点「更改…」会弹出系统文件夹选择框（仅本机可用，手机远程管理时请在主机操作）。</div>`;
     body.querySelectorAll("[data-open]").forEach(b => b.onclick = () =>
@@ -1682,14 +1750,14 @@ async function setJava(body, info) {
         <div class="ri-key">${esc(j.path)}</div></div></div></div>`).join("")
       : `<div class="sub">尚未发现本机安装的 Java，点击下方扫描</div>`}</div>
     <div class="row" style="margin-top:12px;flex-wrap:wrap">
-      <button class="btn" id="java-scan">🔄 重新扫描本机 Java</button>
+      <button class="btn" id="java-scan">${icon("refresh")} 重新扫描本机 Java</button>
       <input type="text" id="java-path" placeholder="手动添加：粘贴 java.exe 或 JDK 目录路径" style="max-width:420px">
       <button class="btn" id="java-add">添加</button>
     </div>`;
   $("#java-scan").onclick = async () => {
     $("#java-scan").disabled = true; $("#java-scan").textContent = "扫描中…（约数秒）";
     try { const list = await api("/api/javas/scan", { method: "POST" }); toast(`扫描完成，发现 ${list.length} 个 Java`); setJava(body, info); }
-    catch (e) { toast(e.message, true); $("#java-scan").disabled = false; $("#java-scan").textContent = "🔄 重新扫描本机 Java"; }
+    catch (e) { toast(e.message, true); $("#java-scan").disabled = false; $("#java-scan").innerHTML = icon("refresh") + " 重新扫描本机 Java"; }
   };
   $("#java-add").onclick = async () => {
     const p = $("#java-path").value.trim(); if (!p) return;
@@ -1736,7 +1804,7 @@ function setAbout(body, info) {
     <div class="row" style="flex-wrap:wrap;margin-bottom:10px">
       <input type="text" id="up-repo" value="${esc(info.config.updateRepo || "")}" placeholder="GitHub 仓库，如 yourname/AutoMCHUB" style="max-width:300px">
       <button class="btn" id="up-save">保存</button>
-      <button class="btn" id="up-check">🔎 检查更新</button>
+      <button class="btn" id="up-check">${icon("search")} 检查更新</button>
       <span id="up-result" class="hint"></span>
     </div>
     <div class="row-list" style="margin-bottom:18px">
@@ -1751,7 +1819,7 @@ function setAbout(body, info) {
     </div>
     <div class="set-danger">
       <div><div class="ri-title">退出程序</div><div class="ri-sub">优雅停止所有运行中的服务器（保存世界）后退出</div></div>
-      <button class="btn danger" id="quit-app">⏻ 退出 AutoMCHUB</button>
+      <button class="btn danger" id="quit-app">${icon("power")} 退出 AutoMCHUB</button>
     </div>`;
   $("#up-save").onclick = async () => {
     try { await api("/api/config", { method: "PUT", body: { updateRepo: $("#up-repo").value.trim() } }); toast("更新仓库已保存"); }
@@ -1769,7 +1837,7 @@ function setAbout(body, info) {
         $("#up-result").innerHTML = `发现新版本 <b style="color:var(--accent-text)">${esc(r.latest.tag)}</b>（当前 v${esc(r.current)}）`;
         const btn = document.createElement("button");
         btn.className = "btn sm primary";
-        btn.textContent = "⬆ 立即更新并重启";
+        btn.innerHTML = icon("arrowUp") + " 立即更新并重启";
         btn.onclick = async () => {
           btn.disabled = true;
           try { await api("/api/update/apply", { method: "POST" }); document.body.innerHTML = `<div style="padding:80px;text-align:center;color:var(--muted)">正在更新，程序将自动重启…</div>`; }
@@ -1807,7 +1875,7 @@ function showOnboarding(info) {
         <div class="hint" style="margin-top:6px">每台服务器一个子文件夹。想放到 D 盘等大容量分区，可到「设置 → 存储位置」更改。</div>
       </div>
     </div>
-    <div class="m-actions"><button class="btn primary" id="ob-go">开始使用 ⛏</button></div>
+    <div class="m-actions"><button class="btn primary" id="ob-go">开始使用</button></div>
   </div></div>`;
   root.querySelector("#ob-go").onclick = async () => {
     const sel = root.querySelector('input[name="ob-src"]:checked');
