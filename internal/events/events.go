@@ -40,7 +40,7 @@ func Subscribe(fn func(Event)) {
 }
 
 // Publish 异步派发，绝不阻塞业务路径：队列满时挤掉该订阅者最旧的事件
-//（保最新优先——tunnel.down 之类的末态比积压的旧事件更有价值）。
+// （保最新优先——tunnel.down 之类的末态比积压的旧事件更有价值）。
 func Publish(typ string, data map[string]any) {
 	e := Event{Type: typ, Time: time.Now(), Data: data}
 	mu.RLock()
