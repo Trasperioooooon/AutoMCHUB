@@ -13,23 +13,51 @@ type Event struct {
 	Data map[string]any `json:"data"`
 }
 
+// subscriber 每个订阅者一条串行队列：专属 goroutine 依发布顺序逐个执行回调，
+// 保证同一订阅者收到的事件有序（此前逐事件 go h(e) 派发，start/stop 可能乱序送达）。
+type subscriber struct {
+	fn func(Event)
+	ch chan Event
+}
+
+const queueSize = 256
+
 var (
-	mu       sync.RWMutex
-	handlers []func(Event)
+	mu   sync.RWMutex
+	subs []*subscriber
 )
 
 func Subscribe(fn func(Event)) {
+	s := &subscriber{fn: fn, ch: make(chan Event, queueSize)}
 	mu.Lock()
-	handlers = append(handlers, fn)
+	subs = append(subs, s)
 	mu.Unlock()
+	go func() {
+		for e := range s.ch {
+			s.fn(e)
+		}
+	}()
 }
 
+// Publish 异步派发，绝不阻塞业务路径：队列满时挤掉该订阅者最旧的事件
+//（保最新优先——tunnel.down 之类的末态比积压的旧事件更有价值）。
 func Publish(typ string, data map[string]any) {
 	e := Event{Type: typ, Time: time.Now(), Data: data}
 	mu.RLock()
-	hs := append([]func(Event){}, handlers...)
+	ss := append([]*subscriber{}, subs...)
 	mu.RUnlock()
-	for _, h := range hs {
-		go h(e) // 异步派发，绝不阻塞业务路径
+	for _, s := range ss {
+		select {
+		case s.ch <- e:
+		default:
+			select {
+			case <-s.ch:
+			default:
+			}
+			select {
+			case s.ch <- e:
+			default:
+			}
+		}
 	}
 }
