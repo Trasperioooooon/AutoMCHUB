@@ -23,6 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"automchub/internal/app"
 	"automchub/internal/autostart"
 	"automchub/internal/inst"
@@ -170,17 +172,37 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, fmt.Errorf("未启用远程访问"))
 		return
 	}
-	sum := sha256.Sum256([]byte(body.Password))
-	if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(sum[:])), []byte(hash)) != 1 {
-		time.Sleep(700 * time.Millisecond) // 抑制暴力尝试（常量时间比较避免计时侧信道）
+	if !checkPassword(hash, body.Password) {
+		time.Sleep(700 * time.Millisecond) // 抑制暴力尝试
 		writeErr(w, 401, fmt.Errorf("密码错误"))
 		return
+	}
+	// 旧版无盐 SHA-256 哈希登录成功后就地升级为 bcrypt（哈希被并发改过则不动）
+	if !strings.HasPrefix(hash, "$2") {
+		if h, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost); err == nil {
+			_, _ = app.UpdateConfig(func(c *app.Config) error {
+				if c.AccessPasswordHash == hash {
+					c.AccessPasswordHash = string(h)
+				}
+				return nil
+			})
+		}
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name: "amh_session", Value: sessionValue,
 		Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
 	})
 	writeJSON(w, "ok")
+}
+
+// checkPassword 校验远程访问密码：bcrypt 为主；兼容 v2.3 及更早的无盐
+// SHA-256 hex（登录成功后由调用方就地升级，无需用户重设密码）。
+func checkPassword(hash, password string) bool {
+	if strings.HasPrefix(hash, "$2") {
+		return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+	}
+	sum := sha256.Sum256([]byte(password))
+	return subtle.ConstantTimeCompare([]byte(hex.EncodeToString(sum[:])), []byte(hash)) == 1
 }
 
 // splitHostPort 拆分 Host 头，正确处理裸 IPv6（如 ::1 / [::1]，有无端口皆可），
@@ -389,7 +411,7 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		MinimizeToTray     *bool   `json:"minimizeToTray"`
 		AutoStart          *bool   `json:"autoStart"`
 		ListenLAN          *bool   `json:"listenLan"`
-		LanPassword        *string `json:"lanPassword"` // 明文仅在本次请求中出现，存储为 SHA-256
+		LanPassword        *string `json:"lanPassword"` // 明文仅在本次请求中出现，存储为 bcrypt 哈希
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeErr(w, 400, err)
@@ -421,8 +443,12 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	var newPassHash string
 	if body.LanPassword != nil && *body.LanPassword != "" {
-		sum := sha256.Sum256([]byte(*body.LanPassword))
-		newPassHash = hex.EncodeToString(sum[:])
+		h, err := bcrypt.GenerateFromPassword([]byte(*body.LanPassword), bcrypt.DefaultCost)
+		if err != nil { // 超出 bcrypt 72 字节上限等
+			writeErr(w, 400, fmt.Errorf("密码不可用（最长 72 字节）: %w", err))
+			return
+		}
+		newPassHash = string(h)
 	}
 	// 读-改-写在 UpdateConfig 的锁内一次完成，避免并发保存互相丢字段
 	if _, err := app.UpdateConfig(func(c *app.Config) error {
