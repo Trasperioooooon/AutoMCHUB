@@ -23,6 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"automchub/internal/app"
 	"automchub/internal/autostart"
 	"automchub/internal/inst"
@@ -170,17 +172,37 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, fmt.Errorf("未启用远程访问"))
 		return
 	}
-	sum := sha256.Sum256([]byte(body.Password))
-	if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(sum[:])), []byte(hash)) != 1 {
-		time.Sleep(700 * time.Millisecond) // 抑制暴力尝试（常量时间比较避免计时侧信道）
+	if !checkPassword(hash, body.Password) {
+		time.Sleep(700 * time.Millisecond) // 抑制暴力尝试
 		writeErr(w, 401, fmt.Errorf("密码错误"))
 		return
+	}
+	// 旧版无盐 SHA-256 哈希登录成功后就地升级为 bcrypt（哈希被并发改过则不动）
+	if !strings.HasPrefix(hash, "$2") {
+		if h, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost); err == nil {
+			_, _ = app.UpdateConfig(func(c *app.Config) error {
+				if c.AccessPasswordHash == hash {
+					c.AccessPasswordHash = string(h)
+				}
+				return nil
+			})
+		}
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name: "amh_session", Value: sessionValue,
 		Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
 	})
 	writeJSON(w, "ok")
+}
+
+// checkPassword 校验远程访问密码：bcrypt 为主；兼容 v2.3 及更早的无盐
+// SHA-256 hex（登录成功后由调用方就地升级，无需用户重设密码）。
+func checkPassword(hash, password string) bool {
+	if strings.HasPrefix(hash, "$2") {
+		return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+	}
+	sum := sha256.Sum256([]byte(password))
+	return subtle.ConstantTimeCompare([]byte(hex.EncodeToString(sum[:])), []byte(hash)) == 1
 }
 
 // splitHostPort 拆分 Host 头，正确处理裸 IPv6（如 ::1 / [::1]，有无端口皆可），
@@ -221,17 +243,17 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 	cfg := app.GetConfig()
 	cfg.AccessPasswordHash = "" // 不下发哈希
 	writeJSON(w, map[string]any{
-		"version":    app.Version,
-		"base":       app.Base,
-		"ramMb":      app.TotalRAMMB(),
+		"version":     app.Version,
+		"base":        app.Base,
+		"ramMb":       app.TotalRAMMB(),
 		"availRamMb":  app.AvailRAMMB(),
 		"port":        s.port,
 		"serversRoot": app.ServersRoot(),
 		"backupsRoot": app.BackupsRoot(),
 		"config":      cfg,
-		"lanSet":     app.GetConfig().AccessPasswordHash != "",
-		"autoStart":  autostart.Enabled(), // 开机自启真值以注册表为准
-		"ips":        localIPs(),
+		"lanSet":      app.GetConfig().AccessPasswordHash != "",
+		"autoStart":   autostart.Enabled(), // 开机自启真值以注册表为准
+		"ips":         localIPs(),
 	})
 }
 
@@ -377,9 +399,9 @@ func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Source      *string `json:"source"`
-		CFApiKey    *string `json:"cfApiKey"`
-		WebhookURL  *string `json:"webhookUrl"`
+		Source             *string `json:"source"`
+		CFApiKey           *string `json:"cfApiKey"`
+		WebhookURL         *string `json:"webhookUrl"`
 		UpdateRepo         *string `json:"updateRepo"`
 		CheckUpdateOnStart *bool   `json:"checkUpdateOnStart"`
 		ServersDir         *string `json:"serversDir"`
@@ -389,80 +411,97 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		MinimizeToTray     *bool   `json:"minimizeToTray"`
 		AutoStart          *bool   `json:"autoStart"`
 		ListenLAN          *bool   `json:"listenLan"`
-		LanPassword        *string `json:"lanPassword"` // 明文仅在本次请求中出现，存储为 SHA-256
+		LanPassword        *string `json:"lanPassword"` // 明文仅在本次请求中出现，存储为 bcrypt 哈希
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeErr(w, 400, err)
 		return
 	}
-	c := app.GetConfig()
-	if body.Source != nil {
-		c.Source = *body.Source
-	}
-	if body.CFApiKey != nil {
-		c.CFApiKey = strings.TrimSpace(*body.CFApiKey)
-	}
+	// 可失败的校验与 I/O（建目录、算哈希）在锁外先做完，锁内只做字段套用
 	if body.WebhookURL != nil {
 		u := strings.TrimSpace(*body.WebhookURL)
 		if u != "" && !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
 			writeErr(w, 400, fmt.Errorf("Webhook 地址需以 http(s):// 开头"))
 			return
 		}
-		c.WebhookURL = u
-	}
-	if body.UpdateRepo != nil {
-		c.UpdateRepo = strings.TrimSpace(*body.UpdateRepo)
-	}
-	if body.CheckUpdateOnStart != nil {
-		c.CheckUpdateOnStart = *body.CheckUpdateOnStart
 	}
 	if body.ServersDir != nil {
-		d := strings.TrimSpace(*body.ServersDir)
-		if d != "" {
+		if d := strings.TrimSpace(*body.ServersDir); d != "" {
 			if err := os.MkdirAll(d, 0o755); err != nil {
 				writeErr(w, 400, fmt.Errorf("存放目录不可用: %w", err))
 				return
 			}
 		}
-		c.ServersDir = d
 	}
 	if body.BackupsDir != nil {
-		d := strings.TrimSpace(*body.BackupsDir)
-		if d != "" {
+		if d := strings.TrimSpace(*body.BackupsDir); d != "" {
 			if err := os.MkdirAll(d, 0o755); err != nil {
 				writeErr(w, 400, fmt.Errorf("备份目录不可用: %w", err))
 				return
 			}
 		}
-		c.BackupsDir = d
 	}
-	if body.BackupKeep != nil {
-		k := *body.BackupKeep
-		if k < 1 {
-			k = 1
-		} else if k > 1000 {
-			k = 1000
-		}
-		c.BackupKeep = k
-	}
-	if body.Onboarded != nil {
-		c.Onboarded = *body.Onboarded
-	}
-	if body.MinimizeToTray != nil {
-		c.MinimizeToTray = *body.MinimizeToTray
-	}
+	var newPassHash string
 	if body.LanPassword != nil && *body.LanPassword != "" {
-		sum := sha256.Sum256([]byte(*body.LanPassword))
-		c.AccessPasswordHash = hex.EncodeToString(sum[:])
-	}
-	if body.ListenLAN != nil {
-		if *body.ListenLAN && c.AccessPasswordHash == "" {
-			writeErr(w, 400, fmt.Errorf("开启局域网访问前请先设置访问密码"))
+		h, err := bcrypt.GenerateFromPassword([]byte(*body.LanPassword), bcrypt.DefaultCost)
+		if err != nil { // 超出 bcrypt 72 字节上限等
+			writeErr(w, 400, fmt.Errorf("密码不可用（最长 72 字节）: %w", err))
 			return
 		}
-		c.ListenLAN = *body.ListenLAN
+		newPassHash = string(h)
 	}
-	app.SetConfig(c)
+	// 读-改-写在 UpdateConfig 的锁内一次完成，避免并发保存互相丢字段
+	if _, err := app.UpdateConfig(func(c *app.Config) error {
+		if body.Source != nil {
+			c.Source = *body.Source
+		}
+		if body.CFApiKey != nil {
+			c.CFApiKey = strings.TrimSpace(*body.CFApiKey)
+		}
+		if body.WebhookURL != nil {
+			c.WebhookURL = strings.TrimSpace(*body.WebhookURL)
+		}
+		if body.UpdateRepo != nil {
+			c.UpdateRepo = strings.TrimSpace(*body.UpdateRepo)
+		}
+		if body.CheckUpdateOnStart != nil {
+			c.CheckUpdateOnStart = *body.CheckUpdateOnStart
+		}
+		if body.ServersDir != nil {
+			c.ServersDir = strings.TrimSpace(*body.ServersDir)
+		}
+		if body.BackupsDir != nil {
+			c.BackupsDir = strings.TrimSpace(*body.BackupsDir)
+		}
+		if body.BackupKeep != nil {
+			k := *body.BackupKeep
+			if k < 1 {
+				k = 1
+			} else if k > 1000 {
+				k = 1000
+			}
+			c.BackupKeep = k
+		}
+		if body.Onboarded != nil {
+			c.Onboarded = *body.Onboarded
+		}
+		if body.MinimizeToTray != nil {
+			c.MinimizeToTray = *body.MinimizeToTray
+		}
+		if newPassHash != "" {
+			c.AccessPasswordHash = newPassHash
+		}
+		if body.ListenLAN != nil {
+			if *body.ListenLAN && c.AccessPasswordHash == "" {
+				return fmt.Errorf("开启局域网访问前请先设置访问密码")
+			}
+			c.ListenLAN = *body.ListenLAN
+		}
+		return nil
+	}); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
 	// 开机自启是注册表副作用（不落 config.json）：放在所有校验与配置保存成功之后再执行，
 	// 避免上面任一校验失败提前 return 时已经改动了注册表（否则会「报错却已悄悄改了自启」）
 	if body.AutoStart != nil {
@@ -776,24 +815,24 @@ func (s *Server) handleJavaAdd(w http.ResponseWriter, r *http.Request) {
 // ---------- 实例 ----------
 
 type instSummary struct {
-	Name      string `json:"name"`
-	Core      string `json:"core"`
-	Kind      string `json:"kind"`
-	MC        string `json:"mc"`
-	Build     string `json:"build"`
-	JavaMajor int    `json:"javaMajor"`
-	XmxMB     int    `json:"xmxMb"`
-	XmsMB     int    `json:"xmsMb"`
-	Port      int    `json:"port"`
-	Status    string `json:"status"`
-	MOTD      string `json:"motd"`
-	Dir       string `json:"dir"`
-	CreatedAt string `json:"createdAt"`
-	ConsoleEncoding string `json:"consoleEncoding"`
-	OnlineCount int      `json:"onlineCount"`
-	UptimeSec   int      `json:"uptimeSec"`
-	MaxPlayers  int      `json:"maxPlayers"`
-	ExtraJVM    []string `json:"extraJvm"`
+	Name            string   `json:"name"`
+	Core            string   `json:"core"`
+	Kind            string   `json:"kind"`
+	MC              string   `json:"mc"`
+	Build           string   `json:"build"`
+	JavaMajor       int      `json:"javaMajor"`
+	XmxMB           int      `json:"xmxMb"`
+	XmsMB           int      `json:"xmsMb"`
+	Port            int      `json:"port"`
+	Status          string   `json:"status"`
+	MOTD            string   `json:"motd"`
+	Dir             string   `json:"dir"`
+	CreatedAt       string   `json:"createdAt"`
+	ConsoleEncoding string   `json:"consoleEncoding"`
+	OnlineCount     int      `json:"onlineCount"`
+	UptimeSec       int      `json:"uptimeSec"`
+	MaxPlayers      int      `json:"maxPlayers"`
+	ExtraJVM        []string `json:"extraJvm"`
 }
 
 func summarize(i *inst.Instance) instSummary {
@@ -816,9 +855,9 @@ func summarize(i *inst.Instance) instSummary {
 		MC: i.MC, Build: i.Build,
 		JavaMajor: i.JavaMajor, XmxMB: xmx, XmsMB: xms,
 		Port: i.Port(), Status: i.Status(), MOTD: motd, Dir: i.Dir,
-		CreatedAt: i.CreatedAt.Format("2006-01-02 15:04"),
+		CreatedAt:       i.CreatedAt.Format("2006-01-02 15:04"),
 		ConsoleEncoding: enc,
-		OnlineCount: i.OnlineCount(), UptimeSec: i.UptimeSec(), MaxPlayers: maxP,
+		OnlineCount:     i.OnlineCount(), UptimeSec: i.UptimeSec(), MaxPlayers: maxP,
 		ExtraJVM: i.ExtraJVMSnapshot(),
 	}
 }

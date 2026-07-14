@@ -42,14 +42,14 @@ type Snapshot struct {
 }
 
 type Task struct {
-	id     string
-	title  string
-	mu     sync.Mutex
-	steps  []Step
-	log    []string
-	label  string
-	done   int64
-	total  int64
+	id       string
+	title    string
+	mu       sync.Mutex
+	steps    []Step
+	log      []string
+	label    string
+	done     int64
+	total    int64
 	ended    bool
 	err      string
 	result   string

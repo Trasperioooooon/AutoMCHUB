@@ -5,17 +5,17 @@ package mcsrc
 type Core string
 
 const (
-	CoreVanilla  Core = "vanilla"
-	CorePaper    Core = "paper"
-	CorePurpur   Core = "purpur"
-	CoreForge    Core = "forge"
-	CoreNeoForge Core = "neoforge"
-	CoreFabric   Core = "fabric"
-	CoreLeaves   Core = "leaves"
-	CoreFolia    Core = "folia"
-	CoreMohist   Core = "mohist"
-	CoreBanner   Core = "banner"
-	CoreVelocity Core = "velocity"
+	CoreVanilla   Core = "vanilla"
+	CorePaper     Core = "paper"
+	CorePurpur    Core = "purpur"
+	CoreForge     Core = "forge"
+	CoreNeoForge  Core = "neoforge"
+	CoreFabric    Core = "fabric"
+	CoreLeaves    Core = "leaves"
+	CoreFolia     Core = "folia"
+	CoreMohist    Core = "mohist"
+	CoreBanner    Core = "banner"
+	CoreVelocity  Core = "velocity"
 	CoreWaterfall Core = "waterfall"
 )
 

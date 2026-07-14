@@ -1,0 +1,16 @@
+# 文本文件统一以 LF 入库与检出（Go/前端工具链均兼容，消除 CRLF/LF 混杂）
+* text=auto eol=lf
+
+# Windows 批处理必须 CRLF（当前仓库未跟踪 .bat，规则为未来兜底）
+*.bat text eol=crlf
+
+# 二进制显式标注，防止被行尾转换损坏
+*.ico binary
+*.syso binary
+*.exe binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.zip binary

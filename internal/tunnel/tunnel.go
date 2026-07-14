@@ -26,8 +26,8 @@ type Tunnel struct {
 	ID         string `json:"id"`
 	Provider   string `json:"provider"` // openfrp | natfrp | custom
 	Name       string `json:"name"`
-	Credential string `json:"credential"`          // openfrp 用户密钥 / natfrp 访问密钥 / custom auth token
-	ProxyID    string `json:"proxyId,omitempty"`   // openfrp 隧道ID / natfrp 隧道ID
+	Credential string `json:"credential"`           // openfrp 用户密钥 / natfrp 访问密钥 / custom auth token
+	ProxyID    string `json:"proxyId,omitempty"`    // openfrp 隧道ID / natfrp 隧道ID
 	ServerAddr string `json:"serverAddr,omitempty"` // custom: frps 地址
 	ServerPort int    `json:"serverPort,omitempty"` // custom: frps 端口
 	RemotePort int    `json:"remotePort,omitempty"` // custom: 公网端口
@@ -284,7 +284,7 @@ func (m *Manager) Start(id string) error {
 		_ = cmd.Wait()
 		m.mu.Lock()
 		userStopped := rs.stopped
-		name := t.Name // 在锁内取名，避免 delete 后与并发 Update 的 *old=t 竞争读 t.Name
+		name := t.Name           // 在锁内取名，避免 delete 后与并发 Update 的 *old=t 竞争读 t.Name
 		if m.running[id] == rs { // 身份判定：只清自己这次运行的登记，避免旧 goroutine 误删并发新运行（对齐 inst.Stop 的 i.proc==p）
 			delete(m.running, id)
 		}

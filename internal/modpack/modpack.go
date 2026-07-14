@@ -19,10 +19,10 @@ import (
 
 // File 一个待下载的整合包文件。
 type File struct {
-	Path   string // 相对实例目录（如 mods/xxx.jar）
-	SHA1   string
-	URLs   []string
-	Size   int64
+	Path string // 相对实例目录（如 mods/xxx.jar）
+	SHA1 string
+	URLs []string
+	Size int64
 }
 
 // CFRef CurseForge 文件引用（需 API 解析成直链）。

@@ -29,7 +29,7 @@ type Config struct {
 	UpdateRepo         string `json:"updateRepo,omitempty"`         // GitHub 更新仓库，如 user/AutoMCHUB
 	CheckUpdateOnStart bool   `json:"checkUpdateOnStart,omitempty"` // 启动时后台静默检查更新
 	ListenLAN          bool   `json:"listenLan,omitempty"`          // 允许局域网访问（需设置密码，重启生效）
-	AccessPasswordHash string `json:"accessPasswordHash,omitempty"` // 远程访问密码的 SHA-256
+	AccessPasswordHash string `json:"accessPasswordHash,omitempty"` // 远程访问密码哈希（bcrypt；兼容旧版 SHA-256 hex，登录成功自动升级）
 	MinimizeToTray     bool   `json:"minimizeToTray,omitempty"`     // 关闭窗口时最小化到托盘（服务器不停），默认关
 
 	ServersDir string   `json:"serversDir,omitempty"` // 自定义实例存放根目录（空=内置 servers/），仅对新建生效
@@ -101,14 +101,26 @@ func GetConfig() Config {
 	return cfg
 }
 
-func SetConfig(c Config) {
+// UpdateConfig 在同一把锁内完成配置的读-改-写并持久化，避免并发处理器各自
+// GetConfig→改→整体覆盖时互相丢更新。mutate 返回错误则放弃本次修改（配置不变、不落盘）。
+func UpdateConfig(mutate func(*Config) error) (Config, error) {
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
+	c := cfg
+	if err := mutate(&c); err != nil {
+		return cfg, err
+	}
 	if c.Source != "mirror" && c.Source != "official" {
 		c.Source = "auto"
 	}
-	cfgMu.Lock()
 	cfg = c
-	cfgMu.Unlock()
-	b, _ := json.MarshalIndent(c, "", "  ")
+	saveLocked()
+	return c, nil
+}
+
+// saveLocked 持久化当前配置，调用方须已持有 cfgMu。
+func saveLocked() {
+	b, _ := json.MarshalIndent(cfg, "", "  ")
 	_ = os.WriteFile(configPath(), b, 0o644)
 }
 
@@ -185,8 +197,7 @@ func RememberRoot(dir string) {
 		}
 	}
 	cfg.Roots = append(cfg.Roots, dir)
-	b, _ := json.MarshalIndent(cfg, "", "  ")
-	_ = os.WriteFile(configPath(), b, 0o644)
+	saveLocked()
 }
 
 type memoryStatusEx struct {

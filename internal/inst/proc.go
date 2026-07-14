@@ -25,9 +25,6 @@ type Console = procutil.Console
 
 func newConsole() *Console { return procutil.NewConsole() }
 
-// InitJob 见 procutil.InitJob（main 直接调用 procutil 亦可）。
-func InitJob() { procutil.InitJob() }
-
 func assignToJob(p *os.Process) { procutil.AssignToJob(p) }
 
 func cleanEnv() []string { return procutil.CleanEnv() }
