@@ -183,6 +183,11 @@ func (customProvider) ID() string { return "custom" }
 
 const frpVersion = "0.61.1"
 
+// frpSHA256 为 frp_0.61.1_windows_amd64.zip 的官方 SHA-256，取自 fatedier/frp
+// v0.61.1 Release 附带的 frp_sha256_checksums.txt。下载走国内加速镜像也必须
+// 过这道校验，镜像被投毒/劫持时直接拒收（升级 frpVersion 时须同步更新）。
+const frpSHA256 = "e0094cd0baf03d5ff9ce9739199406871ad8788cf51e766f00ad3a9e7a836f3a"
+
 func (customProvider) EnsureFrpc(con *procutil.Console) (string, error) {
 	dir := frpcDir("custom")
 	if exe := findExe(dir); exe != "" {
@@ -199,7 +204,7 @@ func (customProvider) EnsureFrpc(con *procutil.Console) (string, error) {
 		ghPath,
 	}
 	zipPath := filepath.Join(app.CacheDir, "frpc", file)
-	if err := dl.Fetch(ctx, dl.Request{URLs: urls, Dest: zipPath, MinSize: 1 << 20}, nil); err != nil {
+	if err := dl.Fetch(ctx, dl.Request{URLs: urls, Dest: zipPath, SHA256: frpSHA256, MinSize: 1 << 20}, nil); err != nil {
 		return "", fmt.Errorf("下载 frp 客户端失败（可手动将 frpc.exe 放入 %s）: %w", dir, err)
 	}
 	if err := extractZipFlat(zipPath, dir); err != nil {
