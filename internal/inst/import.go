@@ -89,7 +89,13 @@ func (m *Manager) runImport(ctx context.Context, t *tasks.Task, pack *modpack.Pa
 	// 首个错误用互斥保护而非 atomic.Value：并发存入异构 error 具体类型会令 atomic.Value panic（连带整个进程）
 	var errMu sync.Mutex
 	var firstErr error
-	setErr := func(e error) { errMu.Lock(); if firstErr == nil { firstErr = e }; errMu.Unlock() }
+	setErr := func(e error) {
+		errMu.Lock()
+		if firstErr == nil {
+			firstErr = e
+		}
+		errMu.Unlock()
+	}
 	getErr := func() error { errMu.Lock(); defer errMu.Unlock(); return firstErr }
 	for _, f := range files {
 		if getErr() != nil {

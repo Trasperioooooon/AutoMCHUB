@@ -51,27 +51,27 @@ var (
 	user32t = windows.NewLazySystemDLL("user32.dll")
 	shell32 = windows.NewLazySystemDLL("shell32.dll")
 
-	pSetWindowLongPtr = user32t.NewProc("SetWindowLongPtrW")
-	pCallWindowProc   = user32t.NewProc("CallWindowProcW")
-	pShowWindow       = user32t.NewProc("ShowWindow")
-	pSetForegroundWin = user32t.NewProc("SetForegroundWindow")
-	pDestroyWindow    = user32t.NewProc("DestroyWindow")
-	pPostMessage      = user32t.NewProc("PostMessageW")
-	pLoadIcon         = user32t.NewProc("LoadIconW")
-	pCreatePopupMenu  = user32t.NewProc("CreatePopupMenu")
-	pAppendMenu       = user32t.NewProc("AppendMenuW")
-	pTrackPopupMenu   = user32t.NewProc("TrackPopupMenu")
-	pDestroyMenu      = user32t.NewProc("DestroyMenu")
+	pSetWindowLongPtr      = user32t.NewProc("SetWindowLongPtrW")
+	pCallWindowProc        = user32t.NewProc("CallWindowProcW")
+	pShowWindow            = user32t.NewProc("ShowWindow")
+	pSetForegroundWin      = user32t.NewProc("SetForegroundWindow")
+	pDestroyWindow         = user32t.NewProc("DestroyWindow")
+	pPostMessage           = user32t.NewProc("PostMessageW")
+	pLoadIcon              = user32t.NewProc("LoadIconW")
+	pCreatePopupMenu       = user32t.NewProc("CreatePopupMenu")
+	pAppendMenu            = user32t.NewProc("AppendMenuW")
+	pTrackPopupMenu        = user32t.NewProc("TrackPopupMenu")
+	pDestroyMenu           = user32t.NewProc("DestroyMenu")
 	pGetCursorPos          = user32t.NewProc("GetCursorPos")
 	pRegisterWindowMessage = user32t.NewProc("RegisterWindowMessageW")
 	pShellNotifyIcon       = shell32.NewProc("Shell_NotifyIconW")
 
-	origWndProc      uintptr
-	trayHWND         uintptr
-	trayHIcon        uintptr
-	trayActive       bool    // 托盘图标是否登记成功（NIM_ADD 返回真）
+	origWndProc       uintptr
+	trayHWND          uintptr
+	trayHIcon         uintptr
+	trayActive        bool    // 托盘图标是否登记成功（NIM_ADD 返回真）
 	taskbarCreatedMsg uintptr // Explorer 重启后广播的消息，用于重新登记图标
-	trayCallback     = syscall.NewCallback(trayWndProc)
+	trayCallback      = syscall.NewCallback(trayWndProc)
 )
 
 // NOTIFYICONDATAW（Vista+ 完整布局）；cbSize 取本结构体大小，Windows 据此识别版本。

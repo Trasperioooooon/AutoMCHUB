@@ -128,7 +128,7 @@ func unescapeUnicode(s string) string {
 			// 合并 UTF-16 高/低代理对
 			if c >= 0xD800 && c <= 0xDBFF {
 				if c2, n2, ok2 := parseUEscape(s, i+n); ok2 && c2 >= 0xDC00 && c2 <= 0xDFFF {
-					sb.WriteRune(((c-0xD800)<<10|(c2-0xDC00) )+ 0x10000)
+					sb.WriteRune(((c-0xD800)<<10 | (c2 - 0xDC00)) + 0x10000)
 					i += n + n2
 					continue
 				}

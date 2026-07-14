@@ -221,17 +221,17 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 	cfg := app.GetConfig()
 	cfg.AccessPasswordHash = "" // 不下发哈希
 	writeJSON(w, map[string]any{
-		"version":    app.Version,
-		"base":       app.Base,
-		"ramMb":      app.TotalRAMMB(),
+		"version":     app.Version,
+		"base":        app.Base,
+		"ramMb":       app.TotalRAMMB(),
 		"availRamMb":  app.AvailRAMMB(),
 		"port":        s.port,
 		"serversRoot": app.ServersRoot(),
 		"backupsRoot": app.BackupsRoot(),
 		"config":      cfg,
-		"lanSet":     app.GetConfig().AccessPasswordHash != "",
-		"autoStart":  autostart.Enabled(), // 开机自启真值以注册表为准
-		"ips":        localIPs(),
+		"lanSet":      app.GetConfig().AccessPasswordHash != "",
+		"autoStart":   autostart.Enabled(), // 开机自启真值以注册表为准
+		"ips":         localIPs(),
 	})
 }
 
@@ -377,9 +377,9 @@ func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Source      *string `json:"source"`
-		CFApiKey    *string `json:"cfApiKey"`
-		WebhookURL  *string `json:"webhookUrl"`
+		Source             *string `json:"source"`
+		CFApiKey           *string `json:"cfApiKey"`
+		WebhookURL         *string `json:"webhookUrl"`
 		UpdateRepo         *string `json:"updateRepo"`
 		CheckUpdateOnStart *bool   `json:"checkUpdateOnStart"`
 		ServersDir         *string `json:"serversDir"`
@@ -776,24 +776,24 @@ func (s *Server) handleJavaAdd(w http.ResponseWriter, r *http.Request) {
 // ---------- 实例 ----------
 
 type instSummary struct {
-	Name      string `json:"name"`
-	Core      string `json:"core"`
-	Kind      string `json:"kind"`
-	MC        string `json:"mc"`
-	Build     string `json:"build"`
-	JavaMajor int    `json:"javaMajor"`
-	XmxMB     int    `json:"xmxMb"`
-	XmsMB     int    `json:"xmsMb"`
-	Port      int    `json:"port"`
-	Status    string `json:"status"`
-	MOTD      string `json:"motd"`
-	Dir       string `json:"dir"`
-	CreatedAt string `json:"createdAt"`
-	ConsoleEncoding string `json:"consoleEncoding"`
-	OnlineCount int      `json:"onlineCount"`
-	UptimeSec   int      `json:"uptimeSec"`
-	MaxPlayers  int      `json:"maxPlayers"`
-	ExtraJVM    []string `json:"extraJvm"`
+	Name            string   `json:"name"`
+	Core            string   `json:"core"`
+	Kind            string   `json:"kind"`
+	MC              string   `json:"mc"`
+	Build           string   `json:"build"`
+	JavaMajor       int      `json:"javaMajor"`
+	XmxMB           int      `json:"xmxMb"`
+	XmsMB           int      `json:"xmsMb"`
+	Port            int      `json:"port"`
+	Status          string   `json:"status"`
+	MOTD            string   `json:"motd"`
+	Dir             string   `json:"dir"`
+	CreatedAt       string   `json:"createdAt"`
+	ConsoleEncoding string   `json:"consoleEncoding"`
+	OnlineCount     int      `json:"onlineCount"`
+	UptimeSec       int      `json:"uptimeSec"`
+	MaxPlayers      int      `json:"maxPlayers"`
+	ExtraJVM        []string `json:"extraJvm"`
 }
 
 func summarize(i *inst.Instance) instSummary {
@@ -816,9 +816,9 @@ func summarize(i *inst.Instance) instSummary {
 		MC: i.MC, Build: i.Build,
 		JavaMajor: i.JavaMajor, XmxMB: xmx, XmsMB: xms,
 		Port: i.Port(), Status: i.Status(), MOTD: motd, Dir: i.Dir,
-		CreatedAt: i.CreatedAt.Format("2006-01-02 15:04"),
+		CreatedAt:       i.CreatedAt.Format("2006-01-02 15:04"),
 		ConsoleEncoding: enc,
-		OnlineCount: i.OnlineCount(), UptimeSec: i.UptimeSec(), MaxPlayers: maxP,
+		OnlineCount:     i.OnlineCount(), UptimeSec: i.UptimeSec(), MaxPlayers: maxP,
 		ExtraJVM: i.ExtraJVMSnapshot(),
 	}
 }

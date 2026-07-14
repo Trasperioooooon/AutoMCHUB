@@ -78,7 +78,7 @@ func NeoBuilds(ctx context.Context, mc string) ([]BuildInfo, map[string]string, 
 }
 
 // mcToNeoPrefixes MC 版本号 → NeoForge 版本前缀的启发式映射
-//（如 1.21.1 → 21.1.，26.2 → 26.2. 或 26.2-）。
+// （如 1.21.1 → 21.1.，26.2 → 26.2. 或 26.2-）。
 func mcToNeoPrefixes(mc string) []string {
 	if strings.HasPrefix(mc, "1.") {
 		rest := strings.TrimPrefix(mc, "1.")

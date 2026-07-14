@@ -23,7 +23,7 @@ type CoreInfo struct {
 }
 
 // coreImpl 一个核心的完整实现。Artifact 为空表示该核心走 install.go 中的专用流程
-//（vanilla/fabric/forge/neoforge），否则走"下载 jar 即服务端"的通用流程。
+// （vanilla/fabric/forge/neoforge），否则走"下载 jar 即服务端"的通用流程。
 type coreImpl struct {
 	Info      CoreInfo
 	FixedJava int // KindProxy 使用的固定 Java major；0 = 按 MC 版本元数据
@@ -122,7 +122,7 @@ func init() {
 		},
 	})
 	register(&coreImpl{
-		Info: CoreInfo{CorePaper, "Paper", "插件", "最流行的高性能插件服务端", KindGame},
+		Info:     CoreInfo{CorePaper, "Paper", "插件", "最流行的高性能插件服务端", KindGame},
 		Versions: wrapIDVersions(PaperVersions),
 		Builds:   PaperBuilds,
 		Artifact: func(ctx context.Context, mc, build string) (Artifact, error) {
@@ -130,7 +130,7 @@ func init() {
 		},
 	})
 	register(&coreImpl{
-		Info: CoreInfo{CorePurpur, "Purpur", "插件+", "Paper 分支，更多可调项与特性", KindGame},
+		Info:     CoreInfo{CorePurpur, "Purpur", "插件+", "Paper 分支，更多可调项与特性", KindGame},
 		Versions: wrapIDVersions(PurpurVersions),
 		Builds:   PurpurBuilds,
 		Artifact: func(ctx context.Context, mc, build string) (Artifact, error) {
@@ -138,24 +138,24 @@ func init() {
 		},
 	})
 	register(&coreImpl{
-		Info: CoreInfo{CoreLeaves, "Leaves", "插件·仿原版", "Paper 分支，修复原版特性（刷铁轨等），国人维护", KindGame},
+		Info:     CoreInfo{CoreLeaves, "Leaves", "插件·仿原版", "Paper 分支，修复原版特性（刷铁轨等），国人维护", KindGame},
 		Versions: wrapIDVersions(LeavesVersions),
 		Builds:   LeavesBuilds,
 		Artifact: LeavesArtifact,
 	})
 	register(&coreImpl{
-		Info: CoreInfo{CoreFolia, "Folia", "插件·多线程", "Paper 官方多线程分支，适合大量玩家分散场景", KindGame},
+		Info:     CoreInfo{CoreFolia, "Folia", "插件·多线程", "Paper 官方多线程分支，适合大量玩家分散场景", KindGame},
 		Versions: wrapIDVersions(FoliaVersions),
 		Builds:   FoliaBuilds,
 		Artifact: FoliaArtifact,
 	})
 	register(&coreImpl{
-		Info: CoreInfo{CoreFabric, "Fabric", "模组·轻量", "轻量模组加载器，启动快、更新快", KindGame},
+		Info:     CoreInfo{CoreFabric, "Fabric", "模组·轻量", "轻量模组加载器，启动快、更新快", KindGame},
 		Versions: wrapIDVersions(FabricMCVersions),
 		Builds:   FabricLoaders,
 	})
 	register(&coreImpl{
-		Info: CoreInfo{CoreNeoForge, "NeoForge", "模组·主流", "1.20.2+ 模组生态主流（Forge 的社区继任者）", KindGame},
+		Info:     CoreInfo{CoreNeoForge, "NeoForge", "模组·主流", "1.20.2+ 模组生态主流（Forge 的社区继任者）", KindGame},
 		Versions: func(ctx context.Context, _ bool) ([]MCVersion, error) { return NeoMCVersions(ctx) },
 		Builds: func(ctx context.Context, mc string) ([]BuildInfo, error) {
 			b, _, err := NeoBuilds(ctx, mc)
@@ -163,19 +163,19 @@ func init() {
 		},
 	})
 	register(&coreImpl{
-		Info: CoreInfo{CoreForge, "Forge", "模组·经典", "经典模组加载器，适合 1.20.1 及更早的整合包", KindGame},
+		Info:     CoreInfo{CoreForge, "Forge", "模组·经典", "经典模组加载器，适合 1.20.1 及更早的整合包", KindGame},
 		Versions: wrapIDVersions(ForgeMCVersions),
 		Builds:   ForgeBuilds,
 	})
 	// ---- 混合服（Forge 模组 + Bukkit 插件同服） ----
 	register(&coreImpl{
-		Info: CoreInfo{CoreMohist, "Mohist", "混合·Forge+插件", "Forge 模组与 Bukkit 插件共存，整合包服首选之一", KindHybrid},
+		Info:     CoreInfo{CoreMohist, "Mohist", "混合·Forge+插件", "Forge 模组与 Bukkit 插件共存，整合包服首选之一", KindHybrid},
 		Versions: wrapIDVersions(MohistVersions),
 		Builds:   MohistBuilds,
 		Artifact: MohistArtifact,
 	})
 	register(&coreImpl{
-		Info: CoreInfo{CoreBanner, "Banner", "混合·Fabric+插件", "Mohist 团队出品，Fabric 模组与 Bukkit 插件共存", KindHybrid},
+		Info:     CoreInfo{CoreBanner, "Banner", "混合·Fabric+插件", "Mohist 团队出品，Fabric 模组与 Bukkit 插件共存", KindHybrid},
 		Versions: wrapIDVersions(BannerVersions),
 		Builds:   BannerBuilds,
 		Artifact: BannerArtifact,

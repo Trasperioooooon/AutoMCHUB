@@ -244,7 +244,13 @@ func fromMojang(ctx context.Context, major int, logf func(string, ...any), prog 
 	// （*errorString / context.deadlineExceededError / *fmt.wrapError…），并发存入 atomic.Value 会 panic 整个进程
 	var errMu sync.Mutex
 	var firstErr error
-	setErr := func(e error) { errMu.Lock(); if firstErr == nil { firstErr = e }; errMu.Unlock() }
+	setErr := func(e error) {
+		errMu.Lock()
+		if firstErr == nil {
+			firstErr = e
+		}
+		errMu.Unlock()
+	}
 	getErr := func() error { errMu.Lock(); defer errMu.Unlock(); return firstErr }
 	for _, j := range jobs {
 		if getErr() != nil {
