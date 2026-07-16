@@ -185,9 +185,12 @@ body.has-host-chrome #hud { -webkit-user-select: none; user-select: none; }
 /* 稀疏内容竖向居中：只居中标题下方的稀疏主体（模式选择、空态），页面标题恒锚顶部左上，
    切页不再竖向跳变。旧 #main.center（整页居中）已废除。 */
 .page-fill { flex: 1; display: flex; flex-direction: column; justify-content: center; }
-/* 跨页切换轻淡入（尊重 reduce-motion，已由全局 media query 关停） */
-#main.view-enter { animation: view-in var(--dur-2) var(--ease-out); }
-@keyframes view-in { from { opacity: 0; } }
+/* 跨页切换：淡入 + 轻抬升，仅真正跨页时重播（尊重 reduce-motion，已由全局 media query 关停） */
+#main.view-enter { animation: view-in var(--dur-3) var(--ease-out); }
+@keyframes view-in { from { opacity: 0; transform: translateY(8px); } }
+/* 页内局部切换（设置分区 body、详情 tab-body）：幅度小一档的内容入场 */
+.sec-enter { animation: sec-in var(--dur-2) var(--ease-out); }
+@keyframes sec-in { from { opacity: 0; transform: translateY(6px); } }
 .eyebrow {
   font-family: var(--brand); font-size: 11px; font-weight: 600;
   letter-spacing: 3px; text-transform: uppercase;

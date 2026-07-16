@@ -416,6 +416,7 @@ const Main = () => $("#main");
 let consoleES = null; // 当前 SSE 连接
 let pollTimer = null;
 let prTimer = null;   // 控制台在线玩家延迟刷新定时器（离开视图时清理）
+let lastAnimKey = null; // 页级入场动画的身份键（跨页判定用）
 
 function navigate() {
   if (consoleES) { consoleES.close(); consoleES = null; }
@@ -429,8 +430,13 @@ function navigate() {
   const navKey = view === "inst" ? "instances" : view === "task" ? "create" : view;
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("active", a.dataset.nav === navKey));
   const mainEl = Main();
-  mainEl.classList.remove("view-enter"); void mainEl.offsetWidth; // 重触发跨页淡入
-  mainEl.classList.add("view-enter");
+  // 页级入场动画只在真正跨页时重播：设置分区切换走 set-body 局部动效、详情 tab 走 tab-body 局部动效
+  const animKey = view === "inst" && arg ? "inst/" + arg.split("/")[0] : view === "task" ? "task/" + arg : view;
+  if (animKey !== lastAnimKey) {
+    mainEl.classList.remove("view-enter"); void mainEl.offsetWidth; // 重触发跨页入场
+    mainEl.classList.add("view-enter");
+  }
+  lastAnimKey = animKey;
   if (view === "create") renderCreate();
   else if (view === "inst" && arg) { const sl = arg.indexOf("/"); sl >= 0 ? renderDetail(arg.slice(0, sl), arg.slice(sl + 1)) : renderDetail(arg); }
   else if (view === "settings") renderSettings(arg);
@@ -941,7 +947,7 @@ async function renderDetail(name, tab = "console") {
       tabs.push(["jvm", "内存 / 启动"]);
       return tabs.map(([id, label]) => `<span class="tab ${tab === id ? "cur" : ""}" data-t="${id}">${label}</span>`).join("");
     })()}</div>
-    <div id="tab-body"></div>`;
+    <div id="tab-body" class="sec-enter"></div>`;
   document.querySelectorAll(".tab").forEach(t => t.onclick = () => location.hash = "#/inst/" + encodeURIComponent(name) + "/" + t.dataset.t);
   $("#d-dir").onclick = () => api(`/api/instances/${encodeURIComponent(name)}/opendir`, { method: "POST" }).catch(e => toast(e.message, true));
   $("#d-start").onclick = async () => {
@@ -1620,17 +1626,24 @@ const SETTINGS_SECTIONS = [
 
 async function renderSettings(section) {
   if (!SETTINGS_SECTIONS.some(s => s.id === section)) section = "download";
-  let info;
-  try { info = await api("/api/app"); } catch (e) { Main().innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
-  // 不再套独立居中容器（旧 .settings-page 令标题与其他页错位、导航随内容横跳），直接落在全站内容列上
-  Main().innerHTML = eyebrow("OPTIONS") + `<h1>全局设置</h1>
-    <div class="settings-layout">
-      <nav class="settings-nav">${SETTINGS_SECTIONS.map(s => `
-        <a class="set-nav ${s.id === section ? "cur" : ""}" href="#/settings/${s.id}"><span class="sn-ico">${icon(s.icon)}</span>${s.label}</a>`).join("")}</nav>
-      <div class="settings-body" id="set-body"><div class="sub">加载中…</div></div>
-    </div>`;
+  // 壳（标题 + 左导航）常驻：切分区只换右侧 body 并播局部入场动效，不整页重建、导航不闪不跳。
+  // #set-body 仅存在于设置视图内，可据此判断壳是否已挂载。
+  // 不套独立居中容器（旧 .settings-page 令标题与其他页错位、导航随内容横跳），直接落在全站内容列上
+  if (!$("#set-body")) {
+    Main().innerHTML = eyebrow("OPTIONS") + `<h1>全局设置</h1>
+      <div class="settings-layout">
+        <nav class="settings-nav">${SETTINGS_SECTIONS.map(s => `
+          <a class="set-nav" data-sec="${s.id}" href="#/settings/${s.id}"><span class="sn-ico">${icon(s.icon)}</span>${s.label}</a>`).join("")}</nav>
+        <div class="settings-body" id="set-body"><div class="sub">加载中…</div></div>
+      </div>`;
+  }
+  document.querySelectorAll(".set-nav").forEach(a => a.classList.toggle("cur", a.dataset.sec === section));
   const body = $("#set-body");
+  let info;
+  try { info = await api("/api/app"); } catch (e) { body.innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
   ({ download: setDownload, storage: setStorage, java: setJava, remote: setRemote, notify: setNotify, startup: setStartup, about: setAbout }[section])(body, info);
+  body.classList.remove("sec-enter"); void body.offsetWidth; // 重触发局部入场
+  body.classList.add("sec-enter");
 }
 
 /* 分区标题；sub 允许富文本（调用方自负安全，标题走 esc） */

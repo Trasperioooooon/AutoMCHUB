@@ -141,14 +141,15 @@ vanilla `#7ec850` · paper `#e8e4d8` · purpur `#b57edc` · leaves `#57c25e` · 
 | Token | 值 | 用途 |
 |---|---|---|
 | `--dur-1` | 90ms | 按压反馈、即时微反馈（**不用于 hover**，见下） |
-| `--dur-2` | 160ms | hover 过渡、展开/收起、选中框、跨页淡入 |
-| `--dur-3` | 240ms | 入场（toast、modal、物品栏 pop）、进度条宽度 |
+| `--dur-2` | 160ms | hover 过渡、展开/收起、选中框、页内局部入场（sec-in） |
+| `--dur-3` | 240ms | 入场（toast、modal、物品栏 pop、跨页 view-in）、进度条宽度 |
 | `--ease-out` | `cubic-bezier(.22,1,.36,1)` | 入场 / 展开 |
 | `--ease-in-out` | `cubic-bezier(.4,0,.2,1)` | 离场 |
 | `--ease-spring` | `cubic-bezier(.34,1.56,.64,1)` | 物品栏浮起、开关滑块等「有弹性的小件」 |
 
 - **[v3.1 新约定] hover 过渡一律 ≥ `--dur-2`（160ms）**，落在交付清单的 150–300ms 区间；`--dur-1` 只用于 `:active` 按压与输入框 focus 光晕。
-- 既有具名动画：`hb-pop`（物品栏入场，逐格延迟 .05/.12/.19/.26s）、`frame-in`（MC 选中框缩入）、`view-in`（跨页淡入）、`menu-in` / `modal-in` / `mask-in` / `toast-in/out`、`blink`（`steps(2,end)` 呼吸，仅过渡态）。
+- 既有具名动画：`hb-pop`（物品栏入场，逐格延迟 .05/.12/.19/.26s）、`frame-in`（MC 选中框缩入）、`view-in`（跨页入场：淡入+8px 抬升，--dur-3）、`sec-in`（页内局部入场：淡入+6px 抬升，--dur-2，用于设置分区 body 与详情 tab-body）、`menu-in` / `modal-in` / `mask-in` / `toast-in/out`、`blink`（`steps(2,end)` 呼吸，仅过渡态）。
+- **[v3.2 新约定] 入场动画两级制**：页级 `view-in` 只在真正跨页时重播（`navigate()` 以 animKey 判定；设置分区、详情 tab 属页内切换不触发）；页内切换用 `sec-in` 只动被替换的内容块。设置页壳（标题+左导航）常驻 DOM，切分区只换 `#set-body`。
 - **reduced-motion**：全局 media query 一刀切关停所有 animation/transition（已实现，任何新动效自动被覆盖，不得用内联 style 绕过）。
 - 所有新过渡**必须引用 `--dur-*` / `--ease-*`**，禁止裸写毫秒数与贝塞尔值。
 
