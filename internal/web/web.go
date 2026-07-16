@@ -408,6 +408,7 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		BackupsDir         *string `json:"backupsDir"`
 		BackupKeep         *int    `json:"backupKeep"`
 		Onboarded          *bool   `json:"onboarded"`
+		TosAccepted        *bool   `json:"tosAccepted"`
 		MinimizeToTray     *bool   `json:"minimizeToTray"`
 		AutoStart          *bool   `json:"autoStart"`
 		ListenLAN          *bool   `json:"listenLan"`
@@ -484,6 +485,9 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.Onboarded != nil {
 			c.Onboarded = *body.Onboarded
+		}
+		if body.TosAccepted != nil {
+			c.TosAccepted = *body.TosAccepted
 		}
 		if body.MinimizeToTray != nil {
 			c.MinimizeToTray = *body.MinimizeToTray

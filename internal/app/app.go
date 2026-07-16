@@ -32,11 +32,12 @@ type Config struct {
 	AccessPasswordHash string `json:"accessPasswordHash,omitempty"` // 远程访问密码哈希（bcrypt；兼容旧版 SHA-256 hex，登录成功自动升级）
 	MinimizeToTray     bool   `json:"minimizeToTray,omitempty"`     // 关闭窗口时最小化到托盘（服务器不停），默认关
 
-	ServersDir string   `json:"serversDir,omitempty"` // 自定义实例存放根目录（空=内置 servers/），仅对新建生效
-	BackupsDir string   `json:"backupsDir,omitempty"` // 自定义备份根目录（空=内置 backups/）
-	Roots      []string `json:"roots,omitempty"`      // 曾放置实例的其它根目录（多根扫描用）
-	BackupKeep int      `json:"backupKeep,omitempty"` // 每实例保留的备份份数（0=默认 10）
-	Onboarded  bool     `json:"onboarded,omitempty"`  // 首次运行引导卡是否已完成
+	ServersDir  string   `json:"serversDir,omitempty"`  // 自定义实例存放根目录（空=内置 servers/），仅对新建生效
+	BackupsDir  string   `json:"backupsDir,omitempty"`  // 自定义备份根目录（空=内置 backups/）
+	Roots       []string `json:"roots,omitempty"`       // 曾放置实例的其它根目录（多根扫描用）
+	BackupKeep  int      `json:"backupKeep,omitempty"`  // 每实例保留的备份份数（0=默认 10）
+	Onboarded   bool     `json:"onboarded,omitempty"`   // 首次运行引导卡是否已完成
+	TosAccepted bool     `json:"tosAccepted,omitempty"` // 用户协议与免责声明是否已同意（未同意则每次启动重新弹引导卡）
 }
 
 // DefaultBackupKeep 未配置时每实例保留的备份份数。

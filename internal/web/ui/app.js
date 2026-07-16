@@ -429,7 +429,6 @@ function navigate() {
   const navKey = view === "inst" ? "instances" : view === "task" ? "create" : view;
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("active", a.dataset.nav === navKey));
   const mainEl = Main();
-  mainEl.classList.remove("center");
   mainEl.classList.remove("view-enter"); void mainEl.offsetWidth; // 重触发跨页淡入
   mainEl.classList.add("view-enter");
   if (view === "create") renderCreate();
@@ -519,12 +518,14 @@ const skeletonRows = (n = 7) => Array.from({ length: n }, () =>
   `<div class="sk-row"><span class="sk" style="width:38%;height:13px"></span><span class="sk" style="width:52px;height:12px"></span></div>`).join("");
 
 async function renderInstances() {
-  Main().innerHTML = eyebrow("SERVER LIST") + `<h1>我的服务器</h1>
+  // 标题与搜索/排序工具栏包进 #inst-chrome：没有实例时整块隐藏（空态自身即整页主体），
+  // 常驻 DOM 只切换 hidden，轮询重绘不重建输入框、不丢焦点
+  Main().innerHTML = `<div id="inst-chrome" hidden>` + eyebrow("SERVER LIST") + `<h1>我的服务器</h1>
     <div class="row" style="margin-bottom:16px;flex-wrap:wrap;gap:10px">
       <div class="search-field" style="max-width:240px">${icon("search", "sf-ico")}<input type="text" id="inst-q" placeholder="搜索实例名"></div>
       <select id="inst-sort" style="width:170px"><option value="recent">排序：最近创建</option><option value="running">排序：运行中优先</option><option value="name">排序：名称</option></select>
       <span class="grow"></span><span class="sub" id="inst-summary" style="margin:0"></span>
-    </div>
+    </div></div>
     <div id="inst-cards">${skeletonCards()}</div>`;
   let lastSig = "", curList = [];
   const cardHTML = i => {
@@ -587,13 +588,15 @@ async function renderInstances() {
     const online = list.reduce((s, i) => s + (i.onlineCount || 0), 0);
     $("#inst-summary").textContent = list.length ? `共 ${list.length} 台 · 运行中 ${running}${online ? ` · 在线 ${online} 人` : ""}` : "";
     if (!list.length) {
-      Main().classList.add("center");
+      $("#inst-chrome").hidden = true; // 没有实例时不显示「我的服务器」标题与搜索/排序
+      $("#inst-cards").classList.add("page-fill");
       $("#inst-cards").innerHTML = `<div class="empty"><div class="cube-hero">${cubeOf("vanilla")}</div>这里空空如也<br>一键开一台推荐配置的服务器，或用向导自定义<br><br>
         <button class="btn primary" id="quick-start">${icon("bolt")} 一键开服（Paper 最新正式版）</button>
         <a class="btn" href="#/create" style="margin-left:8px">${icon("craft")} 自定义合成（按 2）</a></div>`;
       $("#quick-start").onclick = quickStart; lastSig = "empty"; return;
     }
-    Main().classList.remove("center");
+    $("#inst-chrome").hidden = false;
+    $("#inst-cards").classList.remove("page-fill");
     const sig = list.map(i => `${i.name}:${i.status}:${i.status === "running" ? Math.floor(i.uptimeSec / 60) + "/" + i.onlineCount : ""}`).join("|") + "#" + $("#inst-q").value + "#" + $("#inst-sort").value;
     if (sig === lastSig) return; // 数据无实质变化则跳过重绘，消除周期性闪烁与焦点丢失
     lastSig = sig;
@@ -610,19 +613,18 @@ const wiz = { step: 0, core: null, mc: null, build: null, snapshots: false, root
 
 async function renderCreate() {
   wiz.step = 0; wiz.core = null; wiz.mc = null; wiz.build = null; wiz.root = "";
-  Main().classList.add("center"); // 模式选择页稀疏，竖向居中消除留白
+  // 标题锚顶部左上（与各页一致），只把稀疏的模式选择卡在剩余空间竖向居中
   Main().innerHTML = eyebrow("CRAFTING") + `<h1>合成新服务器</h1><div class="sub">选择一种方式开始</div>
-    <div class="recipe-grid">
+    <div class="page-fill"><div class="recipe-grid">
       <div class="core-card" id="mode-new"><span class="recipe-ico">${icon("craft")}</span><div><div class="cn">全新合成</div><div class="cd">选择核心与版本，从零搭建服务器</div></div></div>
       <div class="core-card" id="mode-import"><span class="recipe-ico">${icon("package")}</span><div><div class="cn">导入整合包</div><div class="cd">Modrinth (.mrpack) / CurseForge (zip) 整合包一键开服</div></div></div>
-    </div>`;
+    </div></div>`;
   $("#mode-new").onclick = () => drawWizard();
   $("#mode-import").onclick = () => drawImport();
 }
 
 /* ---------- 视图：整合包导入 ---------- */
 async function drawImport() {
-  Main().classList.remove("center");
   const app = await api("/api/app").catch(() => ({ ramMb: 8192, availRamMb: 4096, config: {} }));
   const maxMem = Math.max(2048, app.ramMb - 2048);
   const defMem = Math.min(6144, maxMem);
@@ -695,7 +697,6 @@ function wizardShell(inner) {
 }
 
 async function drawWizard() {
-  Main().classList.remove("center"); // 向导内容稠密，取消模式选择页的竖向居中
   if (wiz.step === 0) {
     wizardShell(`<div id="core-grid">${skeletonRows(6)}</div>
       <div class="wizard-foot"><button class="btn" id="wback0">${icon("arrowLeft")} 返回</button><button class="btn primary" id="wnext" disabled>下一步 ${icon("arrowRight")}</button></div>`);
@@ -1621,12 +1622,13 @@ async function renderSettings(section) {
   if (!SETTINGS_SECTIONS.some(s => s.id === section)) section = "download";
   let info;
   try { info = await api("/api/app"); } catch (e) { Main().innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
-  Main().innerHTML = `<div class="settings-page">` + eyebrow("OPTIONS") + `<h1>全局设置</h1>
+  // 不再套独立居中容器（旧 .settings-page 令标题与其他页错位、导航随内容横跳），直接落在全站内容列上
+  Main().innerHTML = eyebrow("OPTIONS") + `<h1>全局设置</h1>
     <div class="settings-layout">
       <nav class="settings-nav">${SETTINGS_SECTIONS.map(s => `
         <a class="set-nav ${s.id === section ? "cur" : ""}" href="#/settings/${s.id}"><span class="sn-ico">${icon(s.icon)}</span>${s.label}</a>`).join("")}</nav>
       <div class="settings-body" id="set-body"><div class="sub">加载中…</div></div>
-    </div></div>`;
+    </div>`;
   const body = $("#set-body");
   ({ download: setDownload, storage: setStorage, java: setJava, remote: setRemote, notify: setNotify, startup: setStartup, about: setAbout }[section])(body, info);
 }
@@ -1815,7 +1817,8 @@ function setAbout(body, info) {
     `<div class="hint" style="line-height:1.9">
       内网穿透基于 <b>OpenFrp OPENAPI</b> 接入（<a href="https://www.openfrp.net" target="_blank" style="color:var(--accent)">openfrp.net</a>）。<br>
       本软件为开源项目，遵循仓库 LICENSE（MIT）。<br>
-      Minecraft 是 Mojang Studios 的商标，本工具与 Mojang / Microsoft 无隶属关系。
+      Minecraft 是 Mojang Studios 的商标，本工具与 Mojang / Microsoft / 网易均无隶属或授权关系。<br>
+      NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.
     </div>
     <div class="set-danger">
       <div><div class="ri-title">退出程序</div><div class="ri-sub">优雅停止所有运行中的服务器（保存世界）后退出</div></div>
@@ -1857,7 +1860,8 @@ function setAbout(body, info) {
   };
 }
 
-/* 首次运行引导卡（选下载源 + 存放位置说明；写 config.onboarded 后不再出现） */
+/* 首次运行引导卡（用户协议与免责声明 + 选下载源 + 存放位置说明；
+   同意后写 config.onboarded / tosAccepted，二者齐备才不再弹出） */
 function showOnboarding(info) {
   const root = $("#modal-root");
   const SRC = { auto: "自动（推荐）— 国内镜像优先，失败自动回退官方源", mirror: "镜像优先 — 国内下载更快", official: "仅官方源 — 网络直连国外" };
@@ -1865,8 +1869,20 @@ function showOnboarding(info) {
   root.innerHTML = `<div class="modal-mask"><div class="modal onboard">
     <h3>👋 欢迎使用 AutoMCHUB</h3>
     <div class="m-body">
-      开始前先确认两项设置，之后都能在「设置」里随时更改：
-      <div class="ob-sec"><div class="ob-label">下载源</div>
+      <div class="ob-sec" style="margin-top:0"><div class="ob-label">用户协议与免责声明</div>
+        <div class="ob-terms">
+          AutoMCHUB 是开源、非营利的 Minecraft Java 版开服辅助工具：仅从 Mojang、PaperMC 等官方公开渠道下载服务端文件并配置本地运行环境，<b>不包含、不分发游戏客户端，不修改游戏本体，不破解正版验证</b>。
+          <ol>
+            <li><b>非官方产品</b>：本工具由社区独立开发，与 Mojang Studios、Microsoft 及网易（中国版《我的世界》运营方）均无任何隶属、合作或授权关系。NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT. "Minecraft" 及相关商标归 Mojang / Microsoft 所有。</li>
+            <li><b>遵守官方条款</b>：使用本工具搭建与运行服务器，须遵守 <b>Minecraft EULA</b> 与 Microsoft 服务协议；如你使用网易代理的中国版《我的世界》账号或内容，请另行遵守网易的用户协议（两套账号体系互不相通，本工具仅面向国际 Java 版服务端）。</li>
+            <li><b>正版建议</b>：建议使用正版 Mojang / Microsoft 账号并开启正版验证联机。是否使用离线模式由你自行决定并自行承担相应后果，本工具不提供任何绕过正版验证的功能。</li>
+            <li><b>对外服务责任自负</b>：通过内网穿透等方式向他人开放服务器时，你是该服务器的运营者，须自行遵守所在地法律法规（含网络安全与未成年人保护相关规定），并对服务器内容与运营行为负责。</li>
+            <li><b>开源免责</b>：本软件基于 MIT 协议按「现状」提供，不作任何明示或默示担保；因使用或无法使用本软件导致的任何数据丢失、账号问题或其他损失，作者及贡献者不承担责任。</li>
+          </ol>
+        </div>
+        <label class="ob-agree"><input type="checkbox" id="ob-agree"><span>我已阅读并同意上述《用户协议与免责声明》及 <a href="https://aka.ms/MinecraftEULA" target="_blank">Minecraft EULA</a></span></label>
+      </div>
+      <div class="ob-sec"><div class="ob-label">下载源（之后可在「设置」里随时更改）</div>
         <div id="ob-src">${Object.entries(SRC).map(([v, label]) =>
     `<label class="ob-radio"><input type="radio" name="ob-src" value="${v}" ${v === cur ? "checked" : ""}><span>${esc(label)}</span></label>`).join("")}</div>
       </div>
@@ -1875,11 +1891,13 @@ function showOnboarding(info) {
         <div class="hint" style="margin-top:6px">每台服务器一个子文件夹。想放到 D 盘等大容量分区，可到「设置 → 存储位置」更改。</div>
       </div>
     </div>
-    <div class="m-actions"><button class="btn primary" id="ob-go">开始使用</button></div>
+    <div class="m-actions"><button class="btn primary" id="ob-go" disabled>同意并开始使用</button></div>
   </div></div>`;
-  root.querySelector("#ob-go").onclick = async () => {
+  const agree = root.querySelector("#ob-agree"), go = root.querySelector("#ob-go");
+  agree.onchange = () => { go.disabled = !agree.checked; };
+  go.onclick = async () => {
     const sel = root.querySelector('input[name="ob-src"]:checked');
-    try { await api("/api/config", { method: "PUT", body: { source: sel ? sel.value : cur, onboarded: true } }); }
+    try { await api("/api/config", { method: "PUT", body: { source: sel ? sel.value : cur, onboarded: true, tosAccepted: true } }); }
     catch (e) { toast(e.message, true); }
     root.innerHTML = "";
   };
@@ -1911,5 +1929,6 @@ async function applyBackground() {
   }
   navigate();
   applyBackground();
-  if (!info.config || !info.config.onboarded) showOnboarding(info);
+  // 协议为新增项：老用户虽已 onboarded，但未同意过协议（tosAccepted）仍需补一次
+  if (!info.config || !info.config.onboarded || !info.config.tosAccepted) showOnboarding(info);
 })();

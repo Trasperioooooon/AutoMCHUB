@@ -12,6 +12,9 @@ const (
 	_WM_NCLBUTTONDOWN = 0x00A1
 	_HTCAPTION        = 2
 
+	_SM_CYSIZEFRAME    = 33
+	_SM_CXPADDEDBORDER = 92
+
 	_SW_MAXIMIZE = 3
 	_SW_MINIMIZE = 6
 
@@ -22,10 +25,13 @@ const (
 )
 
 var (
-	pDefWindowProcW = user32t.NewProc("DefWindowProcW")
-	pIsZoomed       = user32t.NewProc("IsZoomed")
-	pReleaseCapture = user32t.NewProc("ReleaseCapture")
-	pSetWindowPos   = user32t.NewProc("SetWindowPos")
+	pDefWindowProcW         = user32t.NewProc("DefWindowProcW")
+	pIsZoomed               = user32t.NewProc("IsZoomed")
+	pReleaseCapture         = user32t.NewProc("ReleaseCapture")
+	pSetWindowPos           = user32t.NewProc("SetWindowPos")
+	pGetSystemMetrics       = user32t.NewProc("GetSystemMetrics")
+	pGetDpiForWindow        = user32t.NewProc("GetDpiForWindow")
+	pGetSystemMetricsForDpi = user32t.NewProc("GetSystemMetricsForDpi")
 )
 
 type nccRect struct{ Left, Top, Right, Bottom int32 }
@@ -46,10 +52,30 @@ func framelessNCCalcSize(hwnd, wparam, lparam uintptr) (ret uintptr, handled boo
 	p := (*nccalcsizeParams)(unsafe.Pointer(lparam)) //nolint:govet
 	origTop := p.Rgrc[0].Top
 	pDefWindowProcW.Call(hwnd, _WM_NCCALCSIZE, wparam, lparam) // 先算标准边框（含侧/底缩放边框）
-	if !isZoomed(hwnd) {
-		p.Rgrc[0].Top = origTop // 非最大化：客户区顶到窗口顶，抹掉标题栏（最大化时保留系统计算以适配工作区/任务栏）
+	if isZoomed(hwnd) {
+		// 最大化：窗口四边各越出屏幕一个缩放边框宽。默认过程会在顶部让出「边框+标题栏」，
+		// 导致原生标题栏露出（与前端 HUD 形成双顶栏）；只保留越屏的边框高，客户区顶恰好落在工作区顶。
+		// 左/右/下沿用系统计算，任务栏/工作区适配不受影响。
+		p.Rgrc[0].Top = origTop + maximizedTopInset(hwnd)
+	} else {
+		p.Rgrc[0].Top = origTop // 非最大化：客户区顶到窗口顶，抹掉标题栏
 	}
 	return 0, true
+}
+
+// maximizedTopInset 返回最大化时窗口顶边越出显示器的高度（缩放边框 + 附加边框）。
+// 优先按窗口所在显示器 DPI 计算（Win10 1607+），避免高 DPI 屏上残留细缝或裁掉 HUD 顶部。
+func maximizedTopInset(hwnd uintptr) int32 {
+	if pGetDpiForWindow.Find() == nil && pGetSystemMetricsForDpi.Find() == nil {
+		if dpi, _, _ := pGetDpiForWindow.Call(hwnd); dpi != 0 {
+			f, _, _ := pGetSystemMetricsForDpi.Call(_SM_CYSIZEFRAME, dpi)
+			pad, _, _ := pGetSystemMetricsForDpi.Call(_SM_CXPADDEDBORDER, dpi)
+			return int32(f) + int32(pad)
+		}
+	}
+	f, _, _ := pGetSystemMetrics.Call(_SM_CYSIZEFRAME)
+	pad, _, _ := pGetSystemMetrics.Call(_SM_CXPADDEDBORDER)
+	return int32(f) + int32(pad)
 }
 
 func isZoomed(hwnd uintptr) bool {
