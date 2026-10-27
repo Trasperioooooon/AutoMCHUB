@@ -254,7 +254,7 @@ body.has-host-chrome #hud { -webkit-user-select: none; user-select: none; }
   border-radius: 9px;
   box-shadow: var(--shadow-sm);
   padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
-  font-family: inherit; white-space: nowrap;
+  font-family: inherit; white-space: nowrap; text-decoration: none; /* <a class="btn"> 不带下划线 */
   transition: background var(--dur-2), border-color var(--dur-2), box-shadow var(--dur-2), transform var(--dur-1) var(--ease-spring);
 }
 .btn:hover { background: var(--sunken); }
@@ -271,6 +271,13 @@ body.has-host-chrome #hud { -webkit-user-select: none; user-select: none; }
 }
 .btn.danger:hover { background: var(--err-bg); border-color: var(--redstone); }
 .btn.sm { padding: 5px 11px; font-size: 12px; border-radius: 8px; }
+.btn.sm.icon-only { padding: 5px 8px; }
+.btn.icon-only .ico { width: 15px; height: 15px; }
+/* 确认弹层里的最终危险键用实底红（列表里的危险入口仍是幽灵态） */
+.modal .btn.danger { background: var(--red-solid); border-color: transparent; color: #fff; }
+.modal .btn.danger:hover { background: var(--red-solid-hov); }
+/* #main 是纵向 flex：直接子级按钮不随容器拉满整行 */
+#main > .btn { align-self: flex-start; }
 
 /* ---------- 面板基元 ---------- */
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 16px; }
@@ -320,8 +327,27 @@ body.has-host-chrome #hud { -webkit-user-select: none; user-select: none; }
 }
 .dropmenu button .ico { color: var(--muted); flex: none; }
 .dropmenu button:hover { background: var(--sunken); }
-.inst-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-.inst-actions a.btn { text-decoration: none; }
+.dropmenu .dm-label { font-size: 11px; font-weight: 600; color: var(--muted); padding: 6px 11px 3px; }
+.dropmenu .dm-sep { height: 1px; background: var(--border); margin: 4px 2px; }
+.dropmenu button.danger, .dropmenu button.danger .ico { color: var(--redstone); }
+.dropmenu button.danger:hover { background: var(--err-bg); }
+.dropmenu button:disabled { opacity: .45; cursor: not-allowed; }
+.dropmenu button:disabled:hover { background: none; }
+.dropmenu .dm-note { font-size: 11px; color: var(--muted); padding: 0 11px 6px 33px; }
+.inst-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+/* 整张实例卡可点进详情（悬停浮起本就暗示可点）；卡内按钮/链接各自处理点击 */
+.card[data-name] { cursor: pointer; }
+a.inst-name { color: var(--text); text-decoration: none; }
+/* 运行状态：点 + 文字（状态不能只靠颜色表达） */
+.st-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.st-pill.running { color: var(--accent-text); }
+.st-pill.starting, .st-pill.stopping { color: var(--gold); }
+/* 详情页头落在 bg 裸底上：加 surface 胶囊底，保证金色等彩色小字的对比度 */
+.detail-head .st-pill {
+  background: var(--surface); border: 1px solid var(--border);
+  padding: 4px 10px; border-radius: var(--radius-pill);
+}
+.detail-head .st-meta { font-family: var(--mono); font-weight: 400; color: var(--muted); }
 
 .empty {
   text-align: center; color: var(--muted); padding: 48px 32px;
@@ -332,6 +358,10 @@ body.has-host-chrome #hud { -webkit-user-select: none; user-select: none; }
 }
 .empty .big { font-size: 40px; margin-bottom: 10px; }
 .empty .btn { margin-top: 6px; }
+.empty .empty-title { color: var(--text); font-size: 16px; font-weight: 700; }
+/* 空态次要入口：安静的文字链接，不与主按钮争抢（两个同权重按钮 = 没有主按钮） */
+.quiet-link { display: inline-block; margin-top: 10px; font-size: 13px; color: var(--muted); text-decoration: none; }
+.quiet-link:hover { color: var(--text); text-decoration: underline; }
 /* 空态英雄图：放大的体素方块（复用签名元素，取代 emoji 大字） */
 .cube-hero { height: 78px; display: grid; place-items: center; margin-bottom: 14px; }
 .cube-hero .cube { transform: scale(2.7); }
@@ -365,7 +395,8 @@ body.has-host-chrome #hud { -webkit-user-select: none; user-select: none; }
 @keyframes sk-shim { to { transform: translateX(100%); } }
 
 /* ---------- 表单 ---------- */
-label.field { display: block; margin-bottom: 15px; }
+/* label 与 div 两种 .field 同一节奏：字段间 16px，避免开关行 / 内存控件下方紧贴下一个标签 */
+label.field, div.field { display: block; margin-bottom: 16px; }
 label.field > span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
 input[type=text], input[type=number], input[type=password], select, input[type=time], input[type=file] {
   width: 100%;
@@ -379,6 +410,13 @@ input:focus, select:focus {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-solid) 22%, transparent);
 }
 input::placeholder { color: var(--muted); opacity: 1; }
+/* 行内校验：错误就近显示在字段下方，不用 toast（toast 离字段太远，且会自动消失） */
+input.invalid, select.invalid {
+  border-color: var(--redstone);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--redstone) 18%, transparent);
+}
+.field-err { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; font-weight: 600; color: var(--err-text); }
+.field-err:empty { display: none; }
 textarea {
   width: 100%; background: var(--surface); color: var(--text);
   border: 1px solid var(--border-strong); border-radius: 9px;
@@ -417,9 +455,12 @@ input[type=file]::file-selector-button {
 .step-pill {
   font-size: 12px; padding: 6px 13px; border-radius: 20px;
   background: var(--sunken); color: var(--muted);
+  border: 0; font-family: inherit; cursor: default;
 }
 .step-pill.cur { color: #fff; font-weight: 700; background: var(--accent-solid); }
-.step-pill.done { color: var(--accent-text); }
+/* 已完成的步骤可点回去修改 */
+.step-pill.done { color: var(--accent-text); cursor: pointer; transition: background var(--dur-2), color var(--dur-2); }
+.step-pill.done:hover { background: var(--surface); color: var(--text); }
 .steps .step-pill:not(:first-child) { position: relative; margin-left: 14px; }
 .steps .step-pill:not(:first-child)::before {
   content: "▸"; position: absolute; left: -15px; color: var(--muted); font-size: 12px; opacity: .6;
@@ -455,15 +496,31 @@ input[type=file]::file-selector-button {
 /* 版本/构建标记（最新 / 推荐）：随选中态反色，避免在绿底选中行上消失 */
 .ver-tag { font-size: 10px; font-weight: 700; color: var(--accent-text); margin-left: 7px; letter-spacing: .3px; }
 .ver-item.sel .ver-tag { color: #fff; }
-.wizard-foot { display: flex; justify-content: space-between; margin-top: 22px; }
+/* 向导底栏吸底：长页面（核心列表）也始终看得到「下一步 / 开始部署」，中间回显已选配方 */
+.wizard-foot {
+  display: flex; align-items: center; gap: 12px; margin-top: 22px;
+  position: sticky; bottom: 0; z-index: 5;
+  padding: 10px 12px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-md);
+}
+.wizard-foot .wf-sum {
+  flex: 1; min-width: 0; text-align: center; font-size: 12.5px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.wizard-foot .wf-sum b { color: var(--text); }
+.w-read { max-width: var(--w-read); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; max-width: var(--w-read); }
 .form-grid .full { grid-column: 1 / -1; }
-.eula-box { padding: 14px 16px; margin: 6px 0 16px; }
+.eula-box { padding: 14px 16px; margin: 6px 0 16px; max-width: var(--w-read); transition: border-color var(--dur-2), box-shadow var(--dur-2); }
+.eula-box.invalid { border-color: var(--redstone); box-shadow: 0 0 0 3px color-mix(in srgb, var(--redstone) 18%, transparent); }
+.eula-box .field-err { margin: 8px 0 0 48px; }
 
 /* ---------- 任务进度：经验条 ---------- */
 .task-steps { margin: 14px 0; }
 .task-step { display: flex; gap: 10px; align-items: center; padding: 6px 0; font-size: 14px; }
-.ts-ico { width: 26px; text-align: center; font-family: var(--brand); font-size: 11px; font-weight: 700; }
+.ts-ico { width: 22px; flex: none; display: grid; place-items: center; font-size: 15px; line-height: 0; }
+.task-step.running .ts-ico .ico { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .task-step.pending { color: var(--muted); opacity: .55; }
 .task-step.running { color: var(--gold); }
 .task-step.done { color: var(--accent-text); }
@@ -553,6 +610,17 @@ input[type=file]::file-selector-button {
 .prop-item select, .prop-item input[type=text], .prop-item input[type=number] { width: 130px; padding: 6px 9px; font-size: 13px; }
 .prop-item.wide { grid-column: 1 / -1; }
 .save-bar { margin-top: 18px; display: flex; gap: 12px; align-items: center; }
+/* 表单类页面的保存条：吸附视口底部、常驻可见；有未保存修改时高亮并给出「放弃修改」 */
+.save-bar.sticky {
+  position: sticky; bottom: 0; z-index: 5;
+  margin-top: 20px; padding: 10px 12px 10px 16px;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-md);
+  transition: border-color var(--dur-2), box-shadow var(--dur-2);
+}
+.save-bar.sticky.dirty { border-color: var(--accent-solid); box-shadow: 0 0 0 1px var(--accent-solid), var(--shadow-md); }
+.sb-state { font-size: 12.5px; color: var(--muted); }
+.save-bar.dirty .sb-state { color: var(--text); font-weight: 600; }
 .warn-text { color: var(--gold); font-size: 12px; }
 table.raw { width: 100%; border-collapse: collapse; max-width: 900px; }
 table.raw td { padding: 6px; border-bottom: 1px solid var(--border); }
@@ -570,11 +638,12 @@ table.raw input { padding: 5px 8px; font-size: 13px; max-width: 320px; }
 .radio-card .rd { font-size: 12px; color: var(--muted); }
 
 /* ---------- Toast / Modal ---------- */
-#toasts { position: fixed; right: 18px; top: 18px; display: flex; flex-direction: column; gap: 10px; z-index: 60; }
+/* 落在 HUD 下方：无边框窗口的最小化 / 最大化 / 关闭键在 HUD 右上角，toast 不得盖住它们 */
+#toasts { position: fixed; right: 18px; top: 64px; display: flex; flex-direction: column; gap: 10px; z-index: 60; }
 .toast {
   border-left: 3px solid var(--accent);
   box-shadow: var(--shadow-md);
-  padding: 12px 16px; font-size: 13px; max-width: 420px;
+  padding: 12px 16px; font-size: 13px; max-width: 420px; cursor: pointer;
   animation: toast-in var(--dur-3) var(--ease-out);
 }
 .toast.error { border-left-color: var(--redstone); }
@@ -771,6 +840,10 @@ input.mem-num { width: 92px; padding: 5px 8px; font-size: 13px; text-align: righ
 @media (max-width: 720px) {
   #main { padding: 16px 14px; }
   .form-grid { grid-template-columns: 1fr; }
+  #hud-status { display: none; } /* 窄屏（局域网手机访问）HUD 只留品牌与主题键 */
+  /* 隧道 / 定时任务等行式条目在手机上换行，不撑出横向滚动 */
+  .java-row { flex-wrap: wrap; }
+  .java-row .jp { white-space: normal; }
   .hb-slot { width: 88px; height: 64px; }
   .console { height: calc(100vh - 470px); }
 }

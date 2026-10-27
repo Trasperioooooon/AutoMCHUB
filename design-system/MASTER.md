@@ -160,7 +160,7 @@ vanilla `#7ec850` · paper `#e8e4d8` · purpur `#b57edc` · leaves `#57c25e` · 
 | `.btn` | surface-2 底 + 强边 + shadow-sm；`primary`=accent-solid 白字；`danger`=幽灵红；`sm` 小号 | 一屏最多一个 primary；danger 永远幽灵态 |
 | `.card` 实例卡 | surface + 发丝边 + radius-lg；hover 浮起 2px + shadow-md | 底部 `.dur` 经验条示状态 |
 | `.badge` | 11px，sunken 底；`.core` 变体 accent-text 加粗 | 元数据标签，不做按钮 |
-| `.dot` | 9px 圆角方点；running=accent+光晕，starting/stopping=gold+blink，stopped=muted 半透明 | 状态点永远伴随文字或 tooltip |
+| `.dot` | 9px 圆角方点；running=accent+光晕，starting/stopping=gold+blink，stopped=muted 半透明 | 状态点永远伴随文字或 tooltip；**[v3.3]** 实例卡与详情页头统一用 `.st-pill`（点 + 「运行中 / 启动中… / 正在停止… / 已停止」），详情页头的胶囊加 surface 底以保彩色小字对比度 |
 | `.row-item` 行式控件 | HMCL 三件套：普通行（标题+副题+右侧控件）/ 可展开行（收起显摘要 `.ri-summary` mono）/ 行内嵌编辑器（`.ri-editor`）；行高 ≥56px | 设置页与常用设置的唯一形态——**每一行长得一样**是消灭罗列感的关键 |
 | `.switch` | 38×21 胶囊；checked=accent-solid 系；输入框视觉隐藏但可聚焦（a11y） | |
 | 表单 `label.field` | 标签 12px/600 muted 在上，控件在下；focus = accent 边 + 22% 光晕 | |
@@ -168,8 +168,8 @@ vanilla `#7ec850` · paper `#e8e4d8` · purpur `#b57edc` · leaves `#57c25e` · 
 | `.step-pill` | 向导步骤丸，`cur`=accent-solid 白字，`done`=accent-text，间以 ▸ | |
 | `.cp-chip` | 分组锚点 chips，sunken 底 20px 圆角 | |
 | `.ver-list` / `.ver-item` | 单列可滚版本表，sel=accent-solid 白字 | |
-| `.dropmenu` | fixed 定位上下文菜单，menu-in 入场 | 「打开目录」直达菜单等 |
-| `.modal` / `.toast` | modal 460px（onboard 520px，max-height 88vh 可滚）+ mask 模糊；toast 右上、左侧 3px 强调线、错误=红线 | Esc 关、点遮罩关、焦点归还；onboard 含协议勾选（`.ob-terms` 可滚长文 + `.ob-agree`），未勾选主键 disabled |
+| `.dropmenu` | fixed 定位上下文菜单，menu-in 入场；`dropMenu(anchor, items)` 生成，支持分组标题 / 分隔线 / 危险项 / 禁用项 + 原因说明；下方放不下时向上展开 | 「打开目录」子目录菜单、实例卡「···」；点外部 / Esc 关、再点触发键收起 |
+| `.modal` / `.toast` | modal 460px（onboard 520px，max-height 88vh 可滚）+ mask 模糊；**[v3.3]** toast 落在 HUD 下方右侧（`top: 64px`，不得盖住无边框窗口三键）、可点击关闭，左侧 3px 强调线、错误=红线 | Esc 关、点遮罩关、焦点归还；onboard 含协议勾选（`.ob-terms` 可滚长文 + `.ob-agree`），未勾选主键 disabled；**[v3.3]** 危险确认框：标题点名对象、按钮写出后果（「保留 / 删除服务器」「继续编辑 / 放弃 N 项修改」）、默认聚焦取消、最终键实底红 |
 | `.empty` 空态 | 虚线框 + 居中 + 主行动按钮 | 空态是行动邀请，不是死路（零状态即主行动）；**[v3.2]** 空态即整页主体时隐藏页头与工具栏（如实例页无实例时隐藏标题/搜索/排序），空态卡用 `.page-fill` 居中 |
 | `.err-box` | err-bg 容器 + 红石描边 | 错误必须说明发生了什么 + 下一步 |
 | `.console` / `.task-log` / `.motd-preview` | `--term-bg` **双主题恒深**（终端惯例）；浅色下边框加深为 `rgba(22,34,25,.28)` | WARN 金 / ERROR 红 / 命令回显绿 |
@@ -199,6 +199,7 @@ vanilla `#7ec850` · paper `#e8e4d8` · purpur `#b57edc` · leaves `#57c25e` · 
 - **空**：`.empty` 形态——说明这是什么 + 一个主行动（参照现有「一键开服」空态）。
 - **错误**：`.err-box`——说清发生了什么 + 给出下一步（重试按钮 / 切换下载源指引），不道歉、不含糊。
 - 轮询刷新必须做**签名比对跳过重绘**（现 `renderInstances` 的 `lastSig` 模式），避免焦点丢失与闪烁。
+- **[v3.3] 视图代号**：每次切页 `viewGen++`；异步渲染在每个 `await` 之后先用 `stale(gen)` 判断，过期即放弃（不写 DOM、不挂定时器、不登记守卫）；轮询一律经 `startPoll(fn, ms, gen)` 挂载。禁止在 await 之后直接 `pollTimer = setInterval(...)`——快速切页时它会在新视图里才挂上，覆盖新视图的轮询并永远清不掉。
 
 ## 9. 硬约束（工程红线）
 
@@ -222,3 +223,23 @@ vanilla `#7ec850` · paper `#e8e4d8` · purpur `#b57edc` · leaves `#57c25e` · 
 - [ ] 加载 / 空 / 错误三态齐备
 - [ ] 无 emoji 图标残留
 - [ ] 无边框拖动、窗口三键、快捷键回归测试
+- [ ] **[v3.3]** 多字段表单有吸底保存条并登记了切页守卫；单字段保存键「未改置灰 + 回车保存」
+- [ ] **[v3.3]** 表单错误就近显示在字段下方，没有用 toast
+- [ ] **[v3.3]** 异步渲染的 await 之后有 `stale(gen)` 判断，轮询经 `startPoll` 挂载
+
+## 11. 交互约定（v3.3「交互正常化」）
+
+依据 uxpeak+《High-Converting Forms & Flows》《Junior vs Senior UI Decisions》《The Onboarding Playbook》相关章节整理（外部参考只作灵感，落地以本节为准）。
+
+1. **保存语义二分，不混用**：
+   - 开关 / 单选卡 → **即时生效**，toast 回执；
+   - 带「保存」按钮的单字段（CurseForge Key、Webhook、更新仓库、备份保留份数）→ `bindSaveInput`：值没变时按钮置灰，回车即保存；
+   - 多字段表单页（常用设置、全部配置、内存 / 启动、定时任务）→ 吸底保存条 `saveBar()` + `wireSaveBar()`：常驻视口底部，干净时显示「所有修改已保存」，有改动时高亮并给出「N 项修改未保存 · 放弃修改 · 保存」。
+   - 例外：常用设置里的「游戏规则」开关在运行中即时下发 `/gamerule`，以「游戏规则」标签区分，不计入未保存。
+2. **未保存守卫**：上述未保存来源经 `addDirtySource` 并入 `dirtyCheck`；切页 / 切 tab / 刷新前确认「放弃未保存的修改？」（继续编辑 / 放弃 N 项修改）。选「继续编辑」时地址退回原页、改动原样保留。
+3. **行内校验**：表单错误显示在对应字段下方（`.field-err` + 输入框 `.invalid`，EULA 框 `.eula-box.invalid`）；离开字段时检查，出错后随输入即时复核；提交时全部检查，滚动并聚焦第一个错误。**表单校验不用 toast**（离字段远、还会自动消失）；toast 只用于操作回执与服务器返回的错误。
+4. **危险操作多一步**：删除等危险入口收进「···」菜单，不与主操作同排同尺寸；运行中不可删时菜单项置灰并写明原因。确认框规则见 §6 `.modal` 行。
+5. **整卡可点**：实例卡悬停会浮起（暗示可点），故单击卡片空白处即进入详情，卡内按钮 / 链接各自处理；名称本身是链接，键盘 Tab 可达。
+6. **导航可回起点**：点当前所在的物品栏格（或按对应数字键）重绘该页起点，例如从向导中途回到「合成」入口。弹层打开时 1–4 快捷键不响应，避免在弹层底下切页。
+7. **向导**：底栏吸底（`wizFoot`）并在中间回显已选配方；已完成的步骤丸可点回；单击选中、双击选中并进入下一步；版本步默认预选最新正式版（合理默认，随时可改）。
+8. **空态只给一个主行动**：次要入口用安静的文字链接（`.quiet-link`）——两个同权重按钮等于没有主按钮。
