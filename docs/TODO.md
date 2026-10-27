@@ -139,7 +139,7 @@
 ## 阶段 9 · 体验打磨
 
 - [x] **9.1 备份保留份数/目录可配**：保留份数（默认 10）进实例备份页；备份根目录随 5.2。
-  验收：设 3 份后第 4 次备份滚动删除最旧。—— Config.BackupKeep + app.BackupKeep()（1~1000 裁剪），pruneBackups 改用；备份页「保留最近 N 份 · 保存」控件（全局设置）。
+  验收：设 3 份后第 4 次备份滚动删除最旧。—— Config.BackupKeep + app.BackupKeep()（1~1000 裁剪），pruneBackups 改用；备份页「保留最近 N 份 · 保存」控件（全局设置）。改备份目录或恢复默认后旧备份原地可用：UpdateConfig 把旧 backupsDir 并入 Config.BackupRoots（json backupRoots，内置根除外），列表 / 还原 / 删除查 app.AllBackupRoots()（当前根 + 内置根 + 旧根），保留份数跨根合计；还原最旧的备份时源备份不再被还原前自动备份的滚动清理删掉（回归测试见 internal/app/backups_test.go、internal/inst/backup_test.go）。
 - [x] **9.2 CF 未解析清单突出显示**：导入完成页醒目卡片「N 个模组需手动补装」+ 清单（名称 + 项目链接）。
   验收：构造含不可解析文件的 CF 包，卡片与清单正确显示。—— tasks.Warning 结构化告警（Snapshot.warnings），import.go 填充项目号/链接，任务页金色 warn-card 渲染（CDP 注入截图验）。
 - [x] **9.3 首次运行引导卡**：首启一次性卡片（选下载源 + 「你的服务器将存放在…」说明 + 可关闭）。

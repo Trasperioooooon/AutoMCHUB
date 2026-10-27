@@ -20,9 +20,41 @@ type BackupInfo struct {
 	Time   string  `json:"time"`
 }
 
-// backupDirOf 返回实例备份目录。filepath.Base 兜底：即便某个 instance.json 携带带路径
-// 分隔符的异常 name（多根扫描可能拾取到），也不会让备份读写逃出备份根。
+// backupDirOf 返回实例在当前备份根下的备份目录（新备份只写这里）。filepath.Base 兜底：即便某个 instance.json
+// 携带带路径分隔符的异常 name（多根扫描可能拾取到），也不会让备份读写逃出备份根。
 func backupDirOf(name string) string { return filepath.Join(app.BackupsRoot(), filepath.Base(name)) }
+
+// backupDirsOf 返回实例在全部已知备份根（app.AllBackupRoots，当前根在前）下的备份目录：改过备份目录或
+// 恢复默认后，旧根里的备份照常列出、还原、删除，并计入保留份数。同样只取 filepath.Base(name)。
+func backupDirsOf(name string) []string {
+	roots := app.AllBackupRoots()
+	dirs := make([]string, len(roots))
+	for i, r := range roots {
+		dirs[i] = filepath.Join(r, filepath.Base(name))
+	}
+	return dirs
+}
+
+// backupCopies 返回实例各备份目录里名为 file 的备份的完整路径（当前根在前）。防越界：file 只取 filepath.Base
+// （去掉目录与盘符），须为 .zip 且 filepath.IsLocal（拒 NTFS 流名、设备名），目录又只来自已知备份根，客户端给的名字
+// 因此落不到这些目录之外。列表按文件名去重、同名即同一份备份：还原取第一个，删除与滚动清理全删。
+func backupCopies(name, file string) ([]string, error) {
+	f := filepath.Base(file)
+	if !strings.HasSuffix(f, ".zip") || !filepath.IsLocal(f) {
+		return nil, fmt.Errorf("非法备份文件名")
+	}
+	var out []string
+	for _, dir := range backupDirsOf(name) {
+		p := filepath.Join(dir, f)
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("备份文件不存在: %s", file)
+	}
+	return out, nil
+}
 
 // worldDirs 返回实例的世界存档目录（vanilla 单目录 / bukkit 三目录）。
 func (i *Instance) worldDirs() []string {
@@ -42,32 +74,36 @@ func (i *Instance) worldDirs() []string {
 	return out
 }
 
-// ListBackups 列出实例的全部备份（新在前）。
+// ListBackups 列出实例在全部已知备份根下的备份（新在前）；同名文件只列一份（当前根优先）。
 func (m *Manager) ListBackups(name string) ([]BackupInfo, error) {
 	if _, err := m.Get(name); err != nil {
 		return nil, err
 	}
-	ents, err := os.ReadDir(backupDirOf(name))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []BackupInfo{}, nil
-		}
-		return nil, err
-	}
 	out := []BackupInfo{} // 显式非 nil：空目录时避免 JSON 编成 null 致前端备份页 .map 崩溃
-	for _, e := range ents {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".zip") {
-			continue
-		}
-		info, err := e.Info()
+	seen := map[string]bool{}
+	for k, dir := range backupDirsOf(name) {
+		ents, err := os.ReadDir(dir)
 		if err != nil {
+			if k == 0 && !os.IsNotExist(err) {
+				return nil, err // 当前根读不了照旧报错；旧根可能已删或在拔掉的盘上，跳过
+			}
 			continue
 		}
-		out = append(out, BackupInfo{
-			File:   e.Name(),
-			SizeMB: float64(info.Size()) / (1 << 20),
-			Time:   info.ModTime().Format("2006-01-02 15:04:05"),
-		})
+		for _, e := range ents {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".zip") || seen[e.Name()] {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+			seen[e.Name()] = true
+			out = append(out, BackupInfo{
+				File:   e.Name(),
+				SizeMB: float64(info.Size()) / (1 << 20),
+				Time:   info.ModTime().Format("2006-01-02 15:04:05"),
+			})
+		}
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].File > out[b].File })
 	return out, nil
@@ -126,12 +162,13 @@ func (m *Manager) RestoreBackup(name, file string) error {
 	if i.Status() != "stopped" {
 		return fmt.Errorf("请先停止服务器再还原备份")
 	}
-	src := filepath.Join(backupDirOf(name), filepath.Base(file))
-	if _, err := os.Stat(src); err != nil {
-		return fmt.Errorf("备份文件不存在: %s", file)
+	copies, err := backupCopies(name, file)
+	if err != nil {
+		return err
 	}
+	src := copies[0]
 	if len(i.worldDirs()) > 0 {
-		if _, err := m.createBackup(name, "还原前自动", filepath.Base(file)); err != nil {
+		if _, err := m.createBackup(name, "还原前自动", filepath.Base(src)); err != nil {
 			return fmt.Errorf("还原前自动备份失败，已中止: %w", err)
 		}
 	}
@@ -147,18 +184,24 @@ func (m *Manager) RestoreBackup(name, file string) error {
 	return nil
 }
 
-// DeleteBackup 删除一个备份文件。
+// DeleteBackup 删除一份备份（各备份根里的同名文件一并删，免得删完又从旧根冒出来）。
 func (m *Manager) DeleteBackup(name, file string) error {
 	if _, err := m.Get(name); err != nil {
 		return err
 	}
-	p := filepath.Join(backupDirOf(name), filepath.Base(file))
-	if !strings.HasSuffix(p, ".zip") {
-		return fmt.Errorf("非法备份文件名")
+	copies, err := backupCopies(name, file)
+	if err != nil {
+		return err
 	}
-	return os.Remove(p)
+	for _, p := range copies {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) { // 两个根可能是同一目录的不同写法
+			return err
+		}
+	}
+	return nil
 }
 
+// pruneBackups 按保留份数滚动清理：与列表一致，跨全部已知备份根计数，超出的最旧备份不论在哪个根都删。
 func (m *Manager) pruneBackups(name, spare string) {
 	list, err := m.ListBackups(name)
 	if err != nil {
@@ -166,8 +209,12 @@ func (m *Manager) pruneBackups(name, spare string) {
 	}
 	for i := app.BackupKeep(); i < len(list); i++ {
 		// 自动清理最旧的（保留手动标签“还原前自动”同样计入总数）；spare 见 createBackup
-		if list[i].File != spare {
-			_ = os.Remove(filepath.Join(backupDirOf(name), list[i].File))
+		if list[i].File == spare {
+			continue
+		}
+		copies, _ := backupCopies(name, list[i].File)
+		for _, p := range copies {
+			_ = os.Remove(p)
 		}
 	}
 }
