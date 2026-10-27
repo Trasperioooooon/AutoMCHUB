@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"minedeck/internal/app"
+	"minedeck/internal/autostart"
 	"minedeck/internal/inst"
 	"minedeck/internal/java"
 	"minedeck/internal/procutil"
@@ -38,6 +39,9 @@ func main() {
 		fatal("初始化数据目录失败: " + err.Error())
 	}
 	procutil.InitJob() // 确保程序退出后不残留 java/frpc 进程
+	if err := autostart.RemoveLegacy(); err != nil {
+		log.Println("删除旧版（AutoMCHUB）开机自启项失败:", err)
+	}
 
 	mgr, err := inst.NewManager()
 	if err != nil {
@@ -120,6 +124,7 @@ func openWebView(url string, sig chan os.Signal, minimized bool) (ok bool) {
 	w := webview2.NewWithOptions(webview2.WebViewOptions{
 		Debug:     false,
 		AutoFocus: true,
+		DataPath:  webviewDataDir(), // 固定数据目录，界面偏好不随 exe 改名丢失
 		WindowOptions: webview2.WindowOptions{
 			Title:  "MineDeck · MC 一键开服",
 			Width:  uint(float64(1280) * scale),

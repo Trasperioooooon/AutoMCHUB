@@ -39,7 +39,7 @@ Windows 本地运行的 **MC 多人联机服务器自动部署工具**（单文�
 
 ## 🚀 使用
 
-1. 把 `MineDeck.exe` 放进一个**独立文件夹**（所有数据都存在 exe 旁边：`servers/` 实例、`runtimes/` Java、`cache/` 下载缓存）。
+1. 把 `MineDeck.exe` 放进一个**独立文件夹**（所有数据都存在 exe 旁边：`servers/` 实例、`runtimes/` Java、`cache/` 下载缓存；只有界面偏好存在 `%LocalAppData%\MineDeck`）。
 2. 双击运行，在窗口中点「新建服务器」→ 选核心 → 选版本 → 选构建 → 勾选 EULA → 创建。
 3. 创建完成后点「▶ 启动」，等控制台出现 `Done (...)!` 即开服成功。
 4. 局域网玩家用 `你的内网IP:端口` 直连；异地玩家用穿透工具映射同一端口。

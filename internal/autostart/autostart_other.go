@@ -8,3 +8,5 @@ import "errors"
 func Enabled() bool { return false }
 
 func Set(on bool) error { return errors.New("开机自启仅支持 Windows") }
+
+func RemoveLegacy() error { return nil }
