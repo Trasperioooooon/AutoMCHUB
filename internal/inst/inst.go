@@ -185,8 +185,8 @@ func safeRemoveInstanceDir(i *Instance) error {
 	return nil
 }
 
-// UpdateSettings 调整实例运行参数（内存、控制台编码）并重新生成启动脚本。
-// xmxMB<=0 表示不修改内存；consoleEnc 为空表示不修改编码。
+// UpdateSettings 调整实例运行参数（内存、控制台编码、自定义 JVM 参数）并重新生成启动脚本。
+// xmxMB<=0 表示不修改内存；consoleEnc 为空表示不修改编码；extraJVM 为 nil 表示不修改 JVM 参数。
 func (m *Manager) UpdateSettings(name string, xmxMB, xmsMB int, consoleEnc string, extraJVM *[]string) error {
 	i, err := m.Get(name)
 	if err != nil {
@@ -215,7 +215,8 @@ func (m *Manager) UpdateSettings(name string, xmxMB, xmsMB int, consoleEnc strin
 		i.ConsoleEncoding = consoleEnc
 	}
 	if extraJVM != nil {
-		i.ExtraJVM = append([]string{}, (*extraJVM)...)
+		// 老版本的 log4shell 缓解参数强制保留：套用预设、清空或手动删掉后保存都会补回
+		i.ExtraJVM = withJVMFlags(*extraJVM, log4jFlags(i))
 	}
 	if err := m.saveInstance(i); err != nil {
 		return err

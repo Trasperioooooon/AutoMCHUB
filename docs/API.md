@@ -42,7 +42,7 @@ AutoMCHUB 的 GUI 与后端通过本地 HTTP API 通信，该 API 同时对外�
 | POST | `/api/instances/{name}/opendir?sub=` | 在资源管理器打开实例目录或其白名单子目录（`sub` ∈ mods/plugins/world/logs/crash-reports），**仅本机** |
 | GET | `/api/instances/{name}/console` | SSE 控制台流（先回放后实时） |
 | GET/PUT | `/api/instances/{name}/properties` | server.properties 读写 |
-| PUT | `/api/instances/{name}/settings` | `{xmxMb, xmsMb, consoleEncoding, extraJvm}`（`extraJvm` 为字符串数组，一行一参） |
+| PUT | `/api/instances/{name}/settings` | `{xmxMb, xmsMb, consoleEncoding, extraJvm}`（`extraJvm` 为字符串数组，一行一参，传入即整体替换；MC 1.18.1 以下实例的 log4shell 缓解参数始终保留，缺失时自动补回） |
 | GET/PUT | `/api/instances/{name}/policies` | 崩溃重启 + 定时任务 |
 | GET/POST | `/api/instances/{name}/backups`；POST `.../backups/restore`；DELETE `.../backups?file=` | 备份（保留份数由全局 `backupKeep` 控制） |
 | GET/POST | `/api/instances/{name}/players` | 玩家名单与操作 `{action, player}` |

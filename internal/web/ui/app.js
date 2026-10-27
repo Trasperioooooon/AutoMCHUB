@@ -1474,13 +1474,28 @@ async function renderDetail(name, tab = "console") {
         <button class="btn primary" id="jm-save">${icon("save")} 保存（重启后生效）</button>
       </div>`;
     renderMemoryControl($("#jm-mem-mount"), { sliderId: "jm-mem", min: 1024, max: maxMem, value: Math.min(info.xmxMb, maxMem), totalMb: appInfo.ramMb, availMb: appInfo.availRamMb });
-    $("#jm-aikar").onclick = () => { $("#jm-jvm").value = aikarsFlags(+$("#jm-mem").value).join("\n"); toast("已填入 Aikar's Flags，点保存生效"); };
-    $("#jm-clear").onclick = () => { $("#jm-jvm").value = ""; };
+    // 老版本创建时加入的 log4shell 缓解参数（后端保存时也会强制补回）：套用预设 / 清空时原样保留
+    const LOG4J_FIX = ["-Dlog4j2.formatMsgNoLookups=true", "-Dlog4j.configurationFile=log4j2_112-116.xml"];
+    const jvmArgs = () => $("#jm-jvm").value.split(/\s+/).map(s => s.trim()).filter(Boolean);
+    const keptFix = () => { const cur = jvmArgs(); return LOG4J_FIX.filter(f => cur.includes(f)); };
+    $("#jm-aikar").onclick = () => {
+      const fix = keptFix();
+      $("#jm-jvm").value = [...aikarsFlags(+$("#jm-mem").value), ...fix].join("\n");
+      toast(`已填入 Aikar's Flags${fix.length ? "（保留 log4shell 漏洞缓解参数）" : ""}，点保存生效`);
+    };
+    $("#jm-clear").onclick = () => {
+      const fix = keptFix();
+      $("#jm-jvm").value = fix.join("\n");
+      if (fix.length) toast("已清空（保留 log4shell 漏洞缓解参数）");
+    };
     $("#jm-save").onclick = async () => {
-      const flags = $("#jm-jvm").value.split(/\s+/).map(s => s.trim()).filter(Boolean);
+      const flags = jvmArgs();
       try {
         await api(`/api/instances/${encodeURIComponent(name)}/settings`, { method: "PUT", body: { xmxMb: +$("#jm-mem").value, xmsMb: 0, extraJvm: flags } });
-        toast("已保存内存与 JVM 参数");
+        // 回显实际保存的参数（老版本被删掉的 log4shell 缓解参数会被后端补回）；回读失败不影响已成功的保存
+        const saved = await api("/api/instances").then(l => l.find(i => i.name === name)?.extraJvm).catch(() => null);
+        if (saved) $("#jm-jvm").value = saved.join("\n");
+        toast("已保存内存与 JVM 参数" + (saved?.some(a => !flags.includes(a)) ? "（已自动补回 log4shell 漏洞缓解参数）" : ""));
       } catch (e) { toast(e.message, true); }
     };
   }
