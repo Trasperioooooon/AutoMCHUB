@@ -75,6 +75,12 @@ func (m *Manager) ListBackups(name string) ([]BackupInfo, error) {
 
 // CreateBackup 备份世界存档；运行中执行热备（save-off → save-all → 压缩 → save-on）。
 func (m *Manager) CreateBackup(name, label string) (string, error) {
+	return m.createBackup(name, label, "")
+}
+
+// createBackup 同 CreateBackup；spare 非空时滚动清理放过这份备份。还原前的自动备份靠它保住待还原的源备份——
+// 份数已满且要还原的正是最旧那份时，源备份本会在解压前被清理掉。
+func (m *Manager) createBackup(name, label, spare string) (string, error) {
 	i, err := m.Get(name)
 	if err != nil {
 		return "", err
@@ -106,7 +112,7 @@ func (m *Manager) CreateBackup(name, label string) (string, error) {
 		os.Remove(dest)
 		return "", fmt.Errorf("压缩备份失败: %w", err)
 	}
-	m.pruneBackups(name)
+	m.pruneBackups(name, spare)
 	events.Publish("backup.done", map[string]any{"instance": name, "file": fname})
 	return fname, nil
 }
@@ -125,7 +131,7 @@ func (m *Manager) RestoreBackup(name, file string) error {
 		return fmt.Errorf("备份文件不存在: %s", file)
 	}
 	if len(i.worldDirs()) > 0 {
-		if _, err := m.CreateBackup(name, "还原前自动"); err != nil {
+		if _, err := m.createBackup(name, "还原前自动", filepath.Base(file)); err != nil {
 			return fmt.Errorf("还原前自动备份失败，已中止: %w", err)
 		}
 	}
@@ -153,14 +159,16 @@ func (m *Manager) DeleteBackup(name, file string) error {
 	return os.Remove(p)
 }
 
-func (m *Manager) pruneBackups(name string) {
+func (m *Manager) pruneBackups(name, spare string) {
 	list, err := m.ListBackups(name)
 	if err != nil {
 		return
 	}
 	for i := app.BackupKeep(); i < len(list); i++ {
-		// 自动清理最旧的（保留手动标签“还原前自动”同样计入总数）
-		_ = os.Remove(filepath.Join(backupDirOf(name), list[i].File))
+		// 自动清理最旧的（保留手动标签“还原前自动”同样计入总数）；spare 见 createBackup
+		if list[i].File != spare {
+			_ = os.Remove(filepath.Join(backupDirOf(name), list[i].File))
+		}
 	}
 }
 
