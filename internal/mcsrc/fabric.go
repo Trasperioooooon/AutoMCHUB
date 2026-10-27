@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/url"
 
-	"automchub/internal/dl"
+	"minedeck/internal/dl"
 )
 
 const (

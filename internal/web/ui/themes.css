@@ -1,5 +1,5 @@
 /* ==========================================================================
-   AutoMCHUB · 配色方案（themes.css）
+   MineDeck · 配色方案（themes.css）
    由 <html data-scheme data-theme data-accent> 三个属性驱动；选择器不带 :root，
    因此「外观」设置里的预览卡片只要带上同样的属性，就会按对应方案渲染。
    · data-scheme：fluent（默认）/ github / graphite / nord / catppuccin / solarized

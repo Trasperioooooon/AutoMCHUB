@@ -44,7 +44,7 @@ var (
 // iconFile 将内嵌 .ico 落到临时目录一次，返回其路径（供 LoadImageW 从文件加载，稳妥支持 PNG 压缩的 .ico）。
 func iconFile() string {
 	iconTmpOnce.Do(func() {
-		p := filepath.Join(os.TempDir(), "automchub-app.ico")
+		p := filepath.Join(os.TempDir(), "minedeck-app.ico")
 		if err := os.WriteFile(p, icoData, 0o644); err == nil {
 			iconTmpPath = p
 		}

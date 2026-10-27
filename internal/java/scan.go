@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"automchub/internal/app"
+	"minedeck/internal/app"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"

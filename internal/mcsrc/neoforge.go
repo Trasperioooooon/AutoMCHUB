@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"strings"
 
-	"automchub/internal/app"
-	"automchub/internal/dl"
+	"minedeck/internal/app"
+	"minedeck/internal/dl"
 )
 
 const (

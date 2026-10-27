@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"automchub/internal/app"
+	"minedeck/internal/app"
 )
 
 // 下发配置的响应一律不得含访问密码哈希（回归：PUT /api/config 曾原样回传整个 app.Config，

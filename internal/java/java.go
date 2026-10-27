@@ -18,9 +18,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"automchub/internal/app"
-	"automchub/internal/dl"
-	"automchub/internal/mcsrc"
+	"minedeck/internal/app"
+	"minedeck/internal/dl"
+	"minedeck/internal/mcsrc"
 )
 
 type Info struct {

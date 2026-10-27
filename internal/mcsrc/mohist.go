@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"automchub/internal/dl"
+	"minedeck/internal/dl"
 )
 
 // MohistMC 新版 API（api.mohistmc.com）：托管 Mohist（Forge+Bukkit 混合服）

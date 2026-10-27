@@ -16,9 +16,9 @@ import (
 	"sync"
 	"time"
 
-	"automchub/internal/app"
-	"automchub/internal/events"
-	"automchub/internal/procutil"
+	"minedeck/internal/app"
+	"minedeck/internal/events"
+	"minedeck/internal/procutil"
 )
 
 // Tunnel 一条穿透隧道的配置。
@@ -240,12 +240,12 @@ func (m *Manager) Start(id string) error {
 	}
 	exe, err := p.EnsureFrpc(con)
 	if err != nil {
-		con.Append("[AutoMCHUB] ❌ " + err.Error())
+		con.Append("[MineDeck] ❌ " + err.Error())
 		return err
 	}
 	args, err := p.LaunchArgs(t)
 	if err != nil {
-		con.Append("[AutoMCHUB] ❌ " + err.Error())
+		con.Append("[MineDeck] ❌ " + err.Error())
 		return err
 	}
 	cmd := exec.Command(exe, args...)
@@ -263,7 +263,7 @@ func (m *Manager) Start(id string) error {
 		return err
 	}
 	cmd.Stderr = cmd.Stdout
-	con.Append(fmt.Sprintf("[AutoMCHUB] 启动 frpc（%s）...", t.Provider))
+	con.Append(fmt.Sprintf("[MineDeck] 启动 frpc（%s）...", t.Provider))
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("frpc 启动失败: %w", err)
 	}
@@ -290,9 +290,9 @@ func (m *Manager) Start(id string) error {
 		}
 		m.mu.Unlock()
 		if userStopped {
-			con.Append("[AutoMCHUB] 隧道已停止")
+			con.Append("[MineDeck] 隧道已停止")
 		} else {
-			con.Append("[AutoMCHUB] frpc 意外退出（检查凭据/隧道 ID 是否正确，或查看上方日志）")
+			con.Append("[MineDeck] frpc 意外退出（检查凭据/隧道 ID 是否正确，或查看上方日志）")
 			events.Publish("tunnel.down", map[string]any{"tunnel": name})
 		}
 	}()
@@ -343,7 +343,7 @@ func (m *Manager) setPublicAddr(t *Tunnel, addr string) {
 	}
 	m.mu.Unlock()
 	if changed {
-		m.Console(t.ID).Append("[AutoMCHUB] ✔ 公网地址: " + addr + "（把它发给朋友直连）")
+		m.Console(t.ID).Append("[MineDeck] ✔ 公网地址: " + addr + "（把它发给朋友直连）")
 		events.Publish("tunnel.up", map[string]any{"tunnel": t.Name, "addr": addr})
 	}
 }
@@ -377,7 +377,7 @@ func (m *Manager) StartBound(instance string) {
 		go func() {
 			time.Sleep(2 * time.Second) // 等服务器进入启动流程
 			if err := m.Start(id); err != nil {
-				m.Console(id).Append("[AutoMCHUB] 跟随启动失败: " + err.Error())
+				m.Console(id).Append("[MineDeck] 跟随启动失败: " + err.Error())
 			}
 		}()
 	}

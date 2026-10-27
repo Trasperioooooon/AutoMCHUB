@@ -1,4 +1,4 @@
-# AutoMCHUB 体验改进 TODO（全量实施清单）
+# MineDeck 体验改进 TODO（全量实施清单）
 
 > 依据：`docs/UI与体验改进调研报告.md`（2026-07-12）。用户决策：**全部改动一起做、做到最好、不计时间**。
 > 目标版本：v2.1.0。本清单为唯一施工依据，每项完成即勾选；「验收」列不通过不算完成。
@@ -155,7 +155,7 @@
 - [x] **10.1 最小化到托盘**：关窗改为收入托盘（服务器不停）；托盘菜单：打开面板 / 全部停止并退出；设置内开关（默认关，保持现有语义）。
   验收：开关开启后关窗服务器仍在跑、托盘可唤回窗口；开关关闭时行为与现在一致。—— tray_windows.go 子类化 go-webview2 窗口过程拦 WM_CLOSE（MinimizeToTray 时 SW_HIDE 吞掉、否则原逻辑退出）；Shell_NotifyIcon 常驻托盘图标 + 左键恢复/右键菜单（打开面板/全部停止并退出）；shutdown 改 PostMessage(WM_APP_QUIT) 线程安全退出 + runtime.LockOSThread。设置「启动与托盘」分区开关，双主题截图 + GUI -minimized 冒烟不崩验。**托盘实际关窗/恢复/菜单需真机手验**。
 - [x] **10.2 开机自启**：设置开关，写/删 `HKCU\...\Run`（带 `-minimized` 参数配合 10.1）。
-  验收：开启后注册表键正确、注销重登自动driving到托盘；关闭后键删除。—— internal/autostart（+非 Windows 桩）Enabled/Set 读写 HKCU\...\Run\AutoMCHUB=`"<exe>" -minimized`；main.go 加 -minimized 启动即 hideTrayWindow；web autoStart 真值以注册表为准。真机 E2E：ON→注册表现值/api 真、OFF→键删/api 假、无残留。
+  验收：开启后注册表键正确、注销重登自动driving到托盘；关闭后键删除。—— internal/autostart（+非 Windows 桩）Enabled/Set 读写 HKCU\...\Run\MineDeck=`"<exe>" -minimized`；main.go 加 -minimized 启动即 hideTrayWindow；web autoStart 真值以注册表为准。真机 E2E：ON→注册表现值/api 真、OFF→键删/api 假、无残留。
 
 ## 阶段 11 · 收尾与回归
 
@@ -164,7 +164,7 @@
 - [x] **11.3 双主题全页截图终验**：各阶段已逐页双主题阅图；本轮终验 instances/create/常用设置全量目录/设置/首启引导/托盘设置/备份/控制台补全/warn-card/壁纸，浅深均过，v2.1.0 显示正确。
 - [x] **11.4 code-review 子代理审查**：4 个 general-purpose 子代理并行审 main…HEAD——①路径与权限安全 ②Windows 原生（托盘子类化/NOTIFYICONDATA/注册表）③并发与状态机 ④Web/API+前端 XSS。无 Critical；v2.1 新增（tunnel lastErr/tasks warnings/在线集合/zip-slip/bg 穿越/删除归属）确认正确。
 - [x] **11.5 QA 修复回归**：审查发现全部处置——修：崩溃重启 runGen 守卫（High，防误拉起已停服）、停止看门狗按 proc 身份（Med，防误杀新进程）、config 自启改到校验/保存之后（Med）、opendir 仅本机、safeRelPath 拒裸 `..`、backupDirOf filepath.Base、UpdateSettings/Policies 持锁落盘、tunnel 锁内取名、warn 链接限 http(s)、两处 badge 转义、prTimer 清理、托盘子类化/NIM_ADD 结果校验 + TaskbarCreated 重登 + 回调 recover。跳过（已判无害）：冗余轮询、waitConsole 回放间隙、托盘图标幂等重删。复测：D1 校验失败不改注册表 + 自启正常开关 + 备份回归，全绿。
-- [x] **11.6 分阶段提交收口**：12 阶段 commit 齐全；`AutoMCHUB.exe` 重新构建发布。
+- [x] **11.6 分阶段提交收口**：12 阶段 commit 齐全；`MineDeck.exe` 重新构建发布。
 
 ## 明确不做 / 观察区
 

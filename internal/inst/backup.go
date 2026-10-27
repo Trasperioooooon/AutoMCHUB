@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"automchub/internal/app"
-	"automchub/internal/events"
+	"minedeck/internal/app"
+	"minedeck/internal/events"
 )
 
 type BackupInfo struct {
@@ -126,13 +126,13 @@ func (m *Manager) createBackup(name, label, spare string) (string, error) {
 		return "", fmt.Errorf("还没有世界存档（服务器从未启动过？）")
 	}
 	if i.Status() == "running" {
-		i.Console.Append("[AutoMCHUB] 开始热备份：暂停自动保存...")
+		i.Console.Append("[MineDeck] 开始热备份：暂停自动保存...")
 		_ = m.Command(name, "save-off")
 		_ = m.Command(name, "save-all flush")
 		i.waitConsole("Saved the game", 15*time.Second)
 		defer func() {
 			_ = m.Command(name, "save-on")
-			i.Console.Append("[AutoMCHUB] 热备份完成，已恢复自动保存")
+			i.Console.Append("[MineDeck] 热备份完成，已恢复自动保存")
 		}()
 	}
 	fname := time.Now().Format("20060102-150405")
@@ -180,7 +180,7 @@ func (m *Manager) RestoreBackup(name, file string) error {
 	if err := unzipTo(src, i.Dir); err != nil {
 		return fmt.Errorf("解压备份失败: %w", err)
 	}
-	i.Console.Append("[AutoMCHUB] 世界已还原至备份 " + filepath.Base(file))
+	i.Console.Append("[MineDeck] 世界已还原至备份 " + filepath.Base(file))
 	return nil
 }
 

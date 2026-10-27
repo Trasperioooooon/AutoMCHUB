@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"automchub/internal/dl"
-	"automchub/internal/events"
+	"minedeck/internal/dl"
+	"minedeck/internal/events"
 )
 
 func contextWithTimeout(d time.Duration) (context.Context, context.CancelFunc) {
@@ -130,7 +130,7 @@ func (m *Manager) PlayerAction(name, action, player string) error {
 		return upsertPlayerFile(filepath.Join(i.Dir, "banned-players.json"), player, map[string]any{
 			"uuid": uuid, "name": player,
 			"created": time.Now().Format("2006-01-02 15:04:05 -0700"),
-			"source":  "AutoMCHUB", "expires": "forever", "reason": "Banned by an operator.",
+			"source":  "MineDeck", "expires": "forever", "reason": "Banned by an operator.",
 		})
 	case "pardon":
 		return removeFromPlayerFile(filepath.Join(i.Dir, "banned-players.json"), player)

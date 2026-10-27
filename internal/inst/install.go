@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"automchub/internal/app"
-	"automchub/internal/dl"
-	"automchub/internal/java"
-	"automchub/internal/mcsrc"
-	"automchub/internal/tasks"
+	"minedeck/internal/app"
+	"minedeck/internal/dl"
+	"minedeck/internal/java"
+	"minedeck/internal/mcsrc"
+	"minedeck/internal/tasks"
 )
 
 type CreateReq struct {
@@ -319,7 +319,7 @@ func (m *Manager) runCreate(ctx context.Context, t *tasks.Task, req CreateReq, d
 		t.Logf("代理端无需 EULA 与 server.properties，首次启动后在实例目录编辑其自带配置文件")
 	} else {
 		if err := os.WriteFile(filepath.Join(dir, "eula.txt"),
-			[]byte("# 用户已在 AutoMCHUB 中确认同意 Minecraft EULA (https://aka.ms/MinecraftEULA)\neula=true\n"), 0o644); err != nil {
+			[]byte("# 用户已在 MineDeck 中确认同意 Minecraft EULA (https://aka.ms/MinecraftEULA)\neula=true\n"), 0o644); err != nil {
 			return err
 		}
 		props, _ := LoadProps(filepath.Join(dir, "server.properties"))
@@ -334,7 +334,7 @@ func (m *Manager) runCreate(ctx context.Context, t *tasks.Task, req CreateReq, d
 		}
 		motd := req.MOTD
 		if motd == "" {
-			motd = "AutoMCHUB 服务器"
+			motd = "MineDeck 服务器"
 		}
 		props.Set("motd", motd)
 		if req.Difficulty != "" {
@@ -615,7 +615,7 @@ func writeRunBat(i *Instance) error {
 	var sb strings.Builder
 	sb.WriteString("@echo off\r\n")
 	sb.WriteString("chcp 65001 >nul\r\n")
-	sb.WriteString(fmt.Sprintf("title %s - AutoMCHUB\r\n", batEscapeTitle(i.Name)))
+	sb.WriteString(fmt.Sprintf("title %s - MineDeck\r\n", batEscapeTitle(i.Name)))
 	sb.WriteString("cd /d \"%~dp0\"\r\n")
 	sb.WriteString(batQuoteArg(i.JavaPath))
 	for _, a := range launchArgs(i) {
@@ -624,7 +624,7 @@ func writeRunBat(i *Instance) error {
 	sb.WriteString("\r\npause\r\n")
 	// 现代 Forge/NeoForge 同步维护 user_jvm_args.txt，便于手动使用官方 run.bat 的用户
 	if strings.HasPrefix(i.LaunchTarget, "args:") {
-		content := fmt.Sprintf("# AutoMCHUB 生成\n-Xms%dM\n-Xmx%dM\n", i.XmsMB, i.XmxMB)
+		content := fmt.Sprintf("# MineDeck 生成\n-Xms%dM\n-Xmx%dM\n", i.XmsMB, i.XmxMB)
 		_ = os.WriteFile(filepath.Join(i.Dir, "user_jvm_args.txt"), []byte(content), 0o644)
 	}
 	return os.WriteFile(filepath.Join(i.Dir, "run.bat"), []byte(sb.String()), 0o644)

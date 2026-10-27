@@ -1,8 +1,8 @@
-# AutoMCHUB · Minecraft 一键开服工具
+# MineDeck · Minecraft 一键开服工具
 
-[![Release](https://img.shields.io/github/v/release/Trasperioooooon/AutoMCHUB?color=6fd24b)](https://github.com/Trasperioooooon/AutoMCHUB/releases/latest) [![Downloads](https://img.shields.io/github/downloads/Trasperioooooon/AutoMCHUB/total?color=6fd24b)](https://github.com/Trasperioooooon/AutoMCHUB/releases) [![License](https://img.shields.io/github/license/Trasperioooooon/AutoMCHUB?color=6fd24b)](LICENSE) ![Platform](https://img.shields.io/badge/platform-Windows-2b6cb0) ![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)
+[![Release](https://img.shields.io/github/v/release/Trasperioooooon/MineDeck?color=6fd24b)](https://github.com/Trasperioooooon/MineDeck/releases/latest) [![Downloads](https://img.shields.io/github/downloads/Trasperioooooon/MineDeck/total?color=6fd24b)](https://github.com/Trasperioooooon/MineDeck/releases) [![License](https://img.shields.io/github/license/Trasperioooooon/MineDeck?color=6fd24b)](LICENSE) ![Platform](https://img.shields.io/badge/platform-Windows-2b6cb0) ![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)
 
-Windows 本地运行的 **MC 多人联机服务器自动部署工具**（单文件 `AutoMCHUB.exe`，约 8 MB，零依赖）。
+Windows 本地运行的 **MC 多人联机服务器自动部署工具**（单文件 `MineDeck.exe`，约 8 MB，零依赖）。
 
 选好版本点创建，自动完成：**匹配并下载便携式 Java → 下载服务端核心 → 运行安装器 → 同意 EULA → 生成配置与启动脚本 → 图形界面管理开服**。全程使用国内镜像加速（BMCLAPI / 清华 TUNA），官方源自动兜底。
 
@@ -39,7 +39,7 @@ Windows 本地运行的 **MC 多人联机服务器自动部署工具**（单文�
 
 ## 🚀 使用
 
-1. 把 `AutoMCHUB.exe` 放进一个**独立文件夹**（所有数据都存在 exe 旁边：`servers/` 实例、`runtimes/` Java、`cache/` 下载缓存）。
+1. 把 `MineDeck.exe` 放进一个**独立文件夹**（所有数据都存在 exe 旁边：`servers/` 实例、`runtimes/` Java、`cache/` 下载缓存）。
 2. 双击运行，在窗口中点「新建服务器」→ 选核心 → 选版本 → 选构建 → 勾选 EULA → 创建。
 3. 创建完成后点「▶ 启动」，等控制台出现 `Done (...)!` 即开服成功。
 4. 局域网玩家用 `你的内网IP:端口` 直连；异地玩家用穿透工具映射同一端口。
@@ -49,7 +49,7 @@ Windows 本地运行的 **MC 多人联机服务器自动部署工具**（单文�
 - **改配置**：实例 → 常用设置（开关化）或 全部配置（全量键值）；运行中修改需重启生效
 - **调内存**：实例 → 内存/启动 → 滑块
 - **手动开服**：每个实例目录内有与 GUI 等效的 `run.bat`
-- **命令行模式**：`AutoMCHUB.exe -nogui -port 27333`（仅后台服务，浏览器访问日志中的 URL）
+- **命令行模式**：`MineDeck.exe -nogui -port 27333`（仅后台服务，浏览器访问日志中的 URL）
 
 ## 🔧 从源码构建
 
@@ -57,10 +57,10 @@ Windows 本地运行的 **MC 多人联机服务器自动部署工具**（单文�
 
 ```powershell
 $env:GOPROXY = 'https://goproxy.cn,direct'   # 国内加速
-go build -trimpath -ldflags="-s -w -H windowsgui" -o AutoMCHUB.exe .
+go build -trimpath -ldflags="-s -w -H windowsgui" -o MineDeck.exe .
 ```
 
-调试版（带控制台日志）：`go build -o automchub-cli.exe .` 后运行 `automchub-cli.exe -nogui`。
+调试版（带控制台日志）：`go build -o minedeck-cli.exe .` 后运行 `minedeck-cli.exe -nogui`。
 
 ## 🏗️ 架构
 

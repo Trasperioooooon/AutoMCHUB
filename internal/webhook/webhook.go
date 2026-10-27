@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"time"
 
-	"automchub/internal/app"
-	"automchub/internal/dl"
-	"automchub/internal/events"
+	"minedeck/internal/app"
+	"minedeck/internal/dl"
+	"minedeck/internal/events"
 )
 
 // Init 订阅事件总线（URL 实时读取配置，改配置即时生效）。

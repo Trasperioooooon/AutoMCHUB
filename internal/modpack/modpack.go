@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"automchub/internal/dl"
-	"automchub/internal/mcsrc"
+	"minedeck/internal/dl"
+	"minedeck/internal/mcsrc"
 )
 
 // File 一个待下载的整合包文件。

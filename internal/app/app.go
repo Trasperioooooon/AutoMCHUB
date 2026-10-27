@@ -26,7 +26,7 @@ type Config struct {
 	Source             string `json:"source"`                       // auto | mirror | official
 	CFApiKey           string `json:"cfApiKey,omitempty"`           // CurseForge API Key（导入 CF 整合包用，选填）
 	WebhookURL         string `json:"webhookUrl,omitempty"`         // 事件推送地址（选填）
-	UpdateRepo         string `json:"updateRepo,omitempty"`         // GitHub 更新仓库，如 user/AutoMCHUB
+	UpdateRepo         string `json:"updateRepo,omitempty"`         // GitHub 更新仓库，如 user/MineDeck
 	CheckUpdateOnStart bool   `json:"checkUpdateOnStart,omitempty"` // 启动时后台静默检查更新
 	ListenLAN          bool   `json:"listenLan,omitempty"`          // 允许局域网访问（需设置密码，重启生效）
 	AccessPasswordHash string `json:"accessPasswordHash,omitempty"` // 远程访问密码哈希（bcrypt；兼容旧版 SHA-256 hex，登录成功自动升级）
@@ -46,7 +46,7 @@ const DefaultBackupKeep = 10
 
 // DefaultUpdateRepo 内置自动更新源：用户未在「设置 → 更新」另填时使用，
 // 让 GitHub 自动更新开箱即用（仍需用户手动点检查或开启启动时检查，不主动联网）。
-const DefaultUpdateRepo = "Trasperioooooon/AutoMCHUB"
+const DefaultUpdateRepo = "Trasperioooooon/MineDeck"
 
 var (
 	cfgMu sync.RWMutex

@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"automchub/internal/app"
+	"minedeck/internal/app"
 )
 
 // tempInstance 把程序目录与内置根换成临时的一份（测试结束后还原），备份目录恢复默认，

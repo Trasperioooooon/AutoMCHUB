@@ -1,6 +1,6 @@
-# AutoMCHUB 开放 API
+# MineDeck 开放 API
 
-AutoMCHUB 的 GUI 与后端通过本地 HTTP API 通信，该 API 同时对外开放，可用任何语言编写扩展（这替代了传统"插件系统"）。
+MineDeck 的 GUI 与后端通过本地 HTTP API 通信，该 API 同时对外开放，可用任何语言编写扩展（这替代了传统"插件系统"）。
 
 ## 认证
 

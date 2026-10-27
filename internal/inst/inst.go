@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"automchub/internal/app"
-	"automchub/internal/mcsrc"
-	"automchub/internal/tasks"
+	"minedeck/internal/app"
+	"minedeck/internal/mcsrc"
+	"minedeck/internal/tasks"
 )
 
 type Settings struct {

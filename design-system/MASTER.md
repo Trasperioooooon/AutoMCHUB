@@ -1,4 +1,4 @@
-# AutoMCHUB 设计系统 MASTER · v4「常规桌面应用 + 多配色方案」
+# MineDeck 设计系统 MASTER · v4「常规桌面应用 + 多配色方案」
 
 > **本文件是唯一事实来源（Single Source of Truth）。**
 > 屏幕级偏离写在 `design-system/pages/<screen>.md`，且必须注明偏离理由；没有对应文件 = 该屏幕完全遵循本文件。

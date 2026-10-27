@@ -10,9 +10,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"automchub/internal/dl"
-	"automchub/internal/modpack"
-	"automchub/internal/tasks"
+	"minedeck/internal/dl"
+	"minedeck/internal/modpack"
+	"minedeck/internal/tasks"
 )
 
 // ImportModpackAsync 从解析好的整合包创建实例（核心/版本/加载器由整合包决定）。
