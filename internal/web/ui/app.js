@@ -1937,6 +1937,8 @@ async function applyBackground() {
     const cores = await api("/api/cores").catch(() => []);
     cores.forEach(c => CORES[c.id] = c);
   } catch (e) {
+    // 局域网访问（如手机扫码打开）尚未登录：api() 已弹出密码登录遮罩，保留它，不得整页覆盖成「无法连接」
+    if ($("#login-mask")) return;
     document.body.innerHTML = `<div style="padding:60px;text-align:center;color:#e5644e">无法连接 AutoMCHUB 后端：${esc(e.message)}<br><br>请通过程序窗口打开本页面。</div>`;
     return;
   }
