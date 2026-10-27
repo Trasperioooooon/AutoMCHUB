@@ -2,6 +2,7 @@
 package autostart
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -10,8 +11,9 @@ import (
 )
 
 const (
-	runKey    = `Software\Microsoft\Windows\CurrentVersion\Run`
-	valueName = "MineDeck"
+	runKey          = `Software\Microsoft\Windows\CurrentVersion\Run`
+	valueName       = "MineDeck"
+	legacyValueName = "AutoMCHUB" // 改名前（v2.6.1 及更早）用的值名
 )
 
 // command 返回写入 Run 键的命令行：带引号的 exe 绝对路径 + -minimized（随托盘静默启动）。
@@ -54,4 +56,24 @@ func Set(on bool) error {
 		return err
 	}
 	return k.SetStringValue(valueName, cmd)
+}
+
+// RemoveLegacy 删除改名前的版本写下的开机自启项。新版只认 MineDeck 这个值名，旧值留着的话，
+// 设置里显示自启已关闭，开机却照样启动，在界面里也关不掉。删除后自启即为关闭，需要时到设置里重新打开。
+func RemoveLegacy() error { return deleteValue(runKey, legacyValueName) }
+
+// deleteValue 删除 HKCU\path 下名为 name 的值；键或值本就不存在视为成功。
+func deleteValue(path, name string) error {
+	k, err := registry.OpenKey(registry.CURRENT_USER, path, registry.SET_VALUE)
+	if errors.Is(err, registry.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer k.Close()
+	if err := k.DeleteValue(name); err != nil && !errors.Is(err, registry.ErrNotExist) {
+		return err
+	}
+	return nil
 }
