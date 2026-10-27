@@ -239,9 +239,15 @@ func readJSON(r *http.Request, v any) error {
 
 // ---------- 基础信息 ----------
 
-func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
+// publicConfig 返回可下发给前端的配置副本：抹去访问密码哈希（是否已设密码由 lanSet 告知）。
+// 凡是把配置写进响应的处理器都必须经由此函数，不得直接下发 app.GetConfig()。
+func publicConfig() app.Config {
 	cfg := app.GetConfig()
 	cfg.AccessPasswordHash = "" // 不下发哈希
+	return cfg
+}
+
+func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"version":     app.Version,
 		"base":        app.Base,
@@ -250,7 +256,7 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 		"port":        s.port,
 		"serversRoot": app.ServersRoot(),
 		"backupsRoot": app.BackupsRoot(),
-		"config":      cfg,
+		"config":      publicConfig(),
 		"lanSet":      app.GetConfig().AccessPasswordHash != "",
 		"autoStart":   autostart.Enabled(), // 开机自启真值以注册表为准
 		"ips":         localIPs(),
@@ -514,7 +520,7 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeJSON(w, app.GetConfig())
+	writeJSON(w, publicConfig())
 }
 
 // ---------- 自动更新 ----------
