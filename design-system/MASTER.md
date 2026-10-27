@@ -60,7 +60,7 @@
 | 语义 | `--success*` / `--warning*` / `--danger*`（各含 `-text`、`-subtle`），`--danger-solid(-hov)` / `--on-danger` | 状态字、状态浅底、危险实底按钮 |
 | 终端 | `--term-bg` / `--term-fg` / `--term-cmd` / `--term-warn` / `--term-err` | 控制台、部署日志、MOTD 预览（双主题恒深） |
 
-阴影 `--shadow-sm/md/lg` 与遮罩 `--scrim` 只按明暗区分，定义在 `app.css`。**组件样式一律引用令牌，不写死色值**（窗口关闭键的系统红 `#c42b1c` 除外）。
+阴影 `--shadow-sm/md/lg` 与遮罩 `--scrim` 只按明暗区分，定义在 `app.css`。二维码的 `--qr-dark` / `--qr-light`（`#18181b` / `#fff`）不随方案与明暗变化，也定义在 `app.css`：深模块配白底，任何配色下都扫得出。**组件样式一律引用令牌，不写死色值**（窗口关闭键的系统红 `#c42b1c` 除外）。
 
 ### 2.4 对比度基线（WCAG AA）
 
@@ -123,9 +123,10 @@
 | `.ver-tag` / `.rec-badge` / `.gr-tag` | accent-subtle 底 + accent-text | 「最新」「推荐」「新手推荐」「游戏规则」等提示性标签 |
 | `.tabs` / `.tab` | 下划线式，当前项 2px 强调色下划线；标签是 `<a>` | 详情页内导航（切换走 hash，受未保存守卫保护） |
 | `.steps` | 圆圈序号 + 连线；当前步实底，已完成打勾可点回，未到达描边 | 新建向导 |
-| `.ver-item` | 行式列表，选中 = accent-subtle 底 + 左侧 3px 强调条，文字保持正文色 | 版本 / 构建选择 |
+| `.ver-item` | 行式列表，选中 = accent-subtle 底 + 左侧 3px 强调条，文字保持正文色；有 `releaseTime` 时版本号下加 `.ver-date` 日期副行（等宽 11px muted） | 版本 / 构建选择 |
 | `.core-card` / `.radio-card` / `.scheme-card` | 选中 = 强调色描边 + 1px 外环 + 6% 强调色叠底 | 单选卡片 |
 | `.row-item` | Windows 11 设置式卡片行：标题 + 说明 + 右侧控件，≥60px | 设置页与常用设置 |
+| `.qr-card` | 左码右文：`.qr-box` 168px，恒用 `--qr-light` 底，SVG 自带 4 模块静区（`qrcode.js` 纯前端生成）；多个本机地址时 `.qr-ip` 按钮切换，当前项 = accent-subtle 底 + 强调色边框 | 「设置 → 远程访问」；二维码不随主题反色 |
 | `.switch` | 40×20 胶囊，关闭 = muted 描边，开启 = accent-solid 底 + on-accent 圆点 | 开关即时生效（见 §11） |
 | `.seg` | 分段控件，选中段 = overlay 底 + 描边 + 小阴影 | 主题模式等 2–4 选 1 |
 | `.dropmenu` | overlay 底 + `--shadow-md`；分组标题 / 分隔线 / 危险项 / 禁用项 + 原因 | `dropMenu(anchor, items)` 生成；点外部 / Esc 关闭 |

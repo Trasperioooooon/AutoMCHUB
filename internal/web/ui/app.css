@@ -22,6 +22,8 @@
   --w-read: 760px;
   --titlebar-h: 40px;
   --sidebar-w: 232px;
+  /* 远程访问二维码：两种主题下都是深模块配白底，不随主题反色（对比度约 17:1，任何配色都扫得出） */
+  --qr-dark: #18181b; --qr-light: #ffffff;
 }
 [data-theme="light"] {
   color-scheme: light;
@@ -436,6 +438,8 @@ a.inst-name:hover { text-decoration: underline; }
 /* 选中行：浅强调底 + 左侧强调条，文字保持正文色 */
 .ver-item.sel { background: var(--accent-subtle); box-shadow: inset 3px 0 0 var(--accent); font-weight: 600; }
 .ver-item .vt { color: var(--muted); font-size: 12px; font-weight: 400; }
+/* 发布日期副行（有 releaseTime 才渲染）：数字用等宽字 */
+.ver-date { display: block; margin-top: 2px; font-family: var(--mono); font-size: 11px; font-weight: 400; color: var(--muted); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; max-width: var(--w-read); }
 .form-grid .full { grid-column: 1 / -1; }
 .eula-box { padding: 14px 16px; margin: 4px 0 16px; max-width: var(--w-read); transition: border-color var(--dur-2), box-shadow var(--dur-2); }
@@ -647,6 +651,32 @@ input.mem-num { width: 96px; height: 30px; font-size: 13px; text-align: right; }
 }
 .set-danger .ri-title { font-size: 14px; font-weight: 600; }
 .set-danger .ri-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+/* 远程访问二维码卡：左码右文。码区恒用 --qr-light / --qr-dark（不随主题反色），SVG 自带 4 模块静区 */
+.qr-card {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  margin-bottom: 12px; padding: 16px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+}
+.qr-box {
+  flex: none; width: 168px; height: 168px; overflow: hidden;
+  background: var(--qr-light); border: 1px solid var(--border); border-radius: var(--radius-md);
+}
+.qr-box svg { display: block; width: 100%; height: 100%; }
+.qr .qr-bg { fill: var(--qr-light); }
+.qr .qr-fg { fill: var(--qr-dark); }
+.qr-info { flex: 1 1 240px; min-width: 0; }
+.qr-url { margin: 8px 0; font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--accent-text); word-break: break-all; user-select: all; }
+/* 多个本机地址时的切换按钮：当前项与其它选中态一样用浅强调底 + 强调色边框 */
+.qr-ips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.qr-ip {
+  height: 28px; padding: 0 10px; cursor: pointer;
+  font: 12px var(--mono); color: var(--text);
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+  transition: background var(--dur-2), border-color var(--dur-2), color var(--dur-2);
+}
+.qr-ip:hover { background: var(--hover); }
+.qr-ip.cur { color: var(--accent-text); background: var(--accent-subtle); border-color: var(--accent); }
 
 /* 外观：配色方案卡（预览区带 data-scheme/data-theme，按该方案的令牌渲染） */
 .scheme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; max-width: var(--w-read); }
