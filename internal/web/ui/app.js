@@ -1795,15 +1795,33 @@ async function renderDetail(name, tab = "console") {
         ${saveBar("保存", info.status === "stopped" ? "" : `<span class="warn-text">${icon("warn")} 运行中：保存后需重启生效</span>`)}
       </div>`;
     renderMemoryControl($("#jm-mem-mount"), { sliderId: "jm-mem", min: 1024, max: maxMem, value: Math.min(info.xmxMb, maxMem), totalMb: appInfo.ramMb, availMb: appInfo.availRamMb });
+    // 老版本创建时加入的 log4shell 缓解参数（后端保存时也会强制补回）：套用预设 / 清空时原样保留
+    const LOG4J_FIX = ["-Dlog4j2.formatMsgNoLookups=true", "-Dlog4j.configurationFile=log4j2_112-116.xml"];
     const jvmFlags = () => $("#jm-jvm").value.split(/\s+/).map(s => s.trim()).filter(Boolean);
+    const keptFix = () => { const cur = jvmFlags(); return LOG4J_FIX.filter(f => cur.includes(f)); };
     const paintBar = wireSaveBar(body, gen,
       () => ({ xmx: $("#jm-mem").value, jvm: jvmFlags().join(" ") }), // 只比较参数本身，换行 / 空格差异不算修改
       async () => {
-        await api(`/api/instances/${encodeURIComponent(name)}/settings`, { method: "PUT", body: { xmxMb: +$("#jm-mem").value, xmsMb: 0, extraJvm: jvmFlags() } });
-        toast("已保存内存与 JVM 参数");
+        const flags = jvmFlags();
+        await api(`/api/instances/${encodeURIComponent(name)}/settings`, { method: "PUT", body: { xmxMb: +$("#jm-mem").value, xmsMb: 0, extraJvm: flags } });
+        // 回显实际保存的参数（老版本被删掉的 log4shell 缓解参数会被后端补回）；回读失败不影响已成功的保存。
+        // 回显在 wireSaveBar 重取基线之前完成，补回的参数不会被算成「未保存的修改」
+        const saved = await api("/api/instances").then(l => l.find(i => i.name === name)?.extraJvm).catch(() => null);
+        if (saved && !stale(gen)) $("#jm-jvm").value = saved.join("\n");
+        toast("已保存内存与 JVM 参数" + (saved?.some(a => !flags.includes(a)) ? "（已自动补回 log4shell 漏洞缓解参数）" : ""));
       });
-    $("#jm-aikar").onclick = () => { $("#jm-jvm").value = aikarsFlags(+$("#jm-mem").value).join("\n"); paintBar(); toast("已填入 Aikar's Flags，保存后生效"); };
-    $("#jm-clear").onclick = () => { $("#jm-jvm").value = ""; paintBar(); };
+    $("#jm-aikar").onclick = () => {
+      const fix = keptFix();
+      $("#jm-jvm").value = [...aikarsFlags(+$("#jm-mem").value), ...fix].join("\n");
+      paintBar();
+      toast(`已填入 Aikar's Flags${fix.length ? "（保留 log4shell 漏洞缓解参数）" : ""}，保存后生效`);
+    };
+    $("#jm-clear").onclick = () => {
+      const fix = keptFix();
+      $("#jm-jvm").value = fix.join("\n");
+      paintBar();
+      if (fix.length) toast("已清空（保留 log4shell 漏洞缓解参数）");
+    };
   }
 }
 

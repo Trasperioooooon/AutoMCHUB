@@ -1,0 +1,152 @@
+package inst
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+
+	"automchub/internal/app"
+	"automchub/internal/mcsrc"
+)
+
+// 测试用版本清单（新版本在前），供 mcsrc.NewerOrEqualCached 从磁盘缓存离线读取。
+const testManifest = `{"latest":{"release":"1.20.1","snapshot":"1.20.1"},"versions":[
+{"id":"1.20.1","type":"release"},{"id":"1.18.1","type":"release"},{"id":"1.18","type":"release"},
+{"id":"1.17.1","type":"release"},{"id":"1.17","type":"release"},{"id":"1.16.5","type":"release"},
+{"id":"1.12.2","type":"release"}]}`
+
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "amh-inst-test")
+	if err != nil {
+		panic(err)
+	}
+	app.CacheDir = dir
+	if err := os.WriteFile(filepath.Join(dir, "version_manifest_v2.json"), []byte(testManifest), 0o644); err != nil {
+		panic(err)
+	}
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+// 保存 JVM 参数（套用预设 / 清空 / 手改）后，老版本的 log4shell 缓解参数必须仍在 instance.json、run.bat 与托管启动参数里；
+// 新版本与代理端不受影响。
+func TestUpdateSettingsKeepsLog4jFix(t *testing.T) {
+	preset := []string{"-XX:+UseG1GC", "-XX:MaxGCPauseMillis=200"}
+	both := []string{log4jNoLookups, log4jConfig}
+	cases := []struct {
+		name    string
+		core    mcsrc.Core
+		mc      string
+		xml     bool // 实例目录中是否有官方 xml（创建时下载成功）
+		initial []string
+		submit  []string
+		want    []string
+	}{
+		{"1.16.5 套用预设", mcsrc.CorePaper, "1.16.5", true, both, preset, append(slices.Clone(preset), both...)},
+		{"1.16.5 清空", mcsrc.CorePaper, "1.16.5", true, both, nil, both},
+		{"1.16.5 前端已保留则原样", mcsrc.CorePaper, "1.16.5", true, both, append(slices.Clone(both), preset...), append(slices.Clone(both), preset...)},
+		{"1.12.2 Forge 清空", mcsrc.CoreForge, "1.12.2", true, both, nil, both},
+		{"1.16.5 xml 下载失败不强加引用", mcsrc.CorePaper, "1.16.5", false, []string{log4jNoLookups}, nil, []string{log4jNoLookups}},
+		{"1.18 套用预设", mcsrc.CoreVanilla, "1.18", false, []string{log4jNoLookups}, preset, append(slices.Clone(preset), log4jNoLookups)},
+		{"1.17.1 清空", mcsrc.CoreFabric, "1.17.1", false, []string{log4jNoLookups}, nil, []string{log4jNoLookups}},
+		{"已丢失的实例保存时补回", mcsrc.CorePaper, "1.16.5", true, preset, preset, append(slices.Clone(preset), both...)},
+		{"同名其他取值被剔除", mcsrc.CorePaper, "1.18", false, nil,
+			[]string{log4jNoLookups, "-Xss1M", "-Dlog4j2.formatMsgNoLookups=false", "-Dlog4j2.formatMsgNoLookups"},
+			[]string{log4jNoLookups, "-Xss1M"}},
+		{"1.18.1 不受影响", mcsrc.CorePaper, "1.18.1", false, nil, preset, preset},
+		{"1.20.1 手填可自由删除", mcsrc.CorePaper, "1.20.1", false, []string{log4jNoLookups}, nil, nil},
+		{"1.20.1 手填原样保留", mcsrc.CorePaper, "1.20.1", false, nil, []string{"-Dlog4j2.formatMsgNoLookups=false"}, []string{"-Dlog4j2.formatMsgNoLookups=false"}},
+		{"代理端不受影响", mcsrc.CoreVelocity, "3.4.0-SNAPSHOT", false, nil, nil, nil},
+		{"版本无法判定时沿用已有缓解", mcsrc.CorePaper, "9.9-unknown", true, append(slices.Clone(preset), both...), nil, both},
+		{"版本无法判定且原本没有则不加", mcsrc.CorePaper, "9.9-unknown", true, preset, nil, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if c.xml {
+				if err := os.WriteFile(filepath.Join(dir, log4jXML), []byte("<Configuration/>"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			i := &Instance{Settings: Settings{
+				Name: "t", Core: c.core, MC: c.mc, JavaPath: `C:\java\bin\java.exe`,
+				XmxMB: 2048, XmsMB: 1024, LaunchTarget: "jar:server.jar", ExtraJVM: c.initial,
+			}, Dir: dir}
+			m := &Manager{insts: map[string]*Instance{"t": i}, creating: map[string]bool{}}
+			submit := slices.Clone(c.submit)
+			if err := m.UpdateSettings("t", 4096, 0, "", &submit); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(i.ExtraJVM, c.want) {
+				t.Fatalf("ExtraJVM = %q, want %q", i.ExtraJVM, c.want)
+			}
+			if !slices.Equal(submit, c.submit) {
+				t.Fatalf("调用方传入的切片被改写: %q", submit)
+			}
+
+			// 持久化：instance.json
+			var saved Settings
+			b, err := os.ReadFile(filepath.Join(dir, "instance.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(b, &saved); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(saved.ExtraJVM, c.want) {
+				t.Fatalf("instance.json extraJvm = %q, want %q", saved.ExtraJVM, c.want)
+			}
+
+			// run.bat 与托管启动同源（launchArgs）：缓解参数要么都在、要么都不在
+			bat, err := os.ReadFile(filepath.Join(dir, "run.bat"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := launchArgs(i)
+			for _, f := range both {
+				want := slices.Contains(c.want, f)
+				if got := slices.Contains(args, f); got != want {
+					t.Errorf("launchArgs 含 %s = %v, want %v（%q）", f, got, want, args)
+				}
+				if got := strings.Contains(string(bat), batQuoteArg(f)); got != want {
+					t.Errorf("run.bat 含 %s = %v, want %v\n%s", f, got, want, bat)
+				}
+			}
+		})
+	}
+}
+
+// 只改内存 / 编码（extraJVM 为 nil）时不动 JVM 参数。
+func TestUpdateSettingsNilExtraJVMUntouched(t *testing.T) {
+	i := &Instance{Settings: Settings{
+		Name: "t", Core: mcsrc.CorePaper, MC: "1.16.5", JavaPath: `C:\java\bin\java.exe`,
+		XmxMB: 2048, XmsMB: 1024, LaunchTarget: "jar:server.jar", ExtraJVM: []string{"-Xss1M"},
+	}, Dir: t.TempDir()}
+	m := &Manager{insts: map[string]*Instance{"t": i}, creating: map[string]bool{}}
+	if err := m.UpdateSettings("t", 0, 0, "gbk", nil); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(i.ExtraJVM, []string{"-Xss1M"}) || i.ConsoleEncoding != "gbk" {
+		t.Fatalf("ExtraJVM = %q, enc = %q", i.ExtraJVM, i.ConsoleEncoding)
+	}
+}
+
+func TestWithJVMFlags(t *testing.T) {
+	in := []string{"-Xss1M", log4jNoLookups, log4jNoLookups}
+	got := withJVMFlags(in, []string{log4jNoLookups, log4jNoLookups})
+	if !slices.Equal(got, []string{"-Xss1M", log4jNoLookups}) {
+		t.Fatalf("重复项未合并: %q", got)
+	}
+	out := withJVMFlags(in, nil)
+	if !slices.Equal(out, in) {
+		t.Fatalf("无须保留参数时应原样返回: %q", out)
+	}
+	out[0] = "changed"
+	if in[0] != "-Xss1M" {
+		t.Fatal("返回值与入参共享底层数组")
+	}
+}
