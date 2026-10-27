@@ -1,7 +1,7 @@
 {
-  "name": "automchub-ui-dev",
+  "name": "minedeck-ui-dev",
   "private": true,
-  "description": "AutoMCHUB 前端开发工具：仿真后端、交互回归测试、截图",
+  "description": "MineDeck 前端开发工具：仿真后端、交互回归测试、截图",
   "scripts": {
     "mock": "node server.js",
     "test": "node tests.js",

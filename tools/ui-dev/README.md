@@ -28,7 +28,7 @@ npm run shots -- pages --only=wiz   # 只截名字匹配 wiz 的页面（新建�
 npm run shots -- schemes            # 只截 6 套配色
 ```
 
-`npm test` 和 `npm run shots` 会各自启动一份全新的仿真后端（随机端口），不用先开 `npm run mock`，每次都从同一份初始数据开始。`npm run mock` 默认用 27390 端口，避开 AutoMCHUB 自己的 27333；要换端口就运行 `node server.js <端口>`。
+`npm test` 和 `npm run shots` 会各自启动一份全新的仿真后端（随机端口），不用先开 `npm run mock`，每次都从同一份初始数据开始。`npm run mock` 默认用 27390 端口，避开 MineDeck 自己的 27333；要换端口就运行 `node server.js <端口>`。
 
 ## 注意
 
