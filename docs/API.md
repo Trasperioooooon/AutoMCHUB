@@ -45,7 +45,7 @@ AutoMCHUB 的 GUI 与后端通过本地 HTTP API 通信，该 API 同时对外�
 | GET/PUT | `/api/instances/{name}/properties` | server.properties 读写 |
 | PUT | `/api/instances/{name}/settings` | `{xmxMb, xmsMb, consoleEncoding, extraJvm}`（`extraJvm` 为字符串数组，一行一参） |
 | GET/PUT | `/api/instances/{name}/policies` | 崩溃重启 + 定时任务 |
-| GET/POST | `/api/instances/{name}/backups`；POST `.../backups/restore`；DELETE `.../backups?file=` | 备份（保留份数由全局 `backupKeep` 控制） |
+| GET/POST | `/api/instances/{name}/backups`；POST `.../backups/restore`；DELETE `.../backups?file=` | 备份（保留份数由全局 `backupKeep` 控制，跨备份根合计）。新备份写当前备份根；列表 / 还原 / 删除也查内置根与改目录前用过的旧根（config.json `backupRoots`），同名文件视为同一份；`file` 只取文件名，须为 `.zip` |
 | GET/POST | `/api/instances/{name}/players` | 玩家名单与操作 `{action, player}` |
 | GET | `/api/instances/{name}/resources/search?q=` | Modrinth 兼容资源搜索 |
 | POST | `/api/instances/{name}/resources/install` | `{projectId}` 安装到 mods/plugins |

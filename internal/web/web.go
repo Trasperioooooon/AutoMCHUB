@@ -484,7 +484,7 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 			c.ServersDir = strings.TrimSpace(*body.ServersDir) // 旧值由 UpdateConfig 并入 Roots，旧实例照常扫描
 		}
 		if body.BackupsDir != nil {
-			c.BackupsDir = strings.TrimSpace(*body.BackupsDir)
+			c.BackupsDir = strings.TrimSpace(*body.BackupsDir) // 旧值由 UpdateConfig 并入 BackupRoots，旧备份照常可用
 		}
 		if body.BackupKeep != nil {
 			k := *body.BackupKeep
