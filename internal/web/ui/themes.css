@@ -1,0 +1,520 @@
+/* ==========================================================================
+   AutoMCHUB · 配色方案（themes.css）
+   由 <html data-scheme data-theme data-accent> 三个属性驱动；选择器不带 :root，
+   因此「外观」设置里的预览卡片只要带上同样的属性，就会按对应方案渲染。
+   · data-scheme：fluent（默认）/ github / graphite / nord / catppuccin / solarized
+   · data-theme ：light / dark（「跟随系统」由前端解析为二者之一）
+   · data-accent：auto（跟随方案）/ blue / indigo / violet / teal / green / orange / rose / graphite
+   新增或修改取值后必须重跑对比度检查（WCAG AA：正文与小字 ≥ 4.5，图形 ≥ 3）。
+   ========================================================================== */
+:root {
+  --chrome: #202020;
+  --bg: #272727;
+  --surface: #2e2e2e;
+  --surface-2: #333333;
+  --overlay: #383838;
+  --sunken: #1c1c1c;
+  --hover: rgba(255,255,255,.06);
+  --border: rgba(255,255,255,.08);
+  --border-strong: rgba(255,255,255,.2);
+  --text: #f3f3f3;
+  --muted: #adadad;
+  --faint: #808080;
+  --accent: #60cdff;
+  --accent-text: #60cdff;
+  --accent-solid: #60cdff;
+  --accent-solid-hov: #4cc2ff;
+  --on-accent: #000000;
+  --accent-subtle: rgba(96,205,255,.12);
+  --success: #6ccb5f;
+  --success-text: #6ccb5f;
+  --success-subtle: rgba(108,203,95,.14);
+  --warning: #e8b54a;
+  --warning-text: #e8b54a;
+  --warning-subtle: rgba(232,181,74,.14);
+  --danger: #ff99a4;
+  --danger-text: #ff99a4;
+  --danger-subtle: rgba(255,153,164,.12);
+  --danger-solid: #c42b1c;
+  --danger-solid-hov: #d13b2c;
+  --on-danger: #ffffff;
+  --term-bg: #1e1e1e;
+  --term-fg: #cccccc;
+  --term-cmd: #4fc1ff;
+  --term-warn: #d7ba7d;
+  --term-err: #f48771;
+}
+
+/* ---- Fluent · Windows 11 默认风格 ---- */
+[data-scheme="fluent"][data-theme="light"] {
+  --chrome: #f3f3f3;
+  --bg: #f9f9f9;
+  --surface: #ffffff;
+  --surface-2: #f5f5f5;
+  --overlay: #ffffff;
+  --sunken: #ebebeb;
+  --hover: rgba(0,0,0,.045);
+  --border: rgba(0,0,0,.08);
+  --border-strong: rgba(0,0,0,.2);
+  --text: #1b1b1b;
+  --muted: #5d5d5d;
+  --faint: #8a8a8a;
+  --accent: #005fb8;
+  --accent-text: #005fb8;
+  --accent-solid: #005fb8;
+  --accent-solid-hov: #1a6fc0;
+  --on-accent: #ffffff;
+  --accent-subtle: rgba(0,95,184,.1);
+  --success: #0f7b0f;
+  --success-text: #0e6e0e;
+  --success-subtle: #dff6dd;
+  --warning: #9d5d00;
+  --warning-text: #8a5100;
+  --warning-subtle: #fff4ce;
+  --danger: #c42b1c;
+  --danger-text: #b42618;
+  --danger-subtle: #fde7e9;
+  --danger-solid: #c42b1c;
+  --danger-solid-hov: #a52317;
+  --on-danger: #ffffff;
+  --term-bg: #1e1e1e;
+  --term-fg: #cccccc;
+  --term-cmd: #4fc1ff;
+  --term-warn: #d7ba7d;
+  --term-err: #f48771;
+}
+[data-scheme="fluent"][data-theme="dark"] {
+  --chrome: #202020;
+  --bg: #272727;
+  --surface: #2e2e2e;
+  --surface-2: #333333;
+  --overlay: #383838;
+  --sunken: #1c1c1c;
+  --hover: rgba(255,255,255,.06);
+  --border: rgba(255,255,255,.08);
+  --border-strong: rgba(255,255,255,.2);
+  --text: #f3f3f3;
+  --muted: #adadad;
+  --faint: #808080;
+  --accent: #60cdff;
+  --accent-text: #60cdff;
+  --accent-solid: #60cdff;
+  --accent-solid-hov: #4cc2ff;
+  --on-accent: #000000;
+  --accent-subtle: rgba(96,205,255,.12);
+  --success: #6ccb5f;
+  --success-text: #6ccb5f;
+  --success-subtle: rgba(108,203,95,.14);
+  --warning: #e8b54a;
+  --warning-text: #e8b54a;
+  --warning-subtle: rgba(232,181,74,.14);
+  --danger: #ff99a4;
+  --danger-text: #ff99a4;
+  --danger-subtle: rgba(255,153,164,.12);
+  --danger-solid: #c42b1c;
+  --danger-solid-hov: #d13b2c;
+  --on-danger: #ffffff;
+  --term-bg: #1e1e1e;
+  --term-fg: #cccccc;
+  --term-cmd: #4fc1ff;
+  --term-warn: #d7ba7d;
+  --term-err: #f48771;
+}
+
+/* ---- GitHub · Primer 设计系统 ---- */
+[data-scheme="github"][data-theme="light"] {
+  --chrome: #f6f8fa;
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f6f8fa;
+  --overlay: #ffffff;
+  --sunken: #eff2f5;
+  --hover: rgba(129,139,152,.12);
+  --border: #d1d9e0;
+  --border-strong: #b7c0c9;
+  --text: #1f2328;
+  --muted: #59636e;
+  --faint: #818b98;
+  --accent: #0969da;
+  --accent-text: #0969da;
+  --accent-solid: #0969da;
+  --accent-solid-hov: #0860ca;
+  --on-accent: #ffffff;
+  --accent-subtle: #ddf4ff;
+  --success: #1a7f37;
+  --success-text: #1a7f37;
+  --success-subtle: #dafbe1;
+  --warning: #9a6700;
+  --warning-text: #9a6700;
+  --warning-subtle: #fff8c5;
+  --danger: #d1242f;
+  --danger-text: #d1242f;
+  --danger-subtle: #ffebe9;
+  --danger-solid: #cf222e;
+  --danger-solid-hov: #a40e26;
+  --on-danger: #ffffff;
+  --term-bg: #0d1117;
+  --term-fg: #e6edf3;
+  --term-cmd: #79c0ff;
+  --term-warn: #d29922;
+  --term-err: #ff7b72;
+}
+[data-scheme="github"][data-theme="dark"] {
+  --chrome: #010409;
+  --bg: #0d1117;
+  --surface: #151b23;
+  --surface-2: #212830;
+  --overlay: #262c36;
+  --sunken: #010409;
+  --hover: rgba(101,108,118,.18);
+  --border: #3d444d;
+  --border-strong: #4b535d;
+  --text: #f0f6fc;
+  --muted: #9198a1;
+  --faint: #656c76;
+  --accent: #4493f8;
+  --accent-text: #4493f8;
+  --accent-solid: #1f6feb;
+  --accent-solid-hov: #1a64d6;
+  --on-accent: #ffffff;
+  --accent-subtle: rgba(56,139,253,.15);
+  --success: #3fb950;
+  --success-text: #3fb950;
+  --success-subtle: rgba(46,160,67,.15);
+  --warning: #d29922;
+  --warning-text: #d29922;
+  --warning-subtle: rgba(187,128,9,.15);
+  --danger: #f85149;
+  --danger-text: #f85149;
+  --danger-subtle: rgba(248,81,73,.1);
+  --danger-solid: #da3633;
+  --danger-solid-hov: #b62324;
+  --on-danger: #ffffff;
+  --term-bg: #0d1117;
+  --term-fg: #e6edf3;
+  --term-cmd: #79c0ff;
+  --term-warn: #d29922;
+  --term-err: #ff7b72;
+}
+
+/* ---- 石墨 · 中性灰阶，Vercel / shadcn 风格 ---- */
+[data-scheme="graphite"][data-theme="light"] {
+  --chrome: #fafafa;
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f4f4f5;
+  --overlay: #ffffff;
+  --sunken: #f4f4f5;
+  --hover: rgba(9,9,11,.045);
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --text: #09090b;
+  --muted: #63636c;
+  --faint: #a1a1aa;
+  --accent: #18181b;
+  --accent-text: #18181b;
+  --accent-solid: #18181b;
+  --accent-solid-hov: #3f3f46;
+  --on-accent: #fafafa;
+  --accent-subtle: rgba(9,9,11,.07);
+  --success: #15803d;
+  --success-text: #15803d;
+  --success-subtle: #f0fdf4;
+  --warning: #a16207;
+  --warning-text: #a16207;
+  --warning-subtle: #fefce8;
+  --danger: #dc2626;
+  --danger-text: #b91c1c;
+  --danger-subtle: #fef2f2;
+  --danger-solid: #dc2626;
+  --danger-solid-hov: #b91c1c;
+  --on-danger: #ffffff;
+  --term-bg: #09090b;
+  --term-fg: #e4e4e7;
+  --term-cmd: #93c5fd;
+  --term-warn: #facc15;
+  --term-err: #f87171;
+}
+[data-scheme="graphite"][data-theme="dark"] {
+  --chrome: #111113;
+  --bg: #0b0b0d;
+  --surface: #18181b;
+  --surface-2: #212124;
+  --overlay: #27272a;
+  --sunken: #09090b;
+  --hover: rgba(250,250,250,.055);
+  --border: #27272a;
+  --border-strong: #3f3f46;
+  --text: #fafafa;
+  --muted: #a1a1aa;
+  --faint: #71717a;
+  --accent: #e4e4e7;
+  --accent-text: #fafafa;
+  --accent-solid: #fafafa;
+  --accent-solid-hov: #d4d4d8;
+  --on-accent: #18181b;
+  --accent-subtle: rgba(250,250,250,.08);
+  --success: #4ade80;
+  --success-text: #4ade80;
+  --success-subtle: rgba(74,222,128,.12);
+  --warning: #eab308;
+  --warning-text: #eab308;
+  --warning-subtle: rgba(234,179,8,.12);
+  --danger: #f87171;
+  --danger-text: #f87171;
+  --danger-subtle: rgba(248,113,113,.12);
+  --danger-solid: #dc2626;
+  --danger-solid-hov: #b91c1c;
+  --on-danger: #ffffff;
+  --term-bg: #09090b;
+  --term-fg: #e4e4e7;
+  --term-cmd: #93c5fd;
+  --term-warn: #facc15;
+  --term-err: #f87171;
+}
+
+/* ---- Nord · 北极冷色调 ---- */
+[data-scheme="nord"][data-theme="light"] {
+  --chrome: #e5e9f0;
+  --bg: #eceff4;
+  --surface: #f8f9fb;
+  --surface-2: #eef1f5;
+  --overlay: #fbfcfd;
+  --sunken: #d8dee9;
+  --hover: rgba(46,52,64,.055);
+  --border: #d8dee9;
+  --border-strong: #b8c1d0;
+  --text: #2e3440;
+  --muted: #4c566a;
+  --faint: #7b88a1;
+  --accent: #5e81ac;
+  --accent-text: #46668f;
+  --accent-solid: #4c6c96;
+  --accent-solid-hov: #46668f;
+  --on-accent: #ffffff;
+  --accent-subtle: rgba(94,129,172,.14);
+  --success: #a3be8c;
+  --success-text: #46632f;
+  --success-subtle: rgba(163,190,140,.22);
+  --warning: #ebcb8b;
+  --warning-text: #735716;
+  --warning-subtle: rgba(235,203,139,.28);
+  --danger: #bf616a;
+  --danger-text: #953a44;
+  --danger-subtle: rgba(191,97,106,.12);
+  --danger-solid: #a5434d;
+  --danger-solid-hov: #914049;
+  --on-danger: #ffffff;
+  --term-bg: #242933;
+  --term-fg: #d8dee9;
+  --term-cmd: #88c0d0;
+  --term-warn: #ebcb8b;
+  --term-err: #eba5ab;
+}
+[data-scheme="nord"][data-theme="dark"] {
+  --chrome: #272c36;
+  --bg: #2e3440;
+  --surface: #3b4252;
+  --surface-2: #434c5e;
+  --overlay: #434c5e;
+  --sunken: #242933;
+  --hover: rgba(216,222,233,.06);
+  --border: #434c5e;
+  --border-strong: #4c566a;
+  --text: #eceff4;
+  --muted: #c0c8d4;
+  --faint: #7b88a1;
+  --accent: #88c0d0;
+  --accent-text: #a3d0dc;
+  --accent-solid: #88c0d0;
+  --accent-solid-hov: #9dccda;
+  --on-accent: #2e3440;
+  --accent-subtle: rgba(136,192,208,.1);
+  --success: #a3be8c;
+  --success-text: #b6cfa1;
+  --success-subtle: rgba(163,190,140,.08);
+  --warning: #ebcb8b;
+  --warning-text: #ebcb8b;
+  --warning-subtle: rgba(235,203,139,.14);
+  --danger: #bf616a;
+  --danger-text: #eba5ab;
+  --danger-subtle: rgba(191,97,106,.12);
+  --danger-solid: #b0535c;
+  --danger-solid-hov: #9d4a52;
+  --on-danger: #ffffff;
+  --term-bg: #242933;
+  --term-fg: #d8dee9;
+  --term-cmd: #88c0d0;
+  --term-warn: #ebcb8b;
+  --term-err: #eba5ab;
+}
+
+/* ---- Catppuccin · Latte / Mocha 柔和粉彩 ---- */
+[data-scheme="catppuccin"][data-theme="light"] {
+  --chrome: #e6e9ef;
+  --bg: #eff1f5;
+  --surface: #fafbfc;
+  --surface-2: #e9ecf1;
+  --overlay: #fcfcfd;
+  --sunken: #dce0e8;
+  --hover: rgba(76,79,105,.06);
+  --border: #dce0e8;
+  --border-strong: #bcc0cc;
+  --text: #4c4f69;
+  --muted: #5c5f77;
+  --faint: #8c8fa1;
+  --accent: #8839ef;
+  --accent-text: #7b2fe0;
+  --accent-solid: #8839ef;
+  --accent-solid-hov: #7b2fe0;
+  --on-accent: #ffffff;
+  --accent-subtle: rgba(136,57,239,.1);
+  --success: #40a02b;
+  --success-text: #286d1a;
+  --success-subtle: rgba(64,160,43,.1);
+  --warning: #df8e1d;
+  --warning-text: #8a5309;
+  --warning-subtle: rgba(223,142,29,.12);
+  --danger: #d20f39;
+  --danger-text: #b20d31;
+  --danger-subtle: rgba(210,15,57,.08);
+  --danger-solid: #d20f39;
+  --danger-solid-hov: #b80d32;
+  --on-danger: #ffffff;
+  --term-bg: #11111b;
+  --term-fg: #cdd6f4;
+  --term-cmd: #89b4fa;
+  --term-warn: #f9e2af;
+  --term-err: #f38ba8;
+}
+[data-scheme="catppuccin"][data-theme="dark"] {
+  --chrome: #181825;
+  --bg: #1e1e2e;
+  --surface: #252537;
+  --surface-2: #313244;
+  --overlay: #313244;
+  --sunken: #11111b;
+  --hover: rgba(205,214,244,.06);
+  --border: #313244;
+  --border-strong: #45475a;
+  --text: #cdd6f4;
+  --muted: #a6adc8;
+  --faint: #7f849c;
+  --accent: #cba6f7;
+  --accent-text: #cba6f7;
+  --accent-solid: #cba6f7;
+  --accent-solid-hov: #d6b8f9;
+  --on-accent: #1e1e2e;
+  --accent-subtle: rgba(203,166,247,.14);
+  --success: #a6e3a1;
+  --success-text: #a6e3a1;
+  --success-subtle: rgba(166,227,161,.12);
+  --warning: #f9e2af;
+  --warning-text: #f9e2af;
+  --warning-subtle: rgba(249,226,175,.12);
+  --danger: #f38ba8;
+  --danger-text: #f38ba8;
+  --danger-subtle: rgba(243,139,168,.12);
+  --danger-solid: #f38ba8;
+  --danger-solid-hov: #f5a0b8;
+  --on-danger: #1e1e2e;
+  --term-bg: #11111b;
+  --term-fg: #cdd6f4;
+  --term-cmd: #89b4fa;
+  --term-warn: #f9e2af;
+  --term-err: #f38ba8;
+}
+
+/* ---- Solarized · 经典护眼配色 ---- */
+[data-scheme="solarized"][data-theme="light"] {
+  --chrome: #eee8d5;
+  --bg: #fdf6e3;
+  --surface: #fffcf4;
+  --surface-2: #f6f0dd;
+  --overlay: #fffdf8;
+  --sunken: #eee8d5;
+  --hover: rgba(88,110,117,.07);
+  --border: #e6dfc8;
+  --border-strong: #cfc6ac;
+  --text: #073642;
+  --muted: #4f6369;
+  --faint: #93a1a1;
+  --accent: #268bd2;
+  --accent-text: #1866a0;
+  --accent-solid: #1c6da8;
+  --accent-solid-hov: #185f93;
+  --on-accent: #ffffff;
+  --accent-subtle: rgba(38,139,210,.12);
+  --success: #859900;
+  --success-text: #5b6900;
+  --success-subtle: rgba(133,153,0,.12);
+  --warning: #b58900;
+  --warning-text: #735700;
+  --warning-subtle: rgba(181,137,0,.12);
+  --danger: #dc322f;
+  --danger-text: #b02a27;
+  --danger-subtle: rgba(220,50,47,.08);
+  --danger-solid: #c9302d;
+  --danger-solid-hov: #b02825;
+  --on-danger: #ffffff;
+  --term-bg: #002b36;
+  --term-fg: #93a1a1;
+  --term-cmd: #2aa198;
+  --term-warn: #cfa22e;
+  --term-err: #f07f7c;
+}
+[data-scheme="solarized"][data-theme="dark"] {
+  --chrome: #00212b;
+  --bg: #002b36;
+  --surface: #073642;
+  --surface-2: #0b3e4b;
+  --overlay: #0c3f4c;
+  --sunken: #001b22;
+  --hover: rgba(147,161,161,.08);
+  --border: #12495a;
+  --border-strong: #2a5965;
+  --text: #eee8d5;
+  --muted: #a6b3b3;
+  --faint: #657b83;
+  --accent: #268bd2;
+  --accent-text: #74b8ec;
+  --accent-solid: #1c6da8;
+  --accent-solid-hov: #1f79b9;
+  --on-accent: #ffffff;
+  --accent-subtle: rgba(38,139,210,.12);
+  --success: #859900;
+  --success-text: #9db32c;
+  --success-subtle: rgba(133,153,0,.16);
+  --warning: #b58900;
+  --warning-text: #cfa22e;
+  --warning-subtle: rgba(181,137,0,.16);
+  --danger: #dc322f;
+  --danger-text: #f07f7c;
+  --danger-subtle: rgba(220,50,47,.14);
+  --danger-solid: #dc322f;
+  --danger-solid-hov: #c42a27;
+  --on-danger: #ffffff;
+  --term-bg: #002b36;
+  --term-fg: #93a1a1;
+  --term-cmd: #2aa198;
+  --term-warn: #cfa22e;
+  --term-err: #f07f7c;
+}
+
+/* ---- 强调色覆盖：放在方案之后，同等特异性下后者生效 ---- */
+[data-accent="blue"][data-theme="light"] { --accent: #2563eb; --accent-text: #1d4ed8; --accent-solid: #2563eb; --accent-solid-hov: #1d4ed8; --on-accent: #ffffff; --accent-subtle: rgba(37,99,235,.1); }
+[data-accent="blue"][data-theme="dark"] { --accent: #60a5fa; --accent-text: #93c5fd; --accent-solid: #2563eb; --accent-solid-hov: #1d4ed8; --on-accent: #ffffff; --accent-subtle: rgba(96,165,250,.12); }
+[data-accent="indigo"][data-theme="light"] { --accent: #4f46e5; --accent-text: #4338ca; --accent-solid: #4f46e5; --accent-solid-hov: #4338ca; --on-accent: #ffffff; --accent-subtle: rgba(79,70,229,.1); }
+[data-accent="indigo"][data-theme="dark"] { --accent: #818cf8; --accent-text: #b4befd; --accent-solid: #4f46e5; --accent-solid-hov: #4338ca; --on-accent: #ffffff; --accent-subtle: rgba(129,140,248,.12); }
+[data-accent="violet"][data-theme="light"] { --accent: #7c3aed; --accent-text: #6d28d9; --accent-solid: #7c3aed; --accent-solid-hov: #6d28d9; --on-accent: #ffffff; --accent-subtle: rgba(124,58,237,.1); }
+[data-accent="violet"][data-theme="dark"] { --accent: #a78bfa; --accent-text: #cfc2fe; --accent-solid: #7c3aed; --accent-solid-hov: #6d28d9; --on-accent: #ffffff; --accent-subtle: rgba(167,139,250,.12); }
+[data-accent="teal"][data-theme="light"] { --accent: #0d9488; --accent-text: #115e59; --accent-solid: #0f766e; --accent-solid-hov: #115e59; --on-accent: #ffffff; --accent-subtle: rgba(13,148,136,.1); }
+[data-accent="teal"][data-theme="dark"] { --accent: #2dd4bf; --accent-text: #5eead4; --accent-solid: #0f766e; --accent-solid-hov: #115e59; --on-accent: #ffffff; --accent-subtle: rgba(45,212,191,.12); }
+[data-accent="green"][data-theme="light"] { --accent: #15803d; --accent-text: #166534; --accent-solid: #15803d; --accent-solid-hov: #166534; --on-accent: #ffffff; --accent-subtle: rgba(22,163,74,.1); }
+[data-accent="green"][data-theme="dark"] { --accent: #4ade80; --accent-text: #86efac; --accent-solid: #15803d; --accent-solid-hov: #166534; --on-accent: #ffffff; --accent-subtle: rgba(74,222,128,.12); }
+[data-accent="orange"][data-theme="light"] { --accent: #ea580c; --accent-text: #9a3412; --accent-solid: #c2410c; --accent-solid-hov: #9a3412; --on-accent: #ffffff; --accent-subtle: rgba(234,88,12,.1); }
+[data-accent="orange"][data-theme="dark"] { --accent: #fb923c; --accent-text: #fdba74; --accent-solid: #c2410c; --accent-solid-hov: #9a3412; --on-accent: #ffffff; --accent-subtle: rgba(251,146,60,.12); }
+[data-accent="rose"][data-theme="light"] { --accent: #e11d48; --accent-text: #9f1239; --accent-solid: #e11d48; --accent-solid-hov: #be123c; --on-accent: #ffffff; --accent-subtle: rgba(225,29,72,.1); }
+[data-accent="rose"][data-theme="dark"] { --accent: #fb7185; --accent-text: #feb4bd; --accent-solid: #e11d48; --accent-solid-hov: #be123c; --on-accent: #ffffff; --accent-subtle: rgba(251,113,133,.12); }
+[data-accent="graphite"][data-theme="light"] { --accent: #52525b; --accent-text: #27272a; --accent-solid: #27272a; --accent-solid-hov: #3f3f46; --on-accent: #fafafa; --accent-subtle: rgba(39,39,42,.08); }
+[data-accent="graphite"][data-theme="dark"] { --accent: #d4d4d8; --accent-text: #f4f4f5; --accent-solid: #e4e4e7; --accent-solid-hov: #d4d4d8; --on-accent: #18181b; --accent-subtle: rgba(228,228,231,.1); }

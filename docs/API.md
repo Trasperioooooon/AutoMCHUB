@@ -7,7 +7,8 @@ AutoMCHUB 的 GUI 与后端通过本地 HTTP API 通信，该 API 同时对外�
 - 本机：请求头 `X-Token: <token>`（token 在启动 URL 的 `?token=` 参数中，每次启动随机）
 - 局域网模式：`POST /api/login {"password": "..."}` 换取会话 Cookie
 - SSE 端点可用查询参数 `?token=` 传递
-- **仅本机（loopback）端点**：`/api/pickdir`、`/api/openpath` 会调起系统对话框 / 资源管理器，只接受来自本机的请求；局域网会话调用返回 403
+- **仅本机（loopback）端点**：`/api/pickdir`、`/api/openpath`、`/api/instances/{name}/opendir` 会调起系统对话框 / 资源管理器，`/api/javas/add` 会执行请求中给出的主机路径（`java -version` 探测），均只接受来自本机的请求；局域网会话调用返回 403
+- **主机路径仅本机可指定**：局域网会话不能决定文件写到主机哪里——`POST /api/instances` 与 `POST /api/import/modpack` 的 `root` 会被忽略（实例一律建在默认存放根下）；`PUT /api/config` 只要带了 `serversDir` / `backupsDir`（含置空恢复默认）即整次返回 403、不做任何修改，不带这两个键的其余配置仍可远程修改
 - **免 token 端点**：`GET /bg/{name}` 提供程序旁 `bg/` 目录内的壁纸图片（供前端 CSS `url()` 引用，仅受 Host 校验约束）
 
 ## 端点总览
@@ -24,27 +25,27 @@ AutoMCHUB 的 GUI 与后端通过本地 HTTP API 通信，该 API 同时对外�
 | POST | `/api/shutdown` | 优雅退出（自动停服） |
 | POST | `/api/update/check` · `/api/update/apply` | 检查/应用更新 |
 | GET | `/api/cores` | 12 种核心元数据（id/name/tag/desc/kind） |
-| GET | `/api/mcversions?core=&snapshots=` | 版本列表 |
+| GET | `/api/mcversions?core=&snapshots=` | 版本列表；每项 `{id, type, latest, releaseTime?}`，`releaseTime` 为 Mojang 清单的发布时间（ISO 8601），仅 Vanilla / NeoForge 等版本表取自官方清单的核心提供，其余核心省略 |
 | GET | `/api/builds?core=&mc=` | 构建列表 |
-| GET | `/api/javas` · POST `/api/javas/scan` · POST `/api/javas/add` | Java 管理 |
+| GET | `/api/javas` · POST `/api/javas/scan` · POST `/api/javas/add` | Java 管理（`add` **仅本机**） |
 
 **配置键**（`PUT /api/config`，均为可选、只更新所传字段）：
-`source`（auto/mirror/official）、`cfApiKey`、`webhookUrl`、`updateRepo`、`checkUpdateOnStart`、`serversDir`（实例存放根，空=默认）、`backupsDir`（备份根）、`backupKeep`（每实例保留份数 1–1000）、`onboarded`（首启引导完成标记）、`minimizeToTray`（关窗最小化到托盘）、`autoStart`（开机自启，直写 `HKCU\...\Run`）、`listenLan`、`lanPassword`（明文，存为 SHA-256）。
+`source`（auto/mirror/official）、`cfApiKey`、`webhookUrl`、`updateRepo`、`checkUpdateOnStart`、`serversDir`（实例存放根，空=默认；**仅本机**；改动时旧值并入 `roots`，旧根里的实例照常扫描）、`backupsDir`（备份根；**仅本机**）、`backupKeep`（每实例保留份数 1–1000）、`onboarded`（首启引导完成标记）、`tosAccepted`（用户协议与免责声明已同意标记）、`minimizeToTray`（关窗最小化到托盘）、`autoStart`（开机自启，直写 `HKCU\...\Run`）、`listenLan`、`lanPassword`（明文，服务端存为 bcrypt 哈希；任何响应都不下发该哈希，是否已设密码看 `GET /api/app` 的 `lanSet`）。
 
 ### 实例
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/instances` | 实例列表；每项含 `name/core/kind/mc/build/javaMajor/xmxMb/xmsMb/port/status/motd/dir/createdAt/consoleEncoding/onlineCount/uptimeSec/maxPlayers/extraJvm` |
-| POST | `/api/instances` | 创建（返回 taskId，轮询 `/api/tasks/{id}`）；body 可含 `difficulty/gamemode/root` 等 |
-| POST | `/api/import/modpack` | multipart 导入整合包（file + name/xmxMb/port/eula/onlineMode/allowFlight/root） |
+| POST | `/api/instances` | 创建（返回 taskId，轮询 `/api/tasks/{id}`）；body 可含 `difficulty/gamemode/root` 等（`root` 仅本机生效） |
+| POST | `/api/import/modpack` | multipart 导入整合包（file + name/xmxMb/port/eula/onlineMode/allowFlight/root；`root` 仅本机生效） |
 | POST | `/api/instances/{name}/start` \| `/stop` \| `/kill` | 进程控制 |
 | POST | `/api/instances/{name}/command` | `{"cmd":"say hi"}` |
 | POST | `/api/instances/{name}/opendir?sub=` | 在资源管理器打开实例目录或其白名单子目录（`sub` ∈ mods/plugins/world/logs/crash-reports），**仅本机** |
 | GET | `/api/instances/{name}/console` | SSE 控制台流（先回放后实时） |
 | GET/PUT | `/api/instances/{name}/properties` | server.properties 读写 |
-| PUT | `/api/instances/{name}/settings` | `{xmxMb, xmsMb, consoleEncoding, extraJvm}`（`extraJvm` 为字符串数组，一行一参） |
+| PUT | `/api/instances/{name}/settings` | `{xmxMb, xmsMb, consoleEncoding, extraJvm}`（`extraJvm` 为字符串数组，一行一参，传入即整体替换；MC 1.18.1 以下实例的 log4shell 缓解参数始终保留，缺失时自动补回） |
 | GET/PUT | `/api/instances/{name}/policies` | 崩溃重启 + 定时任务 |
-| GET/POST | `/api/instances/{name}/backups`；POST `.../backups/restore`；DELETE `.../backups?file=` | 备份（保留份数由全局 `backupKeep` 控制） |
+| GET/POST | `/api/instances/{name}/backups`；POST `.../backups/restore`；DELETE `.../backups?file=` | 备份（保留份数由全局 `backupKeep` 控制，跨备份根合计）。新备份写当前备份根；列表 / 还原 / 删除也查内置根与改目录前用过的旧根（config.json `backupRoots`），同名文件视为同一份；`file` 只取文件名，须为 `.zip` |
 | GET/POST | `/api/instances/{name}/players` | 玩家名单与操作 `{action, player}` |
 | GET | `/api/instances/{name}/resources/search?q=` | Modrinth 兼容资源搜索 |
 | POST | `/api/instances/{name}/resources/install` | `{projectId}` 安装到 mods/plugins |

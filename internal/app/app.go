@@ -34,8 +34,9 @@ type Config struct {
 
 	ServersDir  string   `json:"serversDir,omitempty"`  // 自定义实例存放根目录（空=内置 servers/），仅对新建生效
 	BackupsDir  string   `json:"backupsDir,omitempty"`  // 自定义备份根目录（空=内置 backups/）
-	Roots       []string `json:"roots,omitempty"`       // 曾放置实例的其它根目录（多根扫描用）
+	Roots       []string `json:"roots,omitempty"`       // 曾放置实例或曾设为默认的根目录（多根扫描用，内置根除外）
 	BackupKeep  int      `json:"backupKeep,omitempty"`  // 每实例保留的备份份数（0=默认 10）
+	BackupRoots []string `json:"backupRoots,omitempty"` // 曾设为备份根的目录（旧备份照常列出、还原，内置根除外）
 	Onboarded   bool     `json:"onboarded,omitempty"`   // 首次运行引导卡是否已完成
 	TosAccepted bool     `json:"tosAccepted,omitempty"` // 用户协议与免责声明是否已同意（未同意则每次启动重新弹引导卡）
 }
@@ -114,6 +115,14 @@ func UpdateConfig(mutate func(*Config) error) (Config, error) {
 	if c.Source != "mirror" && c.Source != "official" {
 		c.Source = "auto"
 	}
+	// 默认存放根被改掉（含恢复默认）时旧根并入 Roots：其中的实例重启后仍被扫描，原地可用
+	if c.ServersDir != cfg.ServersDir {
+		addRoot(&c, cfg.ServersDir)
+	}
+	// 备份根同理并入 BackupRoots：其中的备份照常列出、可还原，并计入保留份数
+	if c.BackupsDir != cfg.BackupsDir {
+		addBackupRoot(&c, cfg.BackupsDir)
+	}
 	cfg = c
 	saveLocked()
 	return c, nil
@@ -149,12 +158,54 @@ func BackupKeep() int {
 	return k
 }
 
-// BackupsRoot 返回备份根目录（配置优先，否则程序内置 backups/）。
+// BackupsRoot 返回备份根目录（配置优先，否则程序内置 backups/），新备份都写在这里。
 func BackupsRoot() string {
 	if d := GetConfig().BackupsDir; d != "" {
 		return filepath.Clean(d)
 	}
 	return BackupsDir
+}
+
+// AllBackupRoots 返回查找已有备份的全部根目录（去重、保持顺序）：当前备份根在前，
+// 其后是内置根与改目录前用过的旧根。
+func AllBackupRoots() []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(d string) {
+		if d == "" {
+			return
+		}
+		c := filepath.Clean(d)
+		if !seen[c] {
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	c := GetConfig()
+	add(c.BackupsDir) // 配置的备份根（空则下一行的内置根就是当前根）
+	add(BackupsDir)   // 内置默认根
+	for _, r := range c.BackupRoots {
+		add(r) // 改目录前用过的旧根
+	}
+	return out
+}
+
+// addBackupRoot 把 dir 并入 c.BackupRoots（filepath.Clean 后去重，空串与内置备份根跳过：
+// 内置根总在 AllBackupRoots 里）。调用方须已持有 cfgMu。
+func addBackupRoot(c *Config, dir string) {
+	if dir == "" {
+		return
+	}
+	dir = filepath.Clean(dir)
+	if dir == filepath.Clean(BackupsDir) {
+		return
+	}
+	for _, r := range c.BackupRoots {
+		if filepath.Clean(r) == dir {
+			return
+		}
+	}
+	c.BackupRoots = append(c.BackupRoots, dir)
 }
 
 // InstanceRoots 返回所有需要扫描实例的根目录（去重、保持顺序）。
@@ -180,25 +231,33 @@ func InstanceRoots() []string {
 	return out
 }
 
-// RememberRoot 记录一个曾放置实例的自定义根，便于下次启动扫描发现。
-// 内置默认根与当前配置默认根已被扫描，无需记录。
+// RememberRoot 记录一个曾放置实例的根，便于下次启动扫描发现。
+// 只有内置默认根始终被扫描、无需记录；当前配置根也要记，之后改目录或恢复默认时它就不再被扫描。
 func RememberRoot(dir string) {
-	if dir == "" {
-		return
-	}
-	dir = filepath.Clean(dir)
 	cfgMu.Lock()
 	defer cfgMu.Unlock()
-	if dir == filepath.Clean(ServersDir) || (cfg.ServersDir != "" && dir == filepath.Clean(cfg.ServersDir)) {
-		return
+	if addRoot(&cfg, dir) {
+		saveLocked()
 	}
-	for _, r := range cfg.Roots {
+}
+
+// addRoot 把 dir 并入 c.Roots（filepath.Clean 后去重，空串与内置默认根跳过），返回是否新增。
+// 调用方须已持有 cfgMu。
+func addRoot(c *Config, dir string) bool {
+	if dir == "" {
+		return false
+	}
+	dir = filepath.Clean(dir)
+	if dir == filepath.Clean(ServersDir) {
+		return false
+	}
+	for _, r := range c.Roots {
 		if filepath.Clean(r) == dir {
-			return
+			return false
 		}
 	}
-	cfg.Roots = append(cfg.Roots, dir)
-	saveLocked()
+	c.Roots = append(c.Roots, dir)
+	return true
 }
 
 type memoryStatusEx struct {

@@ -239,9 +239,15 @@ func readJSON(r *http.Request, v any) error {
 
 // ---------- 基础信息 ----------
 
-func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
+// publicConfig 返回可下发给前端的配置副本：抹去访问密码哈希（是否已设密码由 lanSet 告知）。
+// 凡是把配置写进响应的处理器都必须经由此函数，不得直接下发 app.GetConfig()。
+func publicConfig() app.Config {
 	cfg := app.GetConfig()
 	cfg.AccessPasswordHash = "" // 不下发哈希
+	return cfg
+}
+
+func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"version":     app.Version,
 		"base":        app.Base,
@@ -250,7 +256,7 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 		"port":        s.port,
 		"serversRoot": app.ServersRoot(),
 		"backupsRoot": app.BackupsRoot(),
-		"config":      cfg,
+		"config":      publicConfig(),
 		"lanSet":      app.GetConfig().AccessPasswordHash != "",
 		"autoStart":   autostart.Enabled(), // 开机自启真值以注册表为准
 		"ips":         localIPs(),
@@ -418,6 +424,12 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err)
 		return
 	}
+	// 存放 / 备份目录决定之后实例与备份写到主机何处（下方还会 MkdirAll）：与创建实例的 root 同理仅限本机，
+	// 远程 / 局域网请求带这两个键（含置空恢复默认）即整次拒绝，其余键不受影响
+	if (body.ServersDir != nil || body.BackupsDir != nil) && !isLoopbackReq(r) {
+		writeErr(w, 403, fmt.Errorf("存放目录仅支持在本机修改"))
+		return
+	}
 	// 可失败的校验与 I/O（建目录、算哈希）在锁外先做完，锁内只做字段套用
 	if body.WebhookURL != nil {
 		u := strings.TrimSpace(*body.WebhookURL)
@@ -469,10 +481,10 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 			c.CheckUpdateOnStart = *body.CheckUpdateOnStart
 		}
 		if body.ServersDir != nil {
-			c.ServersDir = strings.TrimSpace(*body.ServersDir)
+			c.ServersDir = strings.TrimSpace(*body.ServersDir) // 旧值由 UpdateConfig 并入 Roots，旧实例照常扫描
 		}
 		if body.BackupsDir != nil {
-			c.BackupsDir = strings.TrimSpace(*body.BackupsDir)
+			c.BackupsDir = strings.TrimSpace(*body.BackupsDir) // 旧值由 UpdateConfig 并入 BackupRoots，旧备份照常可用
 		}
 		if body.BackupKeep != nil {
 			k := *body.BackupKeep
@@ -514,7 +526,7 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeJSON(w, app.GetConfig())
+	writeJSON(w, publicConfig())
 }
 
 // ---------- 自动更新 ----------
@@ -617,6 +629,9 @@ func (s *Server) handleImportModpack(w http.ResponseWriter, r *http.Request) {
 		AllowFlight: r.FormValue("allowFlight") == "true",
 		MOTD:        r.FormValue("motd"),
 		Root:        r.FormValue("root"),
+	}
+	if !isLoopbackReq(r) {
+		req.Root = "" // 同 handleCreateInstance：远程 / 局域网请求不得指定主机任意路径，强制落到默认根
 	}
 	id, err := s.mgr.ImportModpackAsync(pack, req, app.GetConfig().CFApiKey)
 	if err != nil {

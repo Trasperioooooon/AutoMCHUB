@@ -5,49 +5,65 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AutoMCHUB · MC 一键开服</title>
 <script>
-/* 主题需在样式表生效前落到 <html>，避免切页闪烁。
-   偏好三态 auto/light/dark 存 dataset.themePref；auto 解析为系统色。
-   优先级：URL 参数 > 记忆 > auto（跟随系统）。 */
+/* 外观需在样式表生效前落到 <html>，避免首帧闪烁。三项偏好均存 localStorage（每台设备各自记忆）：
+   amh_theme = auto | light | dark（auto 解析为系统色）；amh_scheme = 配色方案；amh_accent = 强调色（auto=跟随方案）。
+   优先级：URL 参数 > 记忆 > 默认。 */
 (function () {
-  var q = new URLSearchParams(location.search).get("theme");
-  var pref = q || localStorage.getItem("amh_theme") || "auto";
+  var SCHEMES = ["fluent", "github", "graphite", "nord", "catppuccin", "solarized"];
+  var ACCENTS = ["auto", "blue", "indigo", "violet", "teal", "green", "orange", "rose", "graphite"];
+  var q = new URLSearchParams(location.search);
+  var get = function (k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } };
+  var pref = q.get("theme") || get("amh_theme", "auto");
+  var scheme = q.get("scheme") || get("amh_scheme", "fluent");
+  var accent = q.get("accent") || get("amh_accent", "auto");
+  if (["auto", "light", "dark"].indexOf(pref) < 0) pref = "auto";
+  if (SCHEMES.indexOf(scheme) < 0) scheme = "fluent";
+  if (ACCENTS.indexOf(accent) < 0) accent = "auto";
   var sys = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
   var root = document.documentElement;
   root.dataset.themePref = pref;
-  root.dataset.theme = (pref === "auto") ? sys : pref;
+  root.dataset.theme = pref === "auto" ? sys : pref;
+  root.dataset.scheme = scheme;
+  root.dataset.accent = accent;
 })();
 </script>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='2' width='28' height='28' fill='%237ee81f'/%3E%3Crect x='2' y='2' width='28' height='4' fill='%23a6f55d'/%3E%3Crect x='2' y='26' width='28' height='4' fill='%233f7a1e'/%3E%3Crect x='8' y='10' width='6' height='6' fill='%230e1113'/%3E%3Crect x='18' y='10' width='6' height='6' fill='%230e1113'/%3E%3Crect x='11' y='18' width='10' height='5' fill='%230e1113'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Crect x='1' y='1' width='18' height='18' rx='5' fill='%23005fb8'/%3E%3Crect x='5' y='5.5' width='10' height='3.5' rx='1' fill='%23fff'/%3E%3Crect x='5' y='11' width='10' height='3.5' rx='1' fill='%23fff' opacity='.7'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="themes.css">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
 <div id="app">
-  <header id="hud">
-    <div class="logo">
-      <div class="cube" style="--c:#7ec850"><i></i></div>
-      <span class="logo-name">AutoMCHUB</span>
+  <header id="titlebar">
+    <div class="tb-brand">
+      <svg class="logo-mark" viewBox="0 0 20 20" aria-hidden="true"><rect x="1" y="1" width="18" height="18" rx="5" style="fill:var(--accent-solid)"/><rect x="5" y="5.5" width="10" height="3.5" rx="1" style="fill:var(--on-accent)"/><rect x="5" y="11" width="10" height="3.5" rx="1" style="fill:var(--on-accent)" opacity=".7"/></svg>
+      <span>AutoMCHUB</span>
     </div>
-    <div id="hud-status"></div>
     <span class="grow"></span>
-    <button class="hud-btn" id="theme-btn" title="切换浅色 / 深色" aria-label="切换主题"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="3.1"/><path d="M8 1.6v1.7M8 12.7v1.7M14.4 8h-1.7M3.3 8H1.6M12.5 3.5l-1.2 1.2M4.7 11.3l-1.2 1.2M12.5 12.5l-1.2-1.2M4.7 4.7L3.5 3.5"/></svg></button>
-    <span class="hud-ver">v<span id="app-ver">…</span></span>
     <div class="win-ctrls" id="win-ctrls">
       <button class="wc" id="wc-min" title="最小化" aria-label="最小化"><svg viewBox="0 0 12 12" width="11" height="11"><rect x="1.5" y="5.5" width="9" height="1" fill="currentColor"/></svg></button>
       <button class="wc" id="wc-max" title="最大化 / 还原" aria-label="最大化"><svg viewBox="0 0 12 12" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1"><rect x="2" y="2" width="8" height="8"/></svg></button>
       <button class="wc wc-close" id="wc-close" title="关闭" aria-label="关闭"><svg viewBox="0 0 12 12" width="11" height="11" stroke="currentColor" stroke-width="1.2"><path d="M2 2l8 8M10 2l-8 8"/></svg></button>
     </div>
   </header>
-  <main id="main"></main>
-  <nav id="hotbar">
-    <a href="#/instances" data-nav="instances" class="hb-slot"><span class="hb-ico"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.6 4.3l3.8-1.5 3.2 1.5 3.8-1.5v9.4l-3.8 1.5-3.2-1.5-3.8 1.5z"/><path d="M6.4 2.9v9.4M9.6 4.3v9.4"/></svg></span><span class="hb-label">服务器</span><span class="hb-key">1</span></a>
-    <a href="#/create" data-nav="create" class="hb-slot"><span class="hb-ico"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.6" y="2.6" width="10.8" height="10.8" rx="1.2"/><path d="M6.2 2.8v10.4M9.8 2.8v10.4M2.8 6.2h10.4M2.8 9.8h10.4"/></svg></span><span class="hb-label">合成</span><span class="hb-key">2</span></a>
-    <a href="#/tunnels" data-nav="tunnels" class="hb-slot"><span class="hb-ico"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="5.8"/><path d="M10.4 5.6L8.7 8.7 5.6 10.4 7.3 7.3z" fill="currentColor" stroke="none"/></svg></span><span class="hb-label">联机</span><span class="hb-key">3</span></a>
-    <a href="#/settings" data-nav="settings" class="hb-slot"><span class="hb-ico"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="2.3"/><path d="M8 1.6v1.9M8 12.5v1.9M14.4 8h-1.9M3.5 8H1.6M12.5 3.5l-1.3 1.3M4.8 11.2l-1.3 1.3M12.5 12.5l-1.3-1.3M4.8 4.8L3.5 3.5"/></svg></span><span class="hb-label">设置</span><span class="hb-key">4</span></a>
-  </nav>
+  <div id="shell">
+    <nav id="sidebar" aria-label="主导航">
+      <a href="#/instances" data-nav="instances" class="nav-item" title="服务器（快捷键 1）"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="4.5" rx="1.2"/><rect x="2.5" y="9" width="11" height="4.5" rx="1.2"/><path d="M5 4.75h.01M5 11.25h.01"/></svg><span>服务器</span></a>
+      <a href="#/create" data-nav="create" class="nav-item" title="新建服务器（快捷键 2）"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="2.5"/><path d="M8 5.5v5M5.5 8h5"/></svg><span>新建服务器</span></a>
+      <a href="#/tunnels" data-nav="tunnels" class="nav-item" title="内网穿透（快捷键 3）"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="5.9"/><path d="M2.1 8h11.8M8 2.1c1.7 1.7 2.5 3.8 2.5 5.9S9.7 12.2 8 13.9C6.3 12.2 5.5 10.1 5.5 8S6.3 3.8 8 2.1z"/></svg><span>内网穿透</span></a>
+      <span class="grow"></span>
+      <a href="#/settings" data-nav="settings" class="nav-item" title="设置（快捷键 4）"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.72 3.37L6.87 1.60A6.5 6.5 0 0 1 9.13 1.60L9.28 3.37A4.8 4.8 0 0 1 10.36 3.82L11.73 2.68A6.5 6.5 0 0 1 13.32 4.27L12.18 5.64A4.8 4.8 0 0 1 12.63 6.72L14.4 6.87A6.5 6.5 0 0 1 14.4 9.13L12.63 9.28A4.8 4.8 0 0 1 12.18 10.36L13.32 11.73A6.5 6.5 0 0 1 11.73 13.32L10.36 12.18A4.8 4.8 0 0 1 9.28 12.63L9.13 14.40A6.5 6.5 0 0 1 6.87 14.40L6.72 12.63A4.8 4.8 0 0 1 5.64 12.18L4.27 13.32A6.5 6.5 0 0 1 2.68 11.73L3.82 10.36A4.8 4.8 0 0 1 3.37 9.28L1.6 9.13A6.5 6.5 0 0 1 1.6 6.87L3.37 6.72A4.8 4.8 0 0 1 3.82 5.64L2.68 4.27A6.5 6.5 0 0 1 4.27 2.68L5.64 3.82A4.8 4.8 0 0 1 6.72 3.37Z"/><circle cx="8" cy="8" r="2.1"/></svg><span>设置</span></a>
+      <div class="sb-foot">
+        <button class="sb-theme" id="theme-btn" aria-label="切换浅色 / 深色"></button>
+        <span class="sb-ver">v<span id="app-ver">…</span></span>
+      </div>
+    </nav>
+    <main id="main"></main>
+  </div>
 </div>
-<div id="toasts"></div>
+<div id="toasts" aria-live="polite"></div>
 <div id="modal-root"></div>
 <script src="props-catalog.js"></script>
+<script src="qrcode.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

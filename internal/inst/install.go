@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -492,28 +493,92 @@ func locateLaunchTarget(dir string, core mcsrc.Core, ctx context.Context, mc str
 	return "", fmt.Errorf("安装器未生成可识别的服务端启动文件，请查看实例目录中的 installer.log")
 }
 
+// log4shell 缓解参数（Mojang 官方方案）：<1.18.1 加 noLookups，1.12.2 ~ 1.16.5 另引用官方 xml 日志配置。
+const (
+	log4jNoLookups = "-Dlog4j2.formatMsgNoLookups=true"
+	log4jXML       = "log4j2_112-116.xml" // 创建时下载到实例目录
+	log4jConfig    = "-Dlog4j.configurationFile=" + log4jXML
+)
+
 // applyLog4jMitigation 依据 Mojang 官方公告为老版本添加 log4shell 缓解。
 func applyLog4jMitigation(ctx context.Context, t *tasks.Task, i *Instance) error {
 	newer1181, err := mcsrc.NewerOrEqual(ctx, i.MC, "1.18.1")
 	if err != nil || newer1181 {
 		return err
 	}
-	i.ExtraJVM = append(i.ExtraJVM, "-Dlog4j2.formatMsgNoLookups=true")
+	i.ExtraJVM = append(i.ExtraJVM, log4jNoLookups)
 	newer117, err := mcsrc.NewerOrEqual(ctx, i.MC, "1.17")
 	if err != nil {
 		return err
 	}
 	if !newer117 { // 1.12.2 ~ 1.16.5：官方 xml 配置
 		const xmlURL = "https://launcher.mojang.com/v1/objects/02937d122c86ce73319ef9975b58896fc1b491d1/log4j2_112-116.xml"
-		dest := filepath.Join(i.Dir, "log4j2_112-116.xml")
+		dest := filepath.Join(i.Dir, log4jXML)
 		if err := dl.Fetch(ctx, dl.Request{URLs: mcsrc.URLPair(xmlURL), Dest: dest, MinSize: 100}, nil); err != nil {
 			t.Logf("log4j 防护配置下载失败（不影响开服，仅安全性降低）: %v", err)
 			return nil
 		}
-		i.ExtraJVM = append(i.ExtraJVM, "-Dlog4j.configurationFile=log4j2_112-116.xml")
+		i.ExtraJVM = append(i.ExtraJVM, log4jConfig)
 		t.Logf("已启用 log4shell 漏洞缓解（Mojang 官方方案）")
 	}
 	return nil
+}
+
+// log4jFlags 给出保存 JVM 参数时须强制保留的 log4shell 缓解参数，判定与创建时的 applyLog4jMitigation 一致；
+// 只读本地清单不联网（mcsrc.NewerOrEqualCached），判定不了版本时保守沿用 i.ExtraJVM 中已有的缓解参数。
+// 调用方须持 procMu。
+func log4jFlags(i *Instance) []string {
+	if mcsrc.KindOf(i.Core) == mcsrc.KindProxy {
+		return nil // 代理端不运行 Minecraft 本体，创建时也不加
+	}
+	var flags []string
+	if newer1181, ok := mcsrc.NewerOrEqualCached(i.MC, "1.18.1"); !ok {
+		for _, a := range i.ExtraJVM {
+			if a == log4jNoLookups || a == log4jConfig {
+				flags = append(flags, a)
+			}
+		}
+	} else if !newer1181 {
+		flags = append(flags, log4jNoLookups)
+		if newer117, _ := mcsrc.NewerOrEqualCached(i.MC, "1.17"); !newer117 { // 同一清单里 1.17 必可判定
+			flags = append(flags, log4jConfig)
+		}
+	}
+	// 官方 xml 只在创建时下载：文件不在（当初下载失败 / 被删）就不强加引用——引用不存在的配置文件会令 log4j
+	// 退回只输出 ERROR 的默认配置，控制台日志与「启动完成」检测随之失效
+	if _, err := os.Stat(filepath.Join(i.Dir, log4jXML)); err != nil {
+		flags = slices.DeleteFunc(flags, func(a string) bool { return a == log4jConfig })
+	}
+	return flags
+}
+
+// withJVMFlags 返回 args 的副本，并令 flags 中每个参数恰好出现一次且即为生效值：同名系统属性的其他取值与重复项
+// 一律剔除（JVM 对重复的 -D 取最后一个，残留的其他取值可能覆盖缓解），缺失的追加到末尾；其余参数原样保留。
+func withJVMFlags(args, flags []string) []string {
+	want := make(map[string]string, len(flags)) // 属性名（"=" 之前）→ 须保留的完整参数
+	for _, f := range flags {
+		k, _, _ := strings.Cut(f, "=")
+		want[k] = f
+	}
+	out := make([]string, 0, len(args)+len(flags))
+	kept := make(map[string]bool, len(flags))
+	for _, a := range args {
+		k, _, _ := strings.Cut(a, "=")
+		if f, ok := want[k]; ok {
+			if a != f || kept[f] {
+				continue
+			}
+			kept[f] = true
+		}
+		out = append(out, a)
+	}
+	for _, f := range flags {
+		if !kept[f] {
+			out = append(out, f)
+			kept[f] = true
+		}
+	}
+	return out
 }
 
 // launchArgs 构造 JVM 启动参数（进程托管与 run.bat 共用同一套逻辑）。

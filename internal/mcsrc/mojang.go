@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"automchub/internal/app"
@@ -59,10 +60,11 @@ func Order2(mirror, official string) []string {
 }
 
 type ManifestVersion struct {
-	ID   string `json:"id"`
-	Type string `json:"type"`
-	URL  string `json:"url"`
-	SHA1 string `json:"sha1"`
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	URL         string `json:"url"`
+	SHA1        string `json:"sha1"`
+	ReleaseTime string `json:"releaseTime"` // 如 "2023-06-12T13:25:51+00:00"（另有 time 字段是清单条目的修改时间，勿混用）
 }
 
 type manifest struct {
@@ -78,7 +80,21 @@ var (
 	maniData *manifest
 	maniIdx  map[string]int
 	maniAt   time.Time
+	// maniSnap 为最近一次加载的清单索引（建成后只读），供 NewerOrEqualCached 无锁读取：
+	// getManifest 联网刷新期间一直持有 maniMu，离线判定不应排在它后面
+	maniSnap atomic.Pointer[map[string]int]
 )
+
+func manifestCachePath() string { return filepath.Join(app.CacheDir, "version_manifest_v2.json") }
+
+// indexVersions 建立 版本号 → 清单位置 的索引（清单新版本在前）。
+func indexVersions(m *manifest) map[string]int {
+	idx := make(map[string]int, len(m.Versions))
+	for i, v := range m.Versions {
+		idx[v.ID] = i
+	}
+	return idx
+}
 
 // getManifest 获取版本清单（内存缓存 10 分钟；网络全挂时回退磁盘缓存）。
 func getManifest(ctx context.Context) (*manifest, map[string]int, error) {
@@ -88,7 +104,7 @@ func getManifest(ctx context.Context) (*manifest, map[string]int, error) {
 		return maniData, maniIdx, nil
 	}
 	var m manifest
-	cachePath := filepath.Join(app.CacheDir, "version_manifest_v2.json")
+	cachePath := manifestCachePath()
 	b, err := dl.FetchBytes(ctx, URLPair(officialManifestURL))
 	if err == nil {
 		if jerr := json.Unmarshal(b, &m); jerr == nil && len(m.Versions) > 0 {
@@ -106,11 +122,9 @@ func getManifest(ctx context.Context) (*manifest, map[string]int, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("获取 Minecraft 版本清单失败: %w", err)
 	}
-	idx := make(map[string]int, len(m.Versions))
-	for i, v := range m.Versions {
-		idx[v.ID] = i
-	}
+	idx := indexVersions(&m)
 	maniData, maniIdx, maniAt = &m, idx, time.Now()
+	maniSnap.Store(&idx)
 	return maniData, maniIdx, nil
 }
 
@@ -133,7 +147,31 @@ func NewerOrEqual(ctx context.Context, a, b string) (bool, error) {
 	return newerOrEqualIdx(idx, a, b), nil
 }
 
-// vanillaVersions 返回不老于 FloorVersion 的版本（正式版，可选快照）。
+// NewerOrEqualCached 同 NewerOrEqual，但只用本地已有的清单（本次运行已加载的，否则读磁盘缓存）、绝不联网，
+// 供保存设置等须即时返回的路径——联网刷新最坏要等约两分钟，而历史版本的先后顺序不会变，旧清单足以判定。
+// 无本地清单或任一版本不在其中时 ok=false（不像 NewerOrEqual 那样把未知版本当作较旧），由调用方兜底。
+func NewerOrEqualCached(a, b string) (newer, ok bool) {
+	var idx map[string]int
+	if p := maniSnap.Load(); p != nil {
+		idx = *p
+	} else {
+		var m manifest
+		cb, err := os.ReadFile(manifestCachePath())
+		if err != nil || json.Unmarshal(cb, &m) != nil {
+			return false, false
+		}
+		idx = indexVersions(&m)
+		maniSnap.CompareAndSwap(nil, &idx) // 仅省去后续调用重复解析；不碰 maniData，联网刷新节奏不受影响
+	}
+	_, oka := idx[a]
+	_, okb := idx[b]
+	if !oka || !okb {
+		return false, false
+	}
+	return newerOrEqualIdx(idx, a, b), true
+}
+
+// vanillaVersions 返回不老于 FloorVersion 的版本（正式版，可选快照），附官方发布时间。
 func vanillaVersions(ctx context.Context, snapshots bool) ([]MCVersion, error) {
 	m, idx, err := getManifest(ctx)
 	if err != nil {
@@ -147,9 +185,10 @@ func vanillaVersions(ctx context.Context, snapshots bool) ([]MCVersion, error) {
 		}
 		if v.Type == "release" || (snapshots && v.Type == "snapshot") {
 			out = append(out, MCVersion{
-				ID:     v.ID,
-				Type:   v.Type,
-				Latest: v.ID == m.Latest.Release || v.ID == m.Latest.Snapshot,
+				ID:          v.ID,
+				Type:        v.Type,
+				Latest:      v.ID == m.Latest.Release || v.ID == m.Latest.Snapshot,
+				ReleaseTime: v.ReleaseTime,
 			})
 		}
 	}
