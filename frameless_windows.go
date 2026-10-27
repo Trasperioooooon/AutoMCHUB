@@ -1,6 +1,6 @@
 package main
 
-// 无边框窗口（去掉系统标题栏，改由前端 HUD 充当标题栏）。
+// 无边框窗口（去掉系统标题栏，改由前端标题栏代替）。
 // 手法：拦 WM_NCCALCSIZE，先让系统算出标准边框，再把客户区顶边恢复到窗口顶——
 // 即「去掉标题栏、保留原生左右下缩放边框与 DWM 阴影/圆角」。WebView2 子窗口铺满客户区、
 // 会吞掉命中测试，故拖动窗口与最小化/最大化/关闭改由 Bind 暴露给前端顶栏调用（见 main.go）。
@@ -54,7 +54,7 @@ func framelessNCCalcSize(hwnd, wparam, lparam uintptr) (ret uintptr, handled boo
 	pDefWindowProcW.Call(hwnd, _WM_NCCALCSIZE, wparam, lparam) // 先算标准边框（含侧/底缩放边框）
 	if isZoomed(hwnd) {
 		// 最大化：窗口四边各越出屏幕一个缩放边框宽。默认过程会在顶部让出「边框+标题栏」，
-		// 导致原生标题栏露出（与前端 HUD 形成双顶栏）；只保留越屏的边框高，客户区顶恰好落在工作区顶。
+		// 导致原生标题栏露出（与前端标题栏形成双顶栏）；只保留越屏的边框高，客户区顶恰好落在工作区顶。
 		// 左/右/下沿用系统计算，任务栏/工作区适配不受影响。
 		p.Rgrc[0].Top = origTop + maximizedTopInset(hwnd)
 	} else {
@@ -64,7 +64,7 @@ func framelessNCCalcSize(hwnd, wparam, lparam uintptr) (ret uintptr, handled boo
 }
 
 // maximizedTopInset 返回最大化时窗口顶边越出显示器的高度（缩放边框 + 附加边框）。
-// 优先按窗口所在显示器 DPI 计算（Win10 1607+），避免高 DPI 屏上残留细缝或裁掉 HUD 顶部。
+// 优先按窗口所在显示器 DPI 计算（Win10 1607+），避免高 DPI 屏上残留细缝或裁掉前端标题栏顶部。
 func maximizedTopInset(hwnd uintptr) int32 {
 	if pGetDpiForWindow.Find() == nil && pGetSystemMetricsForDpi.Find() == nil {
 		if dpi, _, _ := pGetDpiForWindow.Call(hwnd); dpi != 0 {
