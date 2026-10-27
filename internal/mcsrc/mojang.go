@@ -59,10 +59,11 @@ func Order2(mirror, official string) []string {
 }
 
 type ManifestVersion struct {
-	ID   string `json:"id"`
-	Type string `json:"type"`
-	URL  string `json:"url"`
-	SHA1 string `json:"sha1"`
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	URL         string `json:"url"`
+	SHA1        string `json:"sha1"`
+	ReleaseTime string `json:"releaseTime"` // 如 "2023-06-12T13:25:51+00:00"（另有 time 字段是清单条目的修改时间，勿混用）
 }
 
 type manifest struct {
@@ -133,7 +134,7 @@ func NewerOrEqual(ctx context.Context, a, b string) (bool, error) {
 	return newerOrEqualIdx(idx, a, b), nil
 }
 
-// vanillaVersions 返回不老于 FloorVersion 的版本（正式版，可选快照）。
+// vanillaVersions 返回不老于 FloorVersion 的版本（正式版，可选快照），附官方发布时间。
 func vanillaVersions(ctx context.Context, snapshots bool) ([]MCVersion, error) {
 	m, idx, err := getManifest(ctx)
 	if err != nil {
@@ -147,9 +148,10 @@ func vanillaVersions(ctx context.Context, snapshots bool) ([]MCVersion, error) {
 		}
 		if v.Type == "release" || (snapshots && v.Type == "snapshot") {
 			out = append(out, MCVersion{
-				ID:     v.ID,
-				Type:   v.Type,
-				Latest: v.ID == m.Latest.Release || v.ID == m.Latest.Snapshot,
+				ID:          v.ID,
+				Type:        v.Type,
+				Latest:      v.ID == m.Latest.Release || v.ID == m.Latest.Snapshot,
+				ReleaseTime: v.ReleaseTime,
 			})
 		}
 	}

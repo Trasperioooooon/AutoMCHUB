@@ -758,10 +758,14 @@ async function drawWizard() {
     const drawList = () => {
       const q = $("#ver-search").value.trim();
       const items = all.filter(v => !q || v.id.includes(q)).slice(0, 300);
-      $("#ver-list").innerHTML = items.length ? items.map(v => `
+      $("#ver-list").innerHTML = items.length ? items.map(v => {
+        // 发布日期副行：仅版本表取自 Mojang 清单的核心带 releaseTime（ISO 8601，取日期部分），其余核心不显示
+        const date = /^\d{4}-\d{2}-\d{2}/.test(v.releaseTime || "") ? v.releaseTime.slice(0, 10) : "";
+        return `
         <div class="ver-item ${wiz.mc === v.id ? "sel" : ""}" data-id="${esc(v.id)}">
-          <span>${esc(v.id)}${v.latest ? `<span class="ver-tag">最新</span>` : ""}</span><span class="vt">${v.type === "snapshot" ? "快照" : "正式版"}</span>
-        </div>`).join("") : `<div class="ver-item">没有匹配的版本</div>`;
+          <span>${esc(v.id)}${v.latest ? `<span class="ver-tag">最新</span>` : ""}${date ? `<span class="ver-date">${esc(date)}</span>` : ""}</span><span class="vt">${v.type === "snapshot" ? "快照" : "正式版"}</span>
+        </div>`;
+      }).join("") : `<div class="ver-item">没有匹配的版本</div>`;
       $("#ver-list").querySelectorAll(".ver-item[data-id]").forEach(el => el.onclick = () => {
         wiz.mc = el.dataset.id;
         $("#ver-list").querySelectorAll(".ver-item").forEach(x => x.classList.toggle("sel", x.dataset.id === wiz.mc));
@@ -1782,15 +1786,28 @@ async function setJava(body, info) {
 }
 
 /* — 远程访问 — */
+/* 访问地址排序：家用局域网段优先，让默认那张二维码就是手机最可能连得上的地址
+   （172.16/12 多为 WSL / Hyper-V 虚拟网卡；169.254 是没拿到 DHCP 的自动地址，垫底） */
+const lanIPRank = ip => /^192\.168\./.test(ip) ? 0 : /^10\./.test(ip) ? 1 : /^172\.(1[6-9]|2\d|3[01])\./.test(ip) ? 2 : /^169\.254\./.test(ip) ? 4 : 3;
 function setRemote(body, info) {
   const lanPort = info.port || location.port || "27333"; // 实际监听端口（被占用时会随机化）
+  const ips = (info.ips || []).slice().sort((a, b) => lanIPRank(a) - lanIPRank(b));
   body.innerHTML = settingsHead("远程访问（手机 / 平板管理）", "开启后本机 IP 可从局域网访问管理界面（密码保护，改动需重启程序生效）。") +
     `<div class="row" style="margin-bottom:10px;flex-wrap:wrap">
       <label class="switch"><input type="checkbox" id="lan-on" ${info.config.listenLan ? "checked" : ""}><span class="sw"></span><span class="sw-label">允许局域网访问</span></label>
       <input type="password" id="lan-pw" placeholder="${info.lanSet ? "已设置密码（留空则不修改）" : "设置访问密码（必填）"}" style="max-width:260px">
       <button class="btn" id="lan-save">保存</button>
     </div>
-    ${info.config.listenLan ? `<div class="hint">手机访问：${(info.ips || []).map(ip => `<b style="color:var(--accent-text)">http://${esc(ip)}:${esc(String(lanPort))}</b>`).join(" 或 ")}</div>` : ""}
+    ${!info.config.listenLan ? "" : ips.length ? `<div class="qr-card">
+      <div class="qr-box" id="qr-box" role="img"></div>
+      <div class="qr-info">
+        <div class="ri-title">手机扫码访问</div>
+        <div class="ri-sub">用手机相机或浏览器扫一扫，打开后输入访问密码即可管理；手机需与本机连在同一局域网（同一 Wi-Fi / 路由器）。</div>
+        <div class="qr-url" id="qr-url"></div>
+        ${ips.length > 1 ? `<div class="qr-ips">${ips.map((ip, i) => `<button type="button" class="qr-ip" data-i="${i}">${esc(ip)}</button>`).join("")}</div>
+        <div class="hint">本机有多个网络地址：扫码打不开就换一个（家用路由器下通常是 192.168.x.x）。</div>` : ""}
+      </div>
+    </div>` : `<div class="hint">未检测到本机局域网 IP，请确认已连接网络。</div>`}
     <div class="hint">若无法访问，请以管理员运行一次放行防火墙：<code>netsh advfirewall firewall add rule name="AutoMCHUB" dir=in action=allow protocol=TCP localport=${esc(String(lanPort))}</code></div>`;
   $("#lan-save").onclick = async () => {
     const b = { listenLan: $("#lan-on").checked };
@@ -1798,6 +1815,21 @@ function setRemote(body, info) {
     try { await api("/api/config", { method: "PUT", body: b }); toast("远程访问设置已保存，重启 AutoMCHUB 后生效"); }
     catch (e) { toast(e.message, true); }
   };
+  if (!info.config.listenLan || !ips.length) return;
+  // 二维码纯前端生成（qrcode.js），多地址时点选切换
+  const show = i => {
+    const url = `http://${ips[i]}:${lanPort}`;
+    $("#qr-box").innerHTML = QR.svg(url);
+    $("#qr-box").setAttribute("aria-label", "访问地址二维码：" + url);
+    $("#qr-url").textContent = url;
+    body.querySelectorAll(".qr-ip").forEach(b => {
+      const on = +b.dataset.i === i;
+      b.classList.toggle("cur", on);
+      b.setAttribute("aria-pressed", String(on));
+    });
+  };
+  body.querySelectorAll(".qr-ip").forEach(b => b.onclick = () => show(+b.dataset.i));
+  show(0);
 }
 
 /* — 通知与集成 — */

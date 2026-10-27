@@ -20,9 +20,10 @@ const (
 )
 
 type MCVersion struct {
-	ID     string `json:"id"`
-	Type   string `json:"type"`
-	Latest bool   `json:"latest"`
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	Latest      bool   `json:"latest"`
+	ReleaseTime string `json:"releaseTime,omitempty"` // 官方发布时间（Mojang 清单原样 ISO 8601）；上游无时间的核心留空
 }
 
 type BuildInfo struct {

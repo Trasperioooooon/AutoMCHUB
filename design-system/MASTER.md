@@ -48,6 +48,7 @@
 | `--hud-bg` | `#161c19` | 顶部 HUD |
 | `--hotbar-fade` | `rgba(9,12,10,.85)` | 物品栏底部渐隐 |
 | `--term-bg` | `#101412` | 终端容器（**双主题恒深**） |
+| `--qr-dark` / `--qr-light` | `#221f18` / `#fbfaf5` | 远程访问二维码（**双主题恒定**深模块配浅底，不随主题反色；15.7:1） |
 | `--bg-veil` | `rgba(18,23,21,.88)` | 壁纸蒙版（只露约 12% 图） |
 | `--shadow-sm` / `--shadow-md` | `0 1px 2px rgba(0,0,0,.35)` / `0 8px 24px rgba(0,0,0,.3)` | 两档投影，无第三档 |
 
@@ -167,7 +168,8 @@ vanilla `#7ec850` · paper `#e8e4d8` · purpur `#b57edc` · leaves `#57c25e` · 
 | `.tabs` | 幽灵 tab，`cur`=surface+强边+shadow-sm | 详情页内导航 |
 | `.step-pill` | 向导步骤丸，`cur`=accent-solid 白字，`done`=accent-text，间以 ▸ | |
 | `.cp-chip` | 分组锚点 chips，sunken 底 20px 圆角 | |
-| `.ver-list` / `.ver-item` | 单列可滚版本表，sel=accent-solid 白字 | |
+| `.ver-list` / `.ver-item` | 单列可滚版本表，sel=accent-solid 白字；有 `releaseTime` 时版本号下加 `.ver-date` 日期副行（mono 11px muted） | 选中行次要字（`.vt` / `.ver-date`）用白 .92（实测 4.6:1） |
+| `.qr-card` | 左码右文：`.qr-box` 168px 恒 `--qr-light` 底，SVG 自带 4 模块静区（`qrcode.js` 纯前端生成）；多地址 `.qr-ip` 胶囊切换（cur=accent-solid 描边 + accent-text） | 远程访问分区；二维码不随主题反色 |
 | `.dropmenu` | fixed 定位上下文菜单，menu-in 入场 | 「打开目录」直达菜单等 |
 | `.modal` / `.toast` | modal 460px（onboard 520px，max-height 88vh 可滚）+ mask 模糊；toast 右上、左侧 3px 强调线、错误=红线 | Esc 关、点遮罩关、焦点归还；onboard 含协议勾选（`.ob-terms` 可滚长文 + `.ob-agree`），未勾选主键 disabled |
 | `.empty` 空态 | 虚线框 + 居中 + 主行动按钮 | 空态是行动邀请，不是死路（零状态即主行动）；**[v3.2]** 空态即整页主体时隐藏页头与工具栏（如实例页无实例时隐藏标题/搜索/排序），空态卡用 `.page-fill` 居中 |

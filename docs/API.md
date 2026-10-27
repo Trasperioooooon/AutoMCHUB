@@ -24,7 +24,7 @@ AutoMCHUB 的 GUI 与后端通过本地 HTTP API 通信，该 API 同时对外�
 | POST | `/api/shutdown` | 优雅退出（自动停服） |
 | POST | `/api/update/check` · `/api/update/apply` | 检查/应用更新 |
 | GET | `/api/cores` | 12 种核心元数据（id/name/tag/desc/kind） |
-| GET | `/api/mcversions?core=&snapshots=` | 版本列表 |
+| GET | `/api/mcversions?core=&snapshots=` | 版本列表；每项 `{id, type, latest, releaseTime?}`，`releaseTime` 为 Mojang 清单的发布时间（ISO 8601），仅 Vanilla / NeoForge 等版本表取自官方清单的核心提供，其余核心省略 |
 | GET | `/api/builds?core=&mc=` | 构建列表 |
 | GET | `/api/javas` · POST `/api/javas/scan` · POST `/api/javas/add` | Java 管理 |
 

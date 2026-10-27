@@ -34,6 +34,8 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, .35);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, .3);
   --term-bg: #101412;        /* 终端（双主题恒深） */
+  --qr-dark: #221f18;        /* 二维码模块 / 底色：双主题恒为深模块配浅底，不随主题反色（15.7:1，任何主题都能扫） */
+  --qr-light: #fbfaf5;
   --bg-veil: rgba(18, 23, 21, .88); /* 壁纸铺底蒙版：仅露约 12% 图，保证文字对比度 */
   --mono: "Cascadia Mono", Consolas, monospace;
   --brand: "Cascadia Code", "Cascadia Mono", Consolas, monospace;
@@ -443,7 +445,7 @@ input[type=file]::file-selector-button {
   border: 1px solid var(--border); border-radius: 12px;
 }
 .ver-item {
-  padding: 10px 16px; cursor: pointer; display: flex; justify-content: space-between;
+  padding: 10px 16px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;
   border-bottom: 1px solid var(--border); font-size: 14px;
   transition: background var(--dur-2), color var(--dur-2);
 }
@@ -451,7 +453,10 @@ input[type=file]::file-selector-button {
 .ver-item:hover { background: var(--surface-2); }
 .ver-item.sel { background: var(--accent-solid); color: #fff; font-weight: 700; }
 .ver-item .vt { color: var(--muted); font-size: 12px; }
-.ver-item.sel .vt { color: rgba(255, 255, 255, .75); }
+/* 发布日期副行（有 releaseTime 才渲染）：数字一律 mono */
+.ver-date { display: block; margin-top: 2px; font-family: var(--mono); font-size: 11px; font-weight: 400; color: var(--muted); }
+/* 选中行绿底上的次要文字：白 .92 实测 4.6:1（.75 仅 3.6:1，不过 AA） */
+.ver-item.sel .vt, .ver-item.sel .ver-date { color: rgba(255, 255, 255, .92); }
 /* 版本/构建标记（最新 / 推荐）：随选中态反色，避免在绿底选中行上消失 */
 .ver-tag { font-size: 10px; font-weight: 700; color: var(--accent-text); margin-left: 7px; letter-spacing: .3px; }
 .ver-item.sel .ver-tag { color: #fff; }
@@ -746,6 +751,31 @@ input.mem-num { width: 92px; padding: 5px 8px; font-size: 13px; text-align: righ
 }
 .set-danger .ri-title { font-size: 13px; font-weight: 700; }
 .set-danger .ri-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+/* 远程访问二维码卡：左码右文。码区恒用 --qr-light / --qr-dark（不随主题反色），SVG 自带 4 模块静区 */
+.qr-card {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  max-width: 760px; margin-bottom: 12px; padding: 16px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
+}
+.qr-box {
+  flex: none; width: 168px; height: 168px; overflow: hidden;
+  background: var(--qr-light); border: 1px solid var(--border); border-radius: var(--radius-md);
+}
+.qr-box svg { display: block; width: 100%; height: 100%; }
+.qr .qr-bg { fill: var(--qr-light); }
+.qr .qr-fg { fill: var(--qr-dark); }
+.qr-info { flex: 1 1 240px; min-width: 0; }
+.qr-url { margin: 8px 0; font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--accent-text); word-break: break-all; user-select: all; }
+.qr-ips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.qr-ip {
+  font-family: var(--mono); font-size: 12px; padding: 4px 12px; cursor: pointer;
+  color: var(--muted); background: var(--sunken);
+  border: 1px solid var(--border); border-radius: var(--radius-pill);
+  transition: color var(--dur-2), border-color var(--dur-2), background var(--dur-2);
+}
+.qr-ip:hover { color: var(--text); border-color: var(--border-strong); }
+.qr-ip.cur { color: var(--accent-text); background: var(--surface); border-color: var(--accent-solid); }
 @media (max-width: 720px) {
   .settings-layout { flex-direction: column; }
   .settings-nav { flex-direction: row; flex-wrap: wrap; width: 100%; position: static; }
