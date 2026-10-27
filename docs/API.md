@@ -29,7 +29,7 @@ AutoMCHUB 的 GUI 与后端通过本地 HTTP API 通信，该 API 同时对外�
 | GET | `/api/javas` · POST `/api/javas/scan` · POST `/api/javas/add` | Java 管理 |
 
 **配置键**（`PUT /api/config`，均为可选、只更新所传字段）：
-`source`（auto/mirror/official）、`cfApiKey`、`webhookUrl`、`updateRepo`、`checkUpdateOnStart`、`serversDir`（实例存放根，空=默认）、`backupsDir`（备份根）、`backupKeep`（每实例保留份数 1–1000）、`onboarded`（首启引导完成标记）、`minimizeToTray`（关窗最小化到托盘）、`autoStart`（开机自启，直写 `HKCU\...\Run`）、`listenLan`、`lanPassword`（明文，存为 SHA-256）。
+`source`（auto/mirror/official）、`cfApiKey`、`webhookUrl`、`updateRepo`、`checkUpdateOnStart`、`serversDir`（实例存放根，空=默认；改动时旧值并入 `roots`，旧根里的实例照常扫描）、`backupsDir`（备份根）、`backupKeep`（每实例保留份数 1–1000）、`onboarded`（首启引导完成标记）、`minimizeToTray`（关窗最小化到托盘）、`autoStart`（开机自启，直写 `HKCU\...\Run`）、`listenLan`、`lanPassword`（明文，存为 SHA-256）。
 
 ### 实例
 | 方法 | 路径 | 说明 |
