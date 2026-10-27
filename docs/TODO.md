@@ -86,8 +86,8 @@
 
 - [ ] **5.1 T1 路径透明化**：向导第 4 步与导入页实时显示目标路径（跟随实例名变化）；任务完成页、详情页头部显示路径。
   验收：改名时路径同步变化；三处路径与实际创建位置一致。
-- [ ] **5.2 T2 全局「服务器存放目录」「备份目录」可配**：config.json 新增 `serversDir`/`backupsDir`（空=默认）+ 曾用根目录列表 `usedRoots`；设置「存储位置」分区落位（当前值摘要 + 浏览按钮 + 各目录「打开」）。变更仅对新建生效。
-  验收：改到 D 盘后新建实例落 D 盘；旧实例原地可用。
+- [x] **5.2 T2 全局「服务器存放目录」「备份目录」可配**：config.json 新增 `serversDir`/`backupsDir`（空=默认）+ 曾用根目录列表 `usedRoots`；设置「存储位置」分区落位（当前值摘要 + 浏览按钮 + 各目录「打开」）。变更仅对新建生效。
+  验收：改到 D 盘后新建实例落 D 盘；旧实例原地可用。—— Config.ServersDir / BackupsDir（json serversDir / backupsDir，空 = 内置默认）；曾用根目录列表实为 Config.Roots（json roots，没有 usedRoots）；app.ServersRoot() / BackupsRoot() 取值；设置「存储位置」三行（服务器 / 备份 / 程序数据目录）带当前路径、打开、更改…、恢复默认，仅对新建生效。旧实例原地可用：改目录或恢复默认时 UpdateConfig 把旧 serversDir 并入 Roots，RememberRoot 也记下当时的配置根（只跳过内置根），旧配置根里的实例重启后照常扫描到（原已知缺陷已修复，回归测试见 internal/app/app_test.go）。
 - [ ] **5.3 Manager 多根扫描**：启动时扫描 默认目录 + 配置目录 + usedRoots + 注册的自定义实例目录；同名冲突时后者跳过并日志告警。
   验收：三个根各放一个实例，列表全部出现且可启停。
 - [ ] **5.4 文件夹选择器**：Win32 `IFileOpenDialog`（`FOS_PICKFOLDERS`）纯 Go COM 封装，`POST /api/pickdir`；PowerShell `-STA` FolderBrowserDialog 兜底；**仅 localhost token 会话可调用**（LAN 会话返回 403 及提示）。

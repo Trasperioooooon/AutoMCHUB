@@ -34,7 +34,7 @@ type Config struct {
 
 	ServersDir  string   `json:"serversDir,omitempty"`  // 自定义实例存放根目录（空=内置 servers/），仅对新建生效
 	BackupsDir  string   `json:"backupsDir,omitempty"`  // 自定义备份根目录（空=内置 backups/）
-	Roots       []string `json:"roots,omitempty"`       // 曾放置实例的其它根目录（多根扫描用）
+	Roots       []string `json:"roots,omitempty"`       // 曾放置实例或曾设为默认的根目录（多根扫描用，内置根除外）
 	BackupKeep  int      `json:"backupKeep,omitempty"`  // 每实例保留的备份份数（0=默认 10）
 	Onboarded   bool     `json:"onboarded,omitempty"`   // 首次运行引导卡是否已完成
 	TosAccepted bool     `json:"tosAccepted,omitempty"` // 用户协议与免责声明是否已同意（未同意则每次启动重新弹引导卡）
@@ -114,6 +114,10 @@ func UpdateConfig(mutate func(*Config) error) (Config, error) {
 	if c.Source != "mirror" && c.Source != "official" {
 		c.Source = "auto"
 	}
+	// 默认存放根被改掉（含恢复默认）时旧根并入 Roots：其中的实例重启后仍被扫描，原地可用
+	if c.ServersDir != cfg.ServersDir {
+		addRoot(&c, cfg.ServersDir)
+	}
 	cfg = c
 	saveLocked()
 	return c, nil
@@ -180,25 +184,33 @@ func InstanceRoots() []string {
 	return out
 }
 
-// RememberRoot 记录一个曾放置实例的自定义根，便于下次启动扫描发现。
-// 内置默认根与当前配置默认根已被扫描，无需记录。
+// RememberRoot 记录一个曾放置实例的根，便于下次启动扫描发现。
+// 只有内置默认根始终被扫描、无需记录；当前配置根也要记，之后改目录或恢复默认时它就不再被扫描。
 func RememberRoot(dir string) {
-	if dir == "" {
-		return
-	}
-	dir = filepath.Clean(dir)
 	cfgMu.Lock()
 	defer cfgMu.Unlock()
-	if dir == filepath.Clean(ServersDir) || (cfg.ServersDir != "" && dir == filepath.Clean(cfg.ServersDir)) {
-		return
+	if addRoot(&cfg, dir) {
+		saveLocked()
 	}
-	for _, r := range cfg.Roots {
+}
+
+// addRoot 把 dir 并入 c.Roots（filepath.Clean 后去重，空串与内置默认根跳过），返回是否新增。
+// 调用方须已持有 cfgMu。
+func addRoot(c *Config, dir string) bool {
+	if dir == "" {
+		return false
+	}
+	dir = filepath.Clean(dir)
+	if dir == filepath.Clean(ServersDir) {
+		return false
+	}
+	for _, r := range c.Roots {
 		if filepath.Clean(r) == dir {
-			return
+			return false
 		}
 	}
-	cfg.Roots = append(cfg.Roots, dir)
-	saveLocked()
+	c.Roots = append(c.Roots, dir)
+	return true
 }
 
 type memoryStatusEx struct {
