@@ -424,6 +424,12 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err)
 		return
 	}
+	// 存放 / 备份目录决定之后实例与备份写到主机何处（下方还会 MkdirAll）：与创建实例的 root 同理仅限本机，
+	// 远程 / 局域网请求带这两个键（含置空恢复默认）即整次拒绝，其余键不受影响
+	if (body.ServersDir != nil || body.BackupsDir != nil) && !isLoopbackReq(r) {
+		writeErr(w, 403, fmt.Errorf("存放目录仅支持在本机修改"))
+		return
+	}
 	// 可失败的校验与 I/O（建目录、算哈希）在锁外先做完，锁内只做字段套用
 	if body.WebhookURL != nil {
 		u := strings.TrimSpace(*body.WebhookURL)
@@ -623,6 +629,9 @@ func (s *Server) handleImportModpack(w http.ResponseWriter, r *http.Request) {
 		AllowFlight: r.FormValue("allowFlight") == "true",
 		MOTD:        r.FormValue("motd"),
 		Root:        r.FormValue("root"),
+	}
+	if !isLoopbackReq(r) {
+		req.Root = "" // 同 handleCreateInstance：远程 / 局域网请求不得指定主机任意路径，强制落到默认根
 	}
 	id, err := s.mgr.ImportModpackAsync(pack, req, app.GetConfig().CFApiKey)
 	if err != nil {
