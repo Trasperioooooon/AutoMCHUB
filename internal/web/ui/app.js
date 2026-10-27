@@ -20,7 +20,8 @@ async function api(path, opts = {}) {
   });
   let j;
   try { j = await res.json(); } catch { throw new Error(`服务异常 (HTTP ${res.status})`); }
-  if (res.status === 401) { showLogin(); throw new Error(j.error || "需要登录"); }
+  // needLogin 标记：让 boot() 区分「需要登录」与真正的后端故障
+  if (res.status === 401) { showLogin(); throw Object.assign(new Error(j.error || "需要登录"), { needLogin: true }); }
   if (!j.ok) throw new Error(j.error || "未知错误");
   return j.data;
 }
@@ -1937,6 +1938,8 @@ async function applyBackground() {
     const cores = await api("/api/cores").catch(() => []);
     cores.forEach(c => CORES[c.id] = c);
   } catch (e) {
+    // 局域网未登录：保留 showLogin() 的密码遮罩，勿整页覆盖（登录成功后 reload 重跑 boot）
+    if (e.needLogin) return;
     document.body.innerHTML = `<div style="padding:60px;text-align:center;color:#e5644e">无法连接 AutoMCHUB 后端：${esc(e.message)}<br><br>请通过程序窗口打开本页面。</div>`;
     return;
   }
