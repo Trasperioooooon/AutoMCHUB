@@ -82,6 +82,7 @@ internal/
 ├── events/ webhook/ update/   事件总线、Webhook 推送、GitHub 自动更新
 ├── web/       REST API + SSE 控制台流 + go:embed 前端（ui/ 多配色 SPA，配色令牌见 themes.css）
 └── themes/    配色方案对比度测试（go test ./internal/themes/，校验 themes.css）
+tools/ui-dev/  前端仿真后端 + 交互回归测试 + 截图（Node + Playwright，不需要 Windows，见其 README）
 ```
 
 关键设计决策见 `docs/MC自动化开服技术实现方案与版本映射表.md`（含实测验证过的版本映射与下载源矩阵）。
