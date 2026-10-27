@@ -146,6 +146,7 @@
 - 不用 emoji 作界面图标或标题装饰（用户内容如 MOTD、控制台输出除外）。
 - 纯图标按钮必须有 `aria-label` 或 `title`；图标栏模式下侧栏标签进 `title`。
 - Logo：强调色圆角方块上两台服务器的简笔（`.logo-mark`），随强调色变化；浏览器标签页图标为固定的 Fluent 蓝版本。
+- 应用图标（`assets/icon.ico`，16–256px 共 7 档）与 Logo 同形、固定 Fluent 蓝，用于窗口、任务栏与托盘；exe 文件图标由 `rsrc_windows_amd64.syso` 提供，换图标后须重新生成它（`go run github.com/akavel/rsrc@v0.10.2 -ico assets/icon.ico -arch amd64 -o rsrc_windows_amd64.syso`，或用 mingw 的 windres 编译只含 `1 ICON "assets/icon.ico"` 的 .rc）。
 
 ## 8. 异步视图三态
 
