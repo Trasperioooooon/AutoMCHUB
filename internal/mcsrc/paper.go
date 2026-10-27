@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"automchub/internal/dl"
+	"minedeck/internal/dl"
 )
 
 // PaperMC 已于 2025 年下线 api.papermc.io v2（HTTP 410），现行为 Fill v3。

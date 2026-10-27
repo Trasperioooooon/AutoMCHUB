@@ -11,7 +11,7 @@ import (
 
 const (
 	runKey    = `Software\Microsoft\Windows\CurrentVersion\Run`
-	valueName = "AutoMCHUB"
+	valueName = "MineDeck"
 )
 
 // command 返回写入 Run 键的命令行：带引号的 exe 绝对路径 + -minimized（随托盘静默启动）。

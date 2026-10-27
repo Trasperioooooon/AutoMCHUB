@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const UA = "AutoMCHUB/1.0 (Minecraft server setup tool; Windows)"
+const UA = "MineDeck/1.0 (Minecraft server setup tool; Windows)"
 
 var Client = &http.Client{
 	Transport: &http.Transport{

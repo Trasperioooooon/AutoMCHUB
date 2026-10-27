@@ -3,7 +3,7 @@ package update
 import (
 	"os/exec"
 
-	"automchub/internal/procutil"
+	"minedeck/internal/procutil"
 )
 
 func runDetached(bat string) error {

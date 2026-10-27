@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"automchub/internal/dl"
-	"automchub/internal/mcsrc"
+	"minedeck/internal/dl"
+	"minedeck/internal/mcsrc"
 )
 
 // resourceSpec 按核心决定可安装的资源类型、Modrinth loader 过滤与安装目录。

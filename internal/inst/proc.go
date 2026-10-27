@@ -12,9 +12,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"automchub/internal/events"
-	"automchub/internal/mcsrc"
-	"automchub/internal/procutil"
+	"minedeck/internal/events"
+	"minedeck/internal/mcsrc"
+	"minedeck/internal/procutil"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
 )
@@ -86,7 +86,7 @@ func (m *Manager) Start(name string) error {
 	}
 	cmd.Stderr = cmd.Stdout
 
-	i.Console.Append(fmt.Sprintf("[AutoMCHUB] 启动: java %s", strings.Join(args, " ")))
+	i.Console.Append(fmt.Sprintf("[MineDeck] 启动: java %s", strings.Join(args, " ")))
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("启动失败: %w", err)
 	}
@@ -123,9 +123,9 @@ func (m *Manager) Start(name string) error {
 		i.procMu.Unlock()
 		i.clearOnline()
 		if err != nil {
-			i.Console.Append(fmt.Sprintf("[AutoMCHUB] 服务器进程已退出（%v）", err))
+			i.Console.Append(fmt.Sprintf("[MineDeck] 服务器进程已退出（%v）", err))
 		} else {
-			i.Console.Append("[AutoMCHUB] 服务器已正常关闭")
+			i.Console.Append("[MineDeck] 服务器已正常关闭")
 		}
 		if wasUser {
 			events.Publish("instance.stop", map[string]any{"instance": i.Name})
@@ -156,7 +156,7 @@ func (m *Manager) Stop(name string) error {
 	i.userStop = true
 	i.procMu.Unlock()
 
-	i.Console.Append("[AutoMCHUB] 正在保存世界并停止服务器...")
+	i.Console.Append("[MineDeck] 正在保存世界并停止服务器...")
 	_ = writeLine(p, "stop")
 	go func() {
 		deadline := time.After(30 * time.Second)
@@ -168,7 +168,7 @@ func (m *Manager) Stop(name string) error {
 				// 仅当仍是本次要停止的那个进程时才强杀——否则可能误杀期间已重启的新进程
 				i.procMu.Lock()
 				if i.proc == p {
-					i.Console.Append("[AutoMCHUB] 停止超时，强制结束进程")
+					i.Console.Append("[MineDeck] 停止超时，强制结束进程")
 					_ = p.cmd.Process.Kill()
 				}
 				i.procMu.Unlock()
@@ -198,7 +198,7 @@ func (m *Manager) Kill(name string) error {
 		return fmt.Errorf("服务器未在运行")
 	}
 	i.userStop = true
-	i.Console.Append("[AutoMCHUB] 强制结束进程")
+	i.Console.Append("[MineDeck] 强制结束进程")
 	return i.proc.cmd.Process.Kill()
 }
 

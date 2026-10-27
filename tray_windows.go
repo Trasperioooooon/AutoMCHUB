@@ -7,7 +7,8 @@ import (
 	"syscall"
 	"unsafe"
 
-	"automchub/internal/app"
+	"minedeck/internal/app"
+
 	"golang.org/x/sys/windows"
 )
 
@@ -200,7 +201,7 @@ func newNID(hwnd uintptr) *notifyIconData {
 		HIcon:            trayHIcon,
 	}
 	nid.CbSize = uint32(unsafe.Sizeof(*nid))
-	tip, err := syscall.UTF16FromString("AutoMCHUB · MC 一键开服")
+	tip, err := syscall.UTF16FromString("MineDeck · MC 一键开服")
 	if err == nil {
 		copy(nid.SzTip[:len(nid.SzTip)-1], tip)
 	}

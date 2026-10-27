@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"automchub/internal/app"
-	"automchub/internal/dl"
-	"automchub/internal/procutil"
+	"minedeck/internal/app"
+	"minedeck/internal/dl"
+	"minedeck/internal/procutil"
 )
 
 // Provider 一个穿透服务商的适配器。
@@ -108,7 +108,7 @@ func (openfrpProvider) EnsureFrpc(con *procutil.Console) (string, error) {
 	if exe := findExe(dir); exe != "" {
 		return exe, nil
 	}
-	con.Append("[AutoMCHUB] 下载 OpenFrp 定制版 frpc ...")
+	con.Append("[MineDeck] 下载 OpenFrp 定制版 frpc ...")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	var meta struct {
@@ -193,7 +193,7 @@ func (customProvider) EnsureFrpc(con *procutil.Console) (string, error) {
 	if exe := findExe(dir); exe != "" {
 		return exe, nil
 	}
-	con.Append("[AutoMCHUB] 下载标准版 frp 客户端 ...")
+	con.Append("[MineDeck] 下载标准版 frp 客户端 ...")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	file := fmt.Sprintf("frp_%s_windows_amd64.zip", frpVersion)
@@ -228,7 +228,7 @@ loginFailExit = false
 	}
 	cfg += fmt.Sprintf(`
 [[proxies]]
-name = "automchub-%s"
+name = "minedeck-%s"
 type = "tcp"
 localIP = "127.0.0.1"
 localPort = %d

@@ -25,15 +25,15 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"automchub/internal/app"
-	"automchub/internal/autostart"
-	"automchub/internal/inst"
-	"automchub/internal/java"
-	"automchub/internal/mcsrc"
-	"automchub/internal/modpack"
-	"automchub/internal/procutil"
-	"automchub/internal/tunnel"
-	"automchub/internal/update"
+	"minedeck/internal/app"
+	"minedeck/internal/autostart"
+	"minedeck/internal/inst"
+	"minedeck/internal/java"
+	"minedeck/internal/mcsrc"
+	"minedeck/internal/modpack"
+	"minedeck/internal/procutil"
+	"minedeck/internal/tunnel"
+	"minedeck/internal/update"
 )
 
 //go:embed ui
@@ -315,7 +315,7 @@ func (s *Server) handleOpenPath(w http.ResponseWriter, r *http.Request) {
 func pickFolder() (string, error) {
 	const ps = "Add-Type -AssemblyName System.Windows.Forms | Out-Null; " +
 		"$f = New-Object System.Windows.Forms.FolderBrowserDialog; " +
-		"$f.Description = 'Choose a folder for AutoMCHUB'; $f.ShowNewFolderButton = $true; " +
+		"$f.Description = 'Choose a folder for MineDeck'; $f.ShowNewFolderButton = $true; " +
 		"if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($f.SelectedPath) }"
 	cmd := exec.Command("powershell", "-STA", "-NoProfile", "-NonInteractive", "-Command", ps)
 	cmd.Env = procutil.CleanEnv()

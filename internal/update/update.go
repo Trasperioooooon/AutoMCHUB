@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"automchub/internal/app"
-	"automchub/internal/dl"
+	"minedeck/internal/app"
+	"minedeck/internal/dl"
 )
 
 type Release struct {
@@ -35,11 +35,11 @@ func ghMirrors(u string) []string {
 	}
 }
 
-// Check 查询最新 Release；repo 形如 "user/AutoMCHUB"。
+// Check 查询最新 Release；repo 形如 "user/MineDeck"。
 func Check(ctx context.Context, repo string) (*Release, bool, error) {
 	repo = strings.Trim(strings.TrimSpace(repo), "/")
 	if repo == "" || !strings.Contains(repo, "/") {
-		return nil, false, fmt.Errorf("未配置更新仓库（在全局设置填写，如 yourname/AutoMCHUB）")
+		return nil, false, fmt.Errorf("未配置更新仓库（在全局设置填写，如 yourname/MineDeck）")
 	}
 	var rel struct {
 		TagName string `json:"tag_name"`
@@ -68,7 +68,7 @@ func Check(ctx context.Context, repo string) (*Release, bool, error) {
 		}
 	}
 	if r.AssetURL != "" && r.checksumURL != "" {
-		r.SHA256 = fetchChecksum(ctx, r.checksumURL, "AutoMCHUB.exe")
+		r.SHA256 = fetchChecksum(ctx, r.checksumURL, "MineDeck.exe")
 	}
 	return r, newer(rel.TagName, app.Version), nil
 }
@@ -137,7 +137,7 @@ func Apply(ctx context.Context, r *Release) error {
 	if err != nil {
 		return err
 	}
-	newExe := filepath.Join(app.Base, "AutoMCHUB.new.exe")
+	newExe := filepath.Join(app.Base, "MineDeck.new.exe")
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	// 经镜像下载但以官方 SHA-256 强校验：镜像被投毒/中间人返回的伪 exe 会校验失败、绝不落地执行
@@ -151,7 +151,7 @@ func Apply(ctx context.Context, r *Release) error {
 cd /d "%s"
 :wait
 tasklist /FI "PID eq %d" 2>nul | find "%d" >nul && (ping 127.0.0.1 -n 2 >nul & goto wait)
-move /y "AutoMCHUB.new.exe" "%s" >nul
+move /y "MineDeck.new.exe" "%s" >nul
 start "" "%s"
 del "%%~f0"
 `, app.Base, os.Getpid(), os.Getpid(), filepath.Base(exe), filepath.Base(exe))

@@ -1,4 +1,4 @@
-module automchub
+module minedeck
 
 go 1.25.0
 

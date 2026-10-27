@@ -61,11 +61,11 @@ func (m *Manager) crashRestart(i *Instance, gen int64) {
 	n := i.crashCount
 	i.procMu.Unlock()
 	if n > 3 {
-		i.Console.Append("[AutoMCHUB] ⚠ 连续崩溃 3 次，已停止自动重启。请检查上方日志排查原因。")
+		i.Console.Append("[MineDeck] ⚠ 连续崩溃 3 次，已停止自动重启。请检查上方日志排查原因。")
 		return
 	}
 	delay := []time.Duration{10 * time.Second, 30 * time.Second, 60 * time.Second}[n-1]
-	i.Console.Append(fmt.Sprintf("[AutoMCHUB] 检测到服务器异常退出，%v 后自动重启（第 %d/3 次）...", delay, n))
+	i.Console.Append(fmt.Sprintf("[MineDeck] 检测到服务器异常退出，%v 后自动重启（第 %d/3 次）...", delay, n))
 	time.Sleep(delay)
 	i.procMu.Lock()
 	abort := i.runGen != gen || (i.state != "" && i.state != "stopped")
@@ -74,7 +74,7 @@ func (m *Manager) crashRestart(i *Instance, gen int64) {
 		return // 用户已手动处理（重启过或正在运行）
 	}
 	if err := m.Start(i.Name); err != nil {
-		i.Console.Append("[AutoMCHUB] 自动重启失败: " + err.Error())
+		i.Console.Append("[MineDeck] 自动重启失败: " + err.Error())
 	}
 }
 
@@ -116,15 +116,15 @@ func (m *Manager) execSchedule(i *Instance, s Schedule) {
 		}
 	case "backup":
 		if _, err := m.CreateBackup(i.Name, "定时"); err != nil {
-			i.Console.Append("[AutoMCHUB] 定时备份失败: " + err.Error())
+			i.Console.Append("[MineDeck] 定时备份失败: " + err.Error())
 		} else {
-			i.Console.Append("[AutoMCHUB] 定时备份完成")
+			i.Console.Append("[MineDeck] 定时备份完成")
 		}
 	case "restart":
 		if i.Status() != "running" {
 			return
 		}
-		i.Console.Append("[AutoMCHUB] 定时重启：60 秒后重启服务器")
+		i.Console.Append("[MineDeck] 定时重启：60 秒后重启服务器")
 		_ = m.Command(i.Name, "say §c服务器将在 60 秒后定时重启，请注意安全下线！")
 		time.Sleep(50 * time.Second)
 		_ = m.Command(i.Name, "say §c10 秒后重启！")
@@ -140,7 +140,7 @@ func (m *Manager) execSchedule(i *Instance, s Schedule) {
 		}
 		if i.Status() == "stopped" {
 			if err := m.Start(i.Name); err != nil {
-				i.Console.Append("[AutoMCHUB] 定时重启失败: " + err.Error())
+				i.Console.Append("[MineDeck] 定时重启失败: " + err.Error())
 			}
 		}
 	}

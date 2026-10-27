@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strconv"
 
-	"automchub/internal/dl"
+	"minedeck/internal/dl"
 )
 
 // LeavesMC API（Paper v2 风格）：Leaves 是修复原版特性的 Paper 分支，国人维护。

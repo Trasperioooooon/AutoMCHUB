@@ -1,4 +1,4 @@
-// AutoMCHUB — Windows 本地 Minecraft 服务器一键部署工具
+// MineDeck — Windows 本地 Minecraft 服务器一键部署工具
 // GUI = 内嵌 Web 界面 + WebView2 原生窗口（缺失 WebView2 时自动回退默认浏览器）。
 package main
 
@@ -15,14 +15,14 @@ import (
 	"runtime"
 	"time"
 
-	"automchub/internal/app"
-	"automchub/internal/inst"
-	"automchub/internal/java"
-	"automchub/internal/procutil"
-	"automchub/internal/tunnel"
-	"automchub/internal/update"
-	"automchub/internal/web"
-	"automchub/internal/webhook"
+	"minedeck/internal/app"
+	"minedeck/internal/inst"
+	"minedeck/internal/java"
+	"minedeck/internal/procutil"
+	"minedeck/internal/tunnel"
+	"minedeck/internal/update"
+	"minedeck/internal/web"
+	"minedeck/internal/webhook"
 
 	webview2 "github.com/jchv/go-webview2"
 )
@@ -72,7 +72,7 @@ func main() {
 			log.Println("HTTP 服务退出:", err)
 		}
 	}()
-	log.Println("AutoMCHUB 已启动:", url)
+	log.Println("MineDeck 已启动:", url)
 
 	// 启动时静默检查更新（可在设置中开关；仅日志提示，不打断）
 	if cfg := app.GetConfig(); cfg.CheckUpdateOnStart && cfg.UpdateRepo != "" {
@@ -121,7 +121,7 @@ func openWebView(url string, sig chan os.Signal, minimized bool) (ok bool) {
 		Debug:     false,
 		AutoFocus: true,
 		WindowOptions: webview2.WindowOptions{
-			Title:  "AutoMCHUB · MC 一键开服",
+			Title:  "MineDeck · MC 一键开服",
 			Width:  uint(float64(1280) * scale),
 			Height: uint(float64(850) * scale),
 			Center: true,
@@ -159,6 +159,6 @@ func openWebView(url string, sig chan os.Signal, minimized bool) (ok bool) {
 func fatal(msg string) {
 	log.Println(msg)
 	// GUI 子系统下没有控制台，弹窗提示
-	_ = exec.Command("mshta", "javascript:alert('AutoMCHUB 启动失败：\\n"+msg+"');close()").Run()
+	_ = exec.Command("mshta", "javascript:alert('MineDeck 启动失败：\\n"+msg+"');close()").Run()
 	os.Exit(1)
 }

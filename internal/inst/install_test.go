@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"automchub/internal/app"
-	"automchub/internal/mcsrc"
+	"minedeck/internal/app"
+	"minedeck/internal/mcsrc"
 )
 
 // 测试用版本清单（新版本在前），供 mcsrc.NewerOrEqualCached 从磁盘缓存离线读取。

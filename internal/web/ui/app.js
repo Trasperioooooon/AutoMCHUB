@@ -1,4 +1,4 @@
-/* AutoMCHUB 前端（无框架 SPA） */
+/* MineDeck 前端（无框架 SPA） */
 "use strict";
 
 /* ---------- Token 与 API ---------- */
@@ -32,7 +32,7 @@ function showLogin() {
   const d = document.createElement("div");
   d.className = "modal-mask";
   d.id = "login-mask";
-  d.innerHTML = `<div class="modal"><h3>${icon("lock")} AutoMCHUB 远程访问</h3>
+  d.innerHTML = `<div class="modal"><h3>${icon("lock")} MineDeck 远程访问</h3>
     <div class="m-body">请输入访问密码（在主机的「设置 → 远程访问」中配置）</div>
     <input type="password" id="login-pw" style="width:100%;margin-bottom:16px" autofocus>
     <div class="m-actions"><button class="btn primary" id="login-go">登录</button></div></div>`;
@@ -666,7 +666,7 @@ async function quickStart() {
     const r = await api("/api/instances", { method: "POST", body: {
       name: "我的服务器", core: "paper", mc, build, root: "",
       xmxMb: mem, port: 25565, eula: true, onlineMode: false, allowFlight: true,
-      difficulty: "easy", gamemode: "survival", motd: "AutoMCHUB 一键开服 · 一起来玩！",
+      difficulty: "easy", gamemode: "survival", motd: "MineDeck 一键开服 · 一起来玩！",
     } });
     toast(`正在部署 Paper ${mc}`);
     location.hash = `#/task/${r.taskId}`;
@@ -1099,7 +1099,7 @@ async function drawWizard() {
           <div class="hint" id="f-path"></div>
         </label>
         ${isProxy ? "" : `
-        <label class="field full"><span>服务器介绍 MOTD（支持中文与 § 色码）</span><input type="text" id="f-motd" value="AutoMCHUB 开服 · 一起来玩！"></label>
+        <label class="field full"><span>服务器介绍 MOTD（支持中文与 § 色码）</span><input type="text" id="f-motd" value="MineDeck 开服 · 一起来玩！"></label>
         <div class="field"><label class="switch"><input type="checkbox" id="f-online"><span class="sw"></span>
           <span><span class="sw-label">正版验证（online-mode）</span><div class="sw-desc">默认关闭：离线账户可直接进服</div></span></label></div>
         <div class="field"><label class="switch"><input type="checkbox" id="f-flight" checked><span class="sw"></span>
@@ -1336,7 +1336,7 @@ async function renderDetail(name, tab = "console") {
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     };
     const classify = line => {
-      if (line.startsWith(">") || line.startsWith("[AutoMCHUB]")) return "cmd-echo";
+      if (line.startsWith(">") || line.startsWith("[MineDeck]")) return "cmd-echo";
       if (/ERROR|SEVERE|FATAL|Exception|^\tat |^Caused by/.test(line)) return "lv-err";
       if (/WARN/.test(line)) return "lv-warn";
       return "";
@@ -1365,7 +1365,7 @@ async function renderDetail(name, tab = "console") {
     };
     consoleES = new EventSource(`/api/instances/${encodeURIComponent(name)}/console?token=${TOKEN()}`);
     consoleES.onmessage = e => push(JSON.parse(e.data));
-    consoleES.onerror = () => push("[AutoMCHUB] 控制台连接中断，切换页面可重连");
+    consoleES.onerror = () => push("[MineDeck] 控制台连接中断，切换页面可重连");
     const histKey = "amh_hist_" + name;
     let hist = [];
     try { hist = JSON.parse(localStorage.getItem(histKey)) || []; } catch {}
@@ -2059,7 +2059,7 @@ function setStartup(body, info) {
   body.innerHTML = settingsHead("启动与托盘", "控制关闭窗口的行为与开机自启。托盘图标在程序运行时始终显示，右键可「打开面板 / 全部停止并退出」，左键点击恢复窗口。") +
     `<div class="row-list">
       ${switchRow("最小化到系统托盘", "开启后点窗口关闭按钮不退出程序，而是收进托盘、服务器继续运行；点托盘图标即可恢复窗口。关闭则保持现状——点关闭即停服退出。", "minimizeToTray", c.minimizeToTray)}
-      ${switchRow("开机自动启动", "登录 Windows 后自动在后台（托盘）启动 AutoMCHUB。写入当前用户启动项（HKCU\\…\\Run，免管理员）；程序换目录后重新开关一次即修正路径。", "autoStart", info.autoStart)}
+      ${switchRow("开机自动启动", "登录 Windows 后自动在后台（托盘）启动 MineDeck。写入当前用户启动项（HKCU\\…\\Run，免管理员）；程序换目录后重新开关一次即修正路径。", "autoStart", info.autoStart)}
     </div>
     <div class="hint" style="margin-top:12px">开机自启以「静默进托盘」方式启动（附加 -minimized 参数），配合上面的托盘开关体验最佳。</div>`;
   body.querySelectorAll("input[data-cfg]").forEach(inp => inp.onchange = async () => {
@@ -2198,11 +2198,11 @@ function setRemote(body, info) {
         <div class="hint">本机有多个网络地址：扫码打不开就换一个（家用路由器下通常是 192.168.x.x）。</div>` : ""}
       </div>
     </div>` : `<div class="hint">未检测到本机局域网 IP，请确认已连接网络。</div>`}
-    <div class="hint">若无法访问，请以管理员运行一次放行防火墙：<code>netsh advfirewall firewall add rule name="AutoMCHUB" dir=in action=allow protocol=TCP localport=${esc(String(lanPort))}</code></div>`;
+    <div class="hint">若无法访问，请以管理员运行一次放行防火墙：<code>netsh advfirewall firewall add rule name="MineDeck" dir=in action=allow protocol=TCP localport=${esc(String(lanPort))}</code></div>`;
   $("#lan-save").onclick = async () => {
     const b = { listenLan: $("#lan-on").checked };
     if ($("#lan-pw").value) b.lanPassword = $("#lan-pw").value;
-    try { await api("/api/config", { method: "PUT", body: b }); toast("远程访问设置已保存，重启 AutoMCHUB 后生效"); }
+    try { await api("/api/config", { method: "PUT", body: b }); toast("远程访问设置已保存，重启 MineDeck 后生效"); }
     catch (e) { toast(e.message, true); }
   };
   if (!info.config.listenLan || !ips.length) return;
@@ -2236,10 +2236,10 @@ function setNotify(body, info) {
 function setAbout(body, info) {
   body.innerHTML = settingsHead("版本与更新", "") +
     `<div class="row-list" style="margin-bottom:14px">
-      <div class="row-item"><div class="ri-head"><div class="ri-main"><div class="ri-title">当前版本</div><div class="ri-sub">AutoMCHUB · Windows 本地 Minecraft 开服工具</div></div><div class="ri-right"><span class="badge core">v${esc(info.version)}</span></div></div></div>
+      <div class="row-item"><div class="ri-head"><div class="ri-main"><div class="ri-title">当前版本</div><div class="ri-sub">MineDeck · Windows 本地 Minecraft 开服工具</div></div><div class="ri-right"><span class="badge core">v${esc(info.version)}</span></div></div></div>
     </div>
     <div class="row" style="flex-wrap:wrap;margin-bottom:10px">
-      <input type="text" id="up-repo" value="${esc(info.config.updateRepo || "")}" placeholder="GitHub 仓库，如 yourname/AutoMCHUB" style="max-width:300px">
+      <input type="text" id="up-repo" value="${esc(info.config.updateRepo || "")}" placeholder="GitHub 仓库，如 yourname/MineDeck" style="max-width:300px">
       <button class="btn" id="up-save">保存</button>
       <button class="btn" id="up-check">${icon("search")} 检查更新</button>
       <span id="up-result" class="hint"></span>
@@ -2257,7 +2257,7 @@ function setAbout(body, info) {
     </div>
     <div class="set-danger">
       <div><div class="ri-title">退出程序</div><div class="ri-sub">优雅停止所有运行中的服务器（保存世界）后退出</div></div>
-      <button class="btn danger" id="quit-app">${icon("power")} 退出 AutoMCHUB</button>
+      <button class="btn danger" id="quit-app">${icon("power")} 退出 MineDeck</button>
     </div>`;
   bindSaveInput($("#up-repo"), $("#up-save"), async v => {
     await api("/api/config", { method: "PUT", body: { updateRepo: v.trim() } });
@@ -2288,9 +2288,9 @@ function setAbout(body, info) {
     } catch (e) { $("#up-result").textContent = e.message; }
   };
   $("#quit-app").onclick = async () => {
-    const r = await confirmModal({ title: "退出 AutoMCHUB？", body: "将优雅停止所有运行中的服务器（保存世界）后退出程序。", okText: "退出", danger: true });
+    const r = await confirmModal({ title: "退出 MineDeck？", body: "将优雅停止所有运行中的服务器（保存世界）后退出程序。", okText: "退出", danger: true });
     if (!r) return;
-    try { await api("/api/shutdown", { method: "POST" }); document.body.innerHTML = `<div style="padding:80px;text-align:center;color:var(--muted)">AutoMCHUB 正在停止服务器并退出，可以关闭此页面了。</div>`; }
+    try { await api("/api/shutdown", { method: "POST" }); document.body.innerHTML = `<div style="padding:80px;text-align:center;color:var(--muted)">MineDeck 正在停止服务器并退出，可以关闭此页面了。</div>`; }
     catch (e) { toast(e.message, true); }
   };
 }
@@ -2302,11 +2302,11 @@ function showOnboarding(info) {
   const SRC = { auto: "自动（推荐）— 国内镜像优先，失败自动回退官方源", mirror: "镜像优先 — 国内下载更快", official: "仅官方源 — 网络直连国外" };
   const cur = (info.config && info.config.source) || "auto";
   root.innerHTML = `<div class="modal-mask"><div class="modal onboard">
-    <h3>欢迎使用 AutoMCHUB</h3>
+    <h3>欢迎使用 MineDeck</h3>
     <div class="m-body">
       <div class="ob-sec" style="margin-top:0"><div class="ob-label">用户协议与免责声明</div>
         <div class="ob-terms">
-          AutoMCHUB 是开源、非营利的 Minecraft Java 版开服辅助工具：仅从 Mojang、PaperMC 等官方公开渠道下载服务端文件并配置本地运行环境，<b>不包含、不分发游戏客户端，不修改游戏本体，不破解正版验证</b>。
+          MineDeck 是开源、非营利的 Minecraft Java 版开服辅助工具：仅从 Mojang、PaperMC 等官方公开渠道下载服务端文件并配置本地运行环境，<b>不包含、不分发游戏客户端，不修改游戏本体，不破解正版验证</b>。
           <ol>
             <li><b>非官方产品</b>：本工具由社区独立开发，与 Mojang Studios、Microsoft 及网易（中国版《我的世界》运营方）均无任何隶属、合作或授权关系。NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT. "Minecraft" 及相关商标归 Mojang / Microsoft 所有。</li>
             <li><b>遵守官方条款</b>：使用本工具搭建与运行服务器，须遵守 <b>Minecraft EULA</b> 与 Microsoft 服务协议；如你使用网易代理的中国版《我的世界》账号或内容，请另行遵守网易的用户协议（两套账号体系互不相通，本工具仅面向国际 Java 版服务端）。</li>
@@ -2360,7 +2360,7 @@ async function applyBackground() {
   } catch (e) {
     // 局域网访问（如手机扫码打开）尚未登录：api() 已弹出密码遮罩，保留它，不整页覆盖成「无法连接」；登录成功后 reload 重跑 boot
     if (e.needLogin) return;
-    document.body.innerHTML = `<div style="padding:60px;text-align:center;color:#e5644e">无法连接 AutoMCHUB 后端：${esc(e.message)}<br><br>请通过程序窗口打开本页面。</div>`;
+    document.body.innerHTML = `<div style="padding:60px;text-align:center;color:#e5644e">无法连接 MineDeck 后端：${esc(e.message)}<br><br>请通过程序窗口打开本页面。</div>`;
     return;
   }
   navigate();

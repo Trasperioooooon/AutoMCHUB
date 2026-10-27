@@ -119,8 +119,8 @@ Fabric 加分项：其 launcher 首次启动才去 Mojang 下载原版 server.ja
 **目录规划**（工具运行目录下自包含，不碰系统环境变量）：
 
 ```
-AutoMCHUB/
-├── AutoMCHUB.exe
+MineDeck/
+├── MineDeck.exe
 ├── runtimes/            # 便携 Java，按 major 版本分目录
 │   ├── java-8/  java-17/  java-21/  java-25/
 ├── cache/               # 下载缓存（installer、server.jar，带 sha1 校验）

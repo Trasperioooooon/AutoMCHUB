@@ -16,16 +16,16 @@ jobs:
         with:
           go-version: "1.25"
       - name: Build
-        run: go build -trimpath -ldflags="-s -w -H windowsgui" -o AutoMCHUB.exe .
+        run: go build -trimpath -ldflags="-s -w -H windowsgui" -o MineDeck.exe .
       - name: Checksums
         shell: pwsh
         run: |
-          $h = (Get-FileHash AutoMCHUB.exe -Algorithm SHA256).Hash.ToLower()
-          "$h *AutoMCHUB.exe" | Out-File -Encoding ascii SHA256SUMS
+          $h = (Get-FileHash MineDeck.exe -Algorithm SHA256).Hash.ToLower()
+          "$h *MineDeck.exe" | Out-File -Encoding ascii SHA256SUMS
       - name: Release
         uses: softprops/action-gh-release@v3
         with:
           files: |
-            AutoMCHUB.exe
+            MineDeck.exe
             SHA256SUMS
           generate_release_notes: true
