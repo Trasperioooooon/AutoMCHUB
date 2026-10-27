@@ -112,16 +112,16 @@ func UpdateConfig(mutate func(*Config) error) (Config, error) {
 	if err := mutate(&c); err != nil {
 		return cfg, err
 	}
-	// 备份根被改掉（含恢复默认）时旧根并入 BackupRoots：其中的备份照常列出、可还原，并计入保留份数
-	if c.BackupsDir != cfg.BackupsDir {
-		addBackupRoot(&c, cfg.BackupsDir)
-	}
 	if c.Source != "mirror" && c.Source != "official" {
 		c.Source = "auto"
 	}
 	// 默认存放根被改掉（含恢复默认）时旧根并入 Roots：其中的实例重启后仍被扫描，原地可用
 	if c.ServersDir != cfg.ServersDir {
 		addRoot(&c, cfg.ServersDir)
+	}
+	// 备份根同理并入 BackupRoots：其中的备份照常列出、可还原，并计入保留份数
+	if c.BackupsDir != cfg.BackupsDir {
+		addBackupRoot(&c, cfg.BackupsDir)
 	}
 	cfg = c
 	saveLocked()

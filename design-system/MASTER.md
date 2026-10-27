@@ -69,12 +69,13 @@
 | `--text` 叠在 bg / surface / chrome / overlay / surface-2 上 | 4.5（目标 7） |
 | `--muted`、`--accent-text` 叠在 bg / surface / chrome / overlay 上 | 4.5 |
 | `--text` 叠在 chrome 上的 `--accent-subtle`、`--hover`（当前 / 悬停导航项） | 4.5 |
+| `--muted` 叠在 surface 上的 `--accent-subtle`（选中行里的次要字，如版本类型与发布日期） | 4.5 |
 | 三种状态字叠在 surface / bg 及各自浅底上 | 4.5 |
 | `--on-accent` 叠在 accent-solid(-hov) 上；`--on-danger` 叠在 danger-solid(-hov) 上 | 4.5 |
 | 终端四色叠在 `--term-bg` 上 | 4.5 |
 | `--accent` 叠在 surface / bg 上（焦点环、进度、指示条） | 3 |
 
-**自动校验**：`go test ./internal/themes/`（纯 Go，任何平台可跑）解析 `themes.css`，对 6 方案 × 2 模式 × 8 强调色共 1320 组逐一计算。**改任何配色都必须先跑通它。**
+**自动校验**：`go test ./internal/themes/`（纯 Go，任何平台可跑）解析 `themes.css`，对 6 方案 × 2 模式 × 8 强调色共 1428 组逐一计算。**改任何配色都必须先跑通它。**
 
 ## 3. 字体排印
 

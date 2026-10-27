@@ -142,6 +142,7 @@ func accentChecks() []check {
 	}
 	return append(cs,
 		check{"--accent-text", "--accent-subtle", "--surface", 4.5},
+		check{"--muted", "--accent-subtle", "--surface", 4.5}, // 选中版本行的类型 / 发布日期副行
 		check{"--on-accent", "--accent-solid", "", 4.5},
 		check{"--on-accent", "--accent-solid-hov", "", 4.5},
 		check{"--accent", "--surface", "", 3},

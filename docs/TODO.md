@@ -66,7 +66,7 @@
 - [x] **3.5 Java 分区行式化**：便携/扫描列表改为行式（版本标题 + 路径副标题 + 右侧操作），扫描/手动添加保留。
   验收：与 3.2 同标准。—— setJava 扫描结果为 .row-item（「Java N」+ 版本徽标 + mono 路径），扫描 / 手动添加保留；与原文差异：行内没有右侧操作，便携运行时仍是徽标条而非行。
 - [x] **3.6 远程访问分区完善**：访问地址二维码（纯前端生成，报告路线图承诺项）、密码修改、防火墙命令（端口来自 1.1）。
-  验收：手机扫码可直达登录页。—— internal/web/ui/qrcode.js 手写精简编码器（字节模式 + 纠错 M、版本 1–40、8 种掩码罚分择优），SVG 输出用双主题恒定的 --qr-dark / --qr-light（深模块浅底）+ 4 模块静区；setRemote 开启局域网后显示二维码卡，多 IP 胶囊切换（家用网段优先）；密码修改、防火墙命令沿用。同时修复 boot() 遇 401 整页覆盖登录遮罩（手机打开只见「无法连接」）。验证：与 Nayuki qrcodegen / python-qrcode 逐模块一致；浏览器截图经 zxing / OpenCV / 微信识码器解出地址，手机视口无 token 打开即登录页（mock 后端，未用实体手机扫）。v2.1.0 漏项，本次补齐。
+  验收：手机扫码可直达登录页。—— internal/web/ui/qrcode.js 手写精简编码器（字节模式 + 纠错 M、版本 1–40、8 种掩码罚分择优），SVG 输出用双主题恒定的 --qr-dark / --qr-light（深模块浅底）+ 4 模块静区；setRemote 开启局域网后显示二维码卡，多 IP 胶囊切换（家用网段优先）；密码修改、防火墙命令沿用。同时修复 boot() 遇 401 整页覆盖登录遮罩（手机打开只见「无法连接」）：api() 的 401 错误带 needLogin 标记，boot() 见标记即保留密码框。验证：与 Nayuki qrcodegen / python-qrcode 逐模块一致；浏览器截图经 zxing / OpenCV / 微信识码器解出地址，手机视口无 token 打开即登录页（mock 后端，未用实体手机扫）。v2.1.0 漏项，本次补齐。
 
 ## 阶段 4 · server.properties 全量目录
 
@@ -124,7 +124,7 @@
 - [x] **7.4 实例搜索/排序**：名称过滤输入框 + 排序（运行中优先/最近创建）。
   验收：8+ 实例时过滤即时、排序稳定。—— #inst-q 名称过滤 + #inst-sort 排序（最近创建 / 运行中优先 / 名称）。
 - [ ] **7.5 JVM 页增强**：ExtraJVM 参数编辑（textarea，一行一参）+ 「Aikar's Flags 一键预设」（按 ≥12G / <12G 两组）+ Xms 显示；run.bat 同步。
-  验收：预设写入后 run.bat 与托管启动参数一致，实例可正常开服。—— 部分完成：「内存 / 启动」页增自定义 JVM 参数 textarea +「套用 Aikar's Flags」（≥12G 大堆变体 / <12G 常规）+ 清空，保存经 UpdateSettings 写 instance.json 并重写 run.bat，托管启动与 run.bat 共用 launchArgs()；未做：Xms 显示（页面恒传 xmsMb: 0，后端取 min(1024, Xmx)）。已知缺陷：「套用 / 清空」整框替换，会连带删掉 1.18.1 以下实例自动加的 log4shell 缓解参数。
+  验收：预设写入后 run.bat 与托管启动参数一致，实例可正常开服。—— 部分完成：「内存 / 启动」页增自定义 JVM 参数 textarea +「套用 Aikar's Flags」（≥12G 大堆变体 / <12G 常规）+ 清空，保存经 UpdateSettings 写 instance.json 并重写 run.bat，托管启动与 run.bat 共用 launchArgs()；未做：Xms 显示（页面恒传 xmsMb: 0，后端取 min(1024, Xmx)）。原已知缺陷已修复：「套用 / 清空」保留参数框里已有的 log4shell 缓解参数，UpdateSettings 保存时按版本强制补回，前端回显实际保存的参数（回归测试见 internal/inst/install_test.go）。
 - [x] **7.6 控制台字号调节 + 导出**：A-/A+（localStorage 记忆）；「复制全部」「导出为 txt」。
   验收：字号跨页面记忆；导出文件内容与缓冲一致。—— 控制台 A- / A+（localStorage amh_con_fs，9–22px）+ 复制全部 + 导出为 txt（Blob 下载 <实例名>-console.txt）。
 - [ ] **7.7 任务失败动线**：失败页增加「打开实例目录」「查看 installer.log / crash-reports」按钮（文件存在才显示）。

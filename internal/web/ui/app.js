@@ -522,8 +522,8 @@ function wireSaveBar(root, gen, read, save) {
   $('[data-sb="discard"]', bar).onclick = () => { dirtyCheck = null; navigate(); }; // 按服务器上的当前值重绘
   saveBtn.onclick = async () => {
     saveBtn.disabled = true;
-    try { await save(); base = read(); } catch (e) { toast(e.message, true); }
-    paint();
+    try { await save(); if (bar.isConnected) base = read(); } catch (e) { toast(e.message, true); }
+    if (bar.isConnected) paint(); // 保存途中已切走：视图已换，不再读写旧表单
   };
   addDirtySource(gen, () => (bar.isConnected ? diff() : 0));
   paint();
