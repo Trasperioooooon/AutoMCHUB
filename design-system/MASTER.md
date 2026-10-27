@@ -164,7 +164,8 @@
 
 ## 10. 交付检查清单（每屏改完必过）
 
-- [ ] 6 套方案 × 浅 / 深各截图过目，无踩色、无边框消失；`go test ./internal/themes/` 通过
+- [ ] 6 套方案 × 浅 / 深各截图过目（`tools/ui-dev` 下 `npm run shots`），无踩色、无边框消失；`go test ./internal/themes/` 通过
+- [ ] `tools/ui-dev` 下 `npm test` 全部通过；新加或改动的交互补上对应测试
 - [ ] 新增颜色全部走令牌，没有写死色值
 - [ ] Tab 可达，`:focus-visible` 可见；纯图标按钮有可读名称
 - [ ] `prefers-reduced-motion` 生效；hover 过渡 150–300ms

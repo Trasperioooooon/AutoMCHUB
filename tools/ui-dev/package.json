@@ -1,0 +1,16 @@
+{
+  "name": "automchub-ui-dev",
+  "private": true,
+  "description": "AutoMCHUB 前端开发工具：仿真后端、交互回归测试、截图",
+  "scripts": {
+    "mock": "node server.js",
+    "test": "node tests.js",
+    "shots": "node shoot.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

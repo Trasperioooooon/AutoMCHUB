@@ -1,0 +1,6 @@
+# npm install 产物（依赖只有固定版本的 playwright，不提交锁文件）
+node_modules/
+package-lock.json
+
+# npm run shots 的输出
+shots/
