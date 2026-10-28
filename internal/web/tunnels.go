@@ -1,62 +1,27 @@
 package web
 
-import (
-	"net/http"
-
-	"minedeck/internal/tunnel"
-)
+import "net/http"
 
 func (s *Server) handleListTunnels(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.tun.List())
+	s.do(w, r, "tunnel.list", nil)
 }
 
 func (s *Server) handleAddTunnel(w http.ResponseWriter, r *http.Request) {
-	var t tunnel.Tunnel
-	if err := readJSON(r, &t); err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-	nt, err := s.tun.Add(t)
-	if err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-	writeJSON(w, nt)
+	s.do(w, r, "tunnel.add", bodyArgs(r))
 }
 
 func (s *Server) handleUpdateTunnel(w http.ResponseWriter, r *http.Request) {
-	var t tunnel.Tunnel
-	if err := readJSON(r, &t); err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-	if err := s.tun.Update(r.PathValue("id"), t); err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-	writeJSON(w, "ok")
+	s.do(w, r, "tunnel.update", bodyArgs(r, "id", r.PathValue("id")))
 }
 
 func (s *Server) handleDeleteTunnel(w http.ResponseWriter, r *http.Request) {
-	if err := s.tun.Delete(r.PathValue("id")); err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-	writeJSON(w, "ok")
+	s.do(w, r, "tunnel.delete", args(map[string]any{"id": r.PathValue("id")}))
 }
 
 func (s *Server) handleTunnelStart(w http.ResponseWriter, r *http.Request) {
-	if err := s.tun.Start(r.PathValue("id")); err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-	writeJSON(w, "ok")
+	s.do(w, r, "tunnel.start", args(map[string]any{"id": r.PathValue("id")}))
 }
 
 func (s *Server) handleTunnelStop(w http.ResponseWriter, r *http.Request) {
-	if err := s.tun.Stop(r.PathValue("id")); err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-	writeJSON(w, "ok")
+	s.do(w, r, "tunnel.stop", args(map[string]any{"id": r.PathValue("id")}))
 }

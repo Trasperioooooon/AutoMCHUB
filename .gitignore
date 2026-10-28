@@ -4,6 +4,7 @@
 /servers/
 /backups/
 /bg/
+/logs/
 /config.json
 /secrets.json
 /tunnels.json

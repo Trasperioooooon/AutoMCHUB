@@ -3,54 +3,42 @@ package web
 import (
 	"fmt"
 	"net/http"
+
+	"minedeck/internal/ops"
 )
 
 func (s *Server) handleListBackups(w http.ResponseWriter, r *http.Request) {
-	list, err := s.mgr.ListBackups(r.PathValue("name"))
-	if err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-	writeJSON(w, list)
+	s.do(w, r, "instance.backups.list", instArg(r))
 }
 
 func (s *Server) handleCreateBackup(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Label string `json:"label"`
-	}
-	_ = readJSON(r, &body)
-	f, err := s.mgr.CreateBackup(r.PathValue("name"), body.Label)
-	if err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-	writeJSON(w, map[string]string{"file": f})
+	s.do(w, r, "instance.backup.create", func() (ops.Args, error) {
+		var body struct {
+			Label string `json:"label"`
+		}
+		_ = readJSON(r, &body) // 请求体可省略
+		return ops.ArgsOf(map[string]any{"inst": r.PathValue("name"), "label": body.Label}), nil
+	})
 }
 
 func (s *Server) handleRestoreBackup(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		File string `json:"file"`
-	}
-	if err := readJSON(r, &body); err != nil || body.File == "" {
-		writeErr(w, 400, fmt.Errorf("缺少备份文件名"))
-		return
-	}
-	if err := s.mgr.RestoreBackup(r.PathValue("name"), body.File); err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-	writeJSON(w, "ok")
+	s.do(w, r, "instance.backup.restore", func() (ops.Args, error) {
+		var body struct {
+			File string `json:"file"`
+		}
+		if err := readJSON(r, &body); err != nil || body.File == "" {
+			return nil, fmt.Errorf("缺少备份文件名")
+		}
+		return ops.ArgsOf(map[string]any{"inst": r.PathValue("name"), "file": body.File}), nil
+	})
 }
 
 func (s *Server) handleDeleteBackup(w http.ResponseWriter, r *http.Request) {
-	f := r.URL.Query().Get("file")
-	if f == "" {
-		writeErr(w, 400, fmt.Errorf("缺少备份文件名"))
-		return
-	}
-	if err := s.mgr.DeleteBackup(r.PathValue("name"), f); err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-	writeJSON(w, "ok")
+	s.do(w, r, "instance.backup.delete", func() (ops.Args, error) {
+		f := r.URL.Query().Get("file")
+		if f == "" {
+			return nil, fmt.Errorf("缺少备份文件名")
+		}
+		return ops.ArgsOf(map[string]any{"inst": r.PathValue("name"), "file": f}), nil
+	})
 }

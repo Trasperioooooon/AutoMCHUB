@@ -1,5 +1,7 @@
 // Package web 提供本地 HTTP API 与内嵌 GUI 静态资源。
 // 安全措施：仅绑定 127.0.0.1、Host 头校验、API 需随机 Token（防跨站请求）。
+// 接口只做 HTTP 适配：解析请求 → ops.Do（操作层判断权限、校验参数、写操作记录）→ 写回响应；
+// 具体的处理逻辑在 internal/ops/catalog。SSE 控制台流、整合包上传、壁纸和登录不走操作层（或只部分走）。
 package web
 
 import (
@@ -16,6 +18,8 @@ import (
 
 	"minedeck/internal/app"
 	"minedeck/internal/inst"
+	"minedeck/internal/ops"
+	"minedeck/internal/ops/catalog"
 	"minedeck/internal/tunnel"
 )
 
@@ -23,13 +27,18 @@ import (
 var uiFS embed.FS
 
 type Server struct {
-	mgr  *inst.Manager
-	tun  *tunnel.Manager
-	port int // 实际监听端口（由 main 注入，只读；被占用时可能与默认端口不同）
+	mgr *inst.Manager
+	tun *tunnel.Manager
+	ops *ops.Registry
 }
 
 func New(mgr *inst.Manager, tun *tunnel.Manager, port int) http.Handler {
-	s := &Server{mgr: mgr, tun: tun, port: port}
+	s := &Server{mgr: mgr, tun: tun}
+	s.ops = catalog.New(catalog.Env{Mgr: mgr, Tun: tun, Port: port, Shutdown: func() {
+		if OnShutdown != nil { // main 在 New 之后才注入 OnShutdown，用到时再取
+			OnShutdown()
+		}
+	}})
 	mux := http.NewServeMux()
 
 	sub, _ := fs.Sub(uiFS, "ui")
@@ -80,8 +89,8 @@ func New(mgr *inst.Manager, tun *tunnel.Manager, port int) http.Handler {
 	mux.HandleFunc("GET /api/tunnels/{id}/console", s.handleTunnelConsole)
 
 	mux.HandleFunc("POST /api/instances/{name}/start", s.handleInstStart)
-	mux.HandleFunc("POST /api/instances/{name}/stop", s.instAction((*inst.Manager).Stop))
-	mux.HandleFunc("POST /api/instances/{name}/kill", s.instAction((*inst.Manager).Kill))
+	mux.HandleFunc("POST /api/instances/{name}/stop", s.instOp("instance.stop"))
+	mux.HandleFunc("POST /api/instances/{name}/kill", s.instOp("instance.kill"))
 	mux.HandleFunc("POST /api/instances/{name}/opendir", s.handleOpenDir)
 	mux.HandleFunc("POST /api/instances/{name}/command", s.handleCommand)
 	mux.HandleFunc("DELETE /api/instances/{name}", s.handleDelete)
@@ -89,6 +98,8 @@ func New(mgr *inst.Manager, tun *tunnel.Manager, port int) http.Handler {
 	mux.HandleFunc("GET /api/instances/{name}/properties", s.handleGetProps)
 	mux.HandleFunc("PUT /api/instances/{name}/properties", s.handleSetProps)
 	mux.HandleFunc("PUT /api/instances/{name}/settings", s.handleSetSettings)
+
+	mux.HandleFunc("GET /api/ops/log", s.handleOpLog)
 
 	return secure(mux)
 }
@@ -180,4 +191,77 @@ func writeErr(w http.ResponseWriter, code int, err error) {
 func readJSON(r *http.Request, v any) error {
 	defer r.Body.Close()
 	return json.NewDecoder(r.Body).Decode(v)
+}
+
+// ---------- 接到操作层 ----------
+
+// callerOf 网页请求的调用方：本机来的算本机（浏览器和 WebView2 里的界面发请求时带 Sec-Fetch-Site: same-origin，
+// 记作 ui；其余本机程序记作 api）；别的设备一律算局域网，记下它的地址。
+func callerOf(r *http.Request) ops.Caller {
+	if isLoopbackReq(r) {
+		src := ops.SrcAPI
+		if r.Header.Get("Sec-Fetch-Site") == "same-origin" {
+			src = ops.SrcUI
+		}
+		return ops.Caller{Source: src, Actor: "本机", Local: true}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	return ops.Caller{Source: ops.SrcLAN, Actor: host}
+}
+
+// do 解析请求 → ops.Do → 写回响应。先判权限，再调 args 取参数（取不到按它带的状态码报，默认 400），最后执行。
+// 成功时响应仍是 {"ok":true,"data":…}；失败时状态码取自操作层的错误。
+func (s *Server) do(w http.ResponseWriter, r *http.Request, name string, args func() (ops.Args, error)) {
+	c := callerOf(r)
+	if err := s.ops.Check(c, name); err != nil {
+		writeErr(w, ops.CodeOf(err), err)
+		return
+	}
+	var a ops.Args
+	if args != nil {
+		var err error
+		if a, err = args(); err != nil {
+			writeErr(w, ops.CodeOf(err), err)
+			return
+		}
+	}
+	res, err := s.ops.Do(r.Context(), c, name, a)
+	if err != nil {
+		writeErr(w, ops.CodeOf(err), err)
+		return
+	}
+	writeJSON(w, res)
+}
+
+// args 固定的参数。
+func args(m map[string]any) func() (ops.Args, error) {
+	return func() (ops.Args, error) { return ops.ArgsOf(m), nil }
+}
+
+// instArg 只有实例名（路径里的 {name}）的参数。
+func instArg(r *http.Request) func() (ops.Args, error) {
+	return args(map[string]any{"inst": r.PathValue("name")})
+}
+
+// bodyArgs 请求体（JSON 对象）加上路径参数 kv（名, 值, 名, 值…）。请求体解析失败按 400 报，和原来的 readJSON 一样。
+func bodyArgs(r *http.Request, kv ...string) func() (ops.Args, error) {
+	return func() (ops.Args, error) {
+		defer r.Body.Close()
+		var m map[string]any
+		dec := json.NewDecoder(r.Body)
+		dec.UseNumber() // 数字原样转交，不经 float64
+		if err := dec.Decode(&m); err != nil {
+			return nil, err
+		}
+		if m == nil {
+			m = map[string]any{}
+		}
+		for i := 0; i+1 < len(kv); i += 2 {
+			m[kv[i]] = kv[i+1]
+		}
+		return ops.ArgsOf(m), nil
+	}
 }

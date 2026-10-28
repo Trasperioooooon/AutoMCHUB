@@ -1,18 +1,17 @@
 package web
 
 import (
+	"fmt"
 	"net/http"
+
+	"minedeck/internal/ops/catalog"
 )
 
 func (s *Server) handleGetPlayers(w http.ResponseWriter, r *http.Request) {
-	pl, err := s.mgr.GetPlayers(r.PathValue("name"))
-	if err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-	writeJSON(w, pl)
+	s.do(w, r, "instance.players.get", instArg(r))
 }
 
+// handlePlayerAction 按 action 分到不同的操作：加减白名单是写操作，op、踢人、封禁这些是危险操作。
 func (s *Server) handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Action string `json:"action"`
@@ -22,9 +21,10 @@ func (s *Server) handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err)
 		return
 	}
-	if err := s.mgr.PlayerAction(r.PathValue("name"), body.Action, body.Player); err != nil {
-		writeErr(w, 400, err)
+	name, ok := catalog.PlayerOps[body.Action]
+	if !ok {
+		writeErr(w, 400, fmt.Errorf("未知操作: %s", body.Action))
 		return
 	}
-	writeJSON(w, "ok")
+	s.do(w, r, name, args(map[string]any{"inst": r.PathValue("name"), "player": body.Player}))
 }

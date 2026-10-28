@@ -81,6 +81,9 @@ type Manager struct {
 	insts    map[string]*Instance
 	creating map[string]bool // 正在创建中的实例名（注册进 insts 前的占位，防并发/重复创建同名实例）
 	Tasks    *tasks.Manager
+
+	autoMu   sync.Mutex
+	autoHook func(AutoAction) // 定时任务、崩溃自动重启执行后的回调（操作层用它写操作记录）
 }
 
 func NewManager() (*Manager, error) {

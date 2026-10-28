@@ -7,232 +7,93 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"minedeck/internal/app"
-	"minedeck/internal/inst"
-	"minedeck/internal/mcsrc"
-	"minedeck/internal/modpack"
+	"minedeck/internal/ops"
 )
 
-// handleImportModpack 接收整合包上传（multipart）并启动导入任务。
+// handleImportModpack 接收整合包上传（multipart），存进缓存目录后交给操作 instance.import 解析并启动导入任务。
 func (s *Server) handleImportModpack(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 4<<30)
-	if err := r.ParseMultipartForm(64 << 20); err != nil {
-		writeErr(w, 400, fmt.Errorf("上传解析失败: %w", err))
-		return
-	}
-	file, hdr, err := r.FormFile("file")
-	if err != nil {
-		writeErr(w, 400, fmt.Errorf("缺少整合包文件"))
-		return
-	}
-	defer file.Close()
-	base := filepath.Base(hdr.Filename)
-	if base == "" || base == "." {
-		base = "modpack.zip"
-	}
-	dest := filepath.Join(app.CacheDir, "import", fmt.Sprintf("%d-%s", time.Now().UnixMilli(), base))
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		writeErr(w, 500, err)
-		return
-	}
-	out, err := os.Create(dest)
-	if err != nil {
-		writeErr(w, 500, err)
-		return
-	}
-	_, cerr := io.Copy(out, file)
-	if werr := out.Close(); cerr == nil {
-		cerr = werr
-	}
-	if cerr != nil {
-		writeErr(w, 500, fmt.Errorf("保存上传文件失败: %w", cerr))
-		return
-	}
-	pack, err := modpack.Parse(dest)
-	if err != nil {
-		os.Remove(dest)
-		writeErr(w, 400, err)
-		return
-	}
-	atoi := func(s string, def int) int {
-		if n, err := strconv.Atoi(s); err == nil {
-			return n
+	s.do(w, r, "instance.import", func() (ops.Args, error) {
+		r.Body = http.MaxBytesReader(w, r.Body, 4<<30)
+		if err := r.ParseMultipartForm(64 << 20); err != nil {
+			return nil, fmt.Errorf("上传解析失败: %w", err)
 		}
-		return def
-	}
-	req := inst.CreateReq{
-		Name:        r.FormValue("name"),
-		XmxMB:       atoi(r.FormValue("xmxMb"), 4096),
-		Port:        atoi(r.FormValue("port"), 25565),
-		EULA:        r.FormValue("eula") == "true",
-		OnlineMode:  r.FormValue("onlineMode") == "true",
-		AllowFlight: r.FormValue("allowFlight") == "true",
-		MOTD:        r.FormValue("motd"),
-		Root:        r.FormValue("root"),
-	}
-	if !isLoopbackReq(r) {
-		req.Root = "" // 同 handleCreateInstance：远程 / 局域网请求不得指定主机任意路径，强制落到默认根
-	}
-	id, err := s.mgr.ImportModpackAsync(pack, req, app.CFKey())
-	if err != nil {
-		os.Remove(dest)
-		writeErr(w, 400, err)
-		return
-	}
-	writeJSON(w, map[string]any{
-		"taskId": id,
-		"pack":   map[string]any{"name": pack.Name, "mc": pack.MC, "core": pack.Core, "loader": pack.Loader, "files": len(pack.Files) + len(pack.CFRefs)},
+		file, hdr, err := r.FormFile("file")
+		if err != nil {
+			return nil, fmt.Errorf("缺少整合包文件")
+		}
+		defer file.Close()
+		base := filepath.Base(hdr.Filename)
+		if base == "" || base == "." {
+			base = "modpack.zip"
+		}
+		dest := filepath.Join(app.CacheDir, "import", fmt.Sprintf("%d-%s", time.Now().UnixMilli(), base))
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			return nil, ops.Wrap(500, err)
+		}
+		out, err := os.Create(dest)
+		if err != nil {
+			return nil, ops.Wrap(500, err)
+		}
+		_, cerr := io.Copy(out, file)
+		if werr := out.Close(); cerr == nil {
+			cerr = werr
+		}
+		if cerr != nil {
+			return nil, ops.Errorf(500, "保存上传文件失败: %w", cerr)
+		}
+		atoi := func(s string, def int) int {
+			if n, err := strconv.Atoi(s); err == nil {
+				return n
+			}
+			return def
+		}
+		return ops.ArgsOf(map[string]any{
+			"file":        dest,
+			"name":        r.FormValue("name"),
+			"xmxMb":       atoi(r.FormValue("xmxMb"), 4096),
+			"port":        atoi(r.FormValue("port"), 25565),
+			"eula":        r.FormValue("eula") == "true",
+			"onlineMode":  r.FormValue("onlineMode") == "true",
+			"allowFlight": r.FormValue("allowFlight") == "true",
+			"motd":        r.FormValue("motd"),
+			"root":        r.FormValue("root"), // 远程 / 局域网请求的 root 由操作层忽略
+		}), nil
 	})
 }
 
-type instSummary struct {
-	Name            string   `json:"name"`
-	Core            string   `json:"core"`
-	Kind            string   `json:"kind"`
-	MC              string   `json:"mc"`
-	Build           string   `json:"build"`
-	JavaMajor       int      `json:"javaMajor"`
-	XmxMB           int      `json:"xmxMb"`
-	XmsMB           int      `json:"xmsMb"`
-	Port            int      `json:"port"`
-	Status          string   `json:"status"`
-	MOTD            string   `json:"motd"`
-	Dir             string   `json:"dir"`
-	CreatedAt       string   `json:"createdAt"`
-	ConsoleEncoding string   `json:"consoleEncoding"`
-	OnlineCount     int      `json:"onlineCount"`
-	UptimeSec       int      `json:"uptimeSec"`
-	MaxPlayers      int      `json:"maxPlayers"`
-	ExtraJVM        []string `json:"extraJvm"`
-}
-
-func summarize(i *inst.Instance) instSummary {
-	motd := ""
-	maxP := 20
-	if p, err := inst.LoadProps(i.PropsPath()); err == nil {
-		motd, _ = p.Get("motd")
-		if v, ok := p.Get("max-players"); ok {
-			if n, e := strconv.Atoi(strings.TrimSpace(v)); e == nil && n > 0 {
-				maxP = n
-			}
-		}
-	}
-	xmx, xms, enc := i.MemSnapshot() // 加锁快照，避免与并发的 UpdateSettings 写入构成数据竞争
-	if enc == "" {
-		enc = "auto"
-	}
-	return instSummary{
-		Name: i.Name, Core: string(i.Core), Kind: string(mcsrc.KindOf(i.Core)),
-		MC: i.MC, Build: i.Build,
-		JavaMajor: i.JavaMajor, XmxMB: xmx, XmsMB: xms,
-		Port: i.Port(), Status: i.Status(), MOTD: motd, Dir: i.Dir,
-		CreatedAt:       i.CreatedAt.Format("2006-01-02 15:04"),
-		ConsoleEncoding: enc,
-		OnlineCount:     i.OnlineCount(), UptimeSec: i.UptimeSec(), MaxPlayers: maxP,
-		ExtraJVM: i.ExtraJVMSnapshot(),
-	}
-}
-
 func (s *Server) handleListInstances(w http.ResponseWriter, r *http.Request) {
-	var out []instSummary
-	for _, i := range s.mgr.List() {
-		out = append(out, summarize(i))
-	}
-	if out == nil {
-		out = []instSummary{}
-	}
-	writeJSON(w, out)
+	s.do(w, r, "instance.list", nil)
 }
 
 func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
-	var req inst.CreateReq
-	if err := readJSON(r, &req); err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-	if !isLoopbackReq(r) {
-		req.Root = "" // 远程 / 局域网请求不得指定主机任意路径，强制落到默认根，防越界写入
-	}
-	id, err := s.mgr.CreateAsync(req)
-	if err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-	writeJSON(w, map[string]string{"taskId": id})
+	s.do(w, r, "instance.create", bodyArgs(r))
 }
 
 func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
-	t := s.mgr.Tasks.Get(r.PathValue("id"))
-	if t == nil {
-		writeErr(w, 404, fmt.Errorf("任务不存在"))
-		return
-	}
-	writeJSON(w, t.Snapshot())
+	s.do(w, r, "task.get", args(map[string]any{"id": r.PathValue("id")}))
 }
 
-func (s *Server) instAction(fn func(*inst.Manager, string) error) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		name := r.PathValue("name")
-		if err := fn(s.mgr, name); err != nil {
-			writeErr(w, 400, err)
-			return
-		}
-		writeJSON(w, "ok")
-	}
+// instOp 只带实例名的操作（停止、强杀）。
+func (s *Server) instOp(name string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { s.do(w, r, name, instArg(r)) }
 }
 
 func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Cmd string `json:"cmd"`
-	}
-	if err := readJSON(r, &body); err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-	if err := s.mgr.Command(r.PathValue("name"), body.Cmd); err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-	writeJSON(w, "ok")
+	s.do(w, r, "instance.command", bodyArgs(r, "inst", r.PathValue("name")))
 }
 
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
-	files := r.URL.Query().Get("files") == "1"
-	if err := s.mgr.Delete(r.PathValue("name"), files); err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-	writeJSON(w, "ok")
+	s.do(w, r, "instance.delete", args(map[string]any{"inst": r.PathValue("name"), "files": r.URL.Query().Get("files") == "1"}))
 }
 
 // handleInstStart 启动实例，成功后拉起绑定的跟随隧道。
 func (s *Server) handleInstStart(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	if err := s.mgr.Start(name); err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-	s.tun.StartBound(name)
-	writeJSON(w, "ok")
+	s.do(w, r, "instance.start", instArg(r))
 }
 
 func (s *Server) handleSetSettings(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		XmxMB           int       `json:"xmxMb"`
-		XmsMB           int       `json:"xmsMb"`
-		ConsoleEncoding string    `json:"consoleEncoding"`
-		ExtraJVM        *[]string `json:"extraJvm"`
-	}
-	if err := readJSON(r, &body); err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-	if err := s.mgr.UpdateSettings(r.PathValue("name"), body.XmxMB, body.XmsMB, body.ConsoleEncoding, body.ExtraJVM); err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-	writeJSON(w, "ok")
+	s.do(w, r, "instance.settings.set", bodyArgs(r, "inst", r.PathValue("name")))
 }
