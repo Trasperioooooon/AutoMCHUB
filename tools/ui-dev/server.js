@@ -101,6 +101,7 @@ function handler(state, ui, portOf) {
     //   legacy: { name, extraJvm, forceFlags } 把某台服务器设成「老版本」，保存 JVM 参数时补回 forceFlags
     //   status: { 名称: running | starting | stopping | stopped } 直接改某台服务器的运行状态（看状态切换的动效用）
     //   cfKey: 已存的 CurseForge API Key（空串 = 未设置）；cfKeyBroken: true 模拟「Key 解不开」（换了电脑或 Windows 用户）
+    //   credBroken: 隧道编号（如 "t2"），模拟这条隧道的凭据解不开；空串还原
     if (p === "/__mock/state" && m === "POST") {
       const b = await readBody(req);
       if ("empty" in b) state.empty = !!b.empty;
@@ -111,6 +112,7 @@ function handler(state, ui, portOf) {
       if (b.legacy) { const i = state.instances.find(x => x.name === b.legacy.name); if (i) { i.extraJvm = b.legacy.extraJvm; i.forceFlags = b.legacy.forceFlags; } }
       if ("cfKey" in b) state.cfKey = String(b.cfKey || "");
       if ("cfKeyBroken" in b) state.cfKeyBroken = !!b.cfKeyBroken;
+      if ("credBroken" in b) for (const t of state.tunnels) t.credBroken = t.id === b.credBroken;
       if (b.status) for (const [n, st] of Object.entries(b.status)) { const i = state.instances.find(x => x.name === n); if (i) { i.status = st; i.uptimeSec = st === "stopped" ? 0 : st === "starting" ? 9 : i.uptimeSec; i.onlineCount = st === "running" ? i.onlineCount : 0; } }
       return ok(res, state);
     }

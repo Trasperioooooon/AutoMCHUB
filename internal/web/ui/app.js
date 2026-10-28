@@ -2128,7 +2128,8 @@ async function renderTunnels() {
         <b style="min-width:110px">${esc(t.name)}</b>
         <span class="badge core">${esc(PROV_NAMES[t.provider] || t.provider)}</span>
         ${t.boundInstance ? `<span class="badge">${icon("link")} ${esc(t.boundInstance)}${t.autoStart ? " · 跟随" : ""}</span>` : ""}
-        ${t.publicAddr ? `<span class="jv" style="color:var(--accent-text);font-family:var(--mono)">${esc(t.publicAddr)}</span>
+        ${t.credBroken ? `<span class="jp" style="color:var(--danger-text);display:inline-flex;align-items:center;gap:5px" title="凭据加密绑定当前电脑和 Windows 用户，换了就解不开">${icon("warn")} 凭据无法解开，请删除后重新添加</span>`
+          : t.publicAddr ? `<span class="jv" style="color:var(--accent-text);font-family:var(--mono)">${esc(t.publicAddr)}</span>
           <button class="btn sm" data-copy="${esc(t.publicAddr)}">${icon("copy")} 复制</button>`
           : t.lastError ? `<span class="jp" style="color:var(--danger-text);display:inline-flex;align-items:center;gap:5px" title="${esc(t.lastError)}">${icon("warn")} ${esc(t.lastError.length > 46 ? t.lastError.slice(0, 46) + "…" : t.lastError)}</span>`
           : `<span class="jp">${t.running ? "连接中…" : "尚未启动"}</span>`}

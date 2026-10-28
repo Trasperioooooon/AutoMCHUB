@@ -564,6 +564,17 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
     } finally { await mockState({ cfKey: "", cfKeyBroken: false }); }
   });
 
+  await run("隧道：凭据解不开（换了电脑或 Windows 用户）时，这一行说明原因，优先于上次的公网地址", async () => {
+    const mockState = b => page.evaluate(x => fetch("/__mock/state", { method: "POST", body: JSON.stringify(x) }), b);
+    await mockState({ credBroken: "t1" });
+    try {
+      await page.goto(url("#/tunnels")); await settle(600);
+      const rows = await page.$$eval("#tun-list .java-row", els => els.map(e => e.textContent));
+      assert(rows[0].includes("凭据无法解开") && !rows[0].includes("openfrp.top"), "解不开的隧道应显示原因：" + rows[0]);
+      assert(!rows[1].includes("凭据无法解开"), "别的隧道不受影响：" + rows[1]);
+    } finally { await mockState({ credBroken: "" }); }
+  });
+
   await run("全程无页面报错", async () => { assert(errors.length === 0, errors.slice(0, 3).join(" | ")); });
 
   await browser.close();

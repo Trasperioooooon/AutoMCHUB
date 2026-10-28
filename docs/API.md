@@ -56,10 +56,12 @@ MineDeck 的 GUI 与后端通过本地 HTTP API 通信，该 API 同时对外开
 ### 穿透
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET/POST | `/api/tunnels` | 列表（每项含运行态 `lastError`——frpc 最近一条失败原因，成功后清空）/ 新增 |
+| GET/POST | `/api/tunnels` | 列表（每项含运行态 `lastError`——frpc 最近一条失败原因，成功后清空；`credBroken`——凭据解不开，多半是换了电脑或 Windows 用户，这条隧道不能启动，要重填凭据）/ 新增 |
 | PUT/DELETE | `/api/tunnels/{id}` | 修改 / 删除 |
 | POST | `/api/tunnels/{id}/start` \| `/stop` | 启停 frpc |
 | GET | `/api/tunnels/{id}/console` | SSE frpc 日志 |
+
+凭据 `credential` 只写不读：用 Windows DPAPI 加密后存进 `tunnels.json`（`"dpapi:…"`），任何响应都不下发；`PUT` 时留空表示不修改。旧版的明文凭据在启动时自动加密写回。自定义 frps 的 token 不再写进 frpc 的配置文件，而是经环境变量交给 frpc 进程（配置里只有 `{{ .Envs.… }}` 模板）。OpenFrp 和樱花的 frpc 仍然只能从命令行参数接收凭据。
 
 所有响应统一为 `{"ok": true, "data": ...}` 或 `{"ok": false, "error": "..."}`。
 
