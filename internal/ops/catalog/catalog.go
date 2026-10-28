@@ -11,7 +11,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"minedeck/internal/ai"
 	"minedeck/internal/app"
+	"minedeck/internal/dl"
 	"minedeck/internal/inst"
 	"minedeck/internal/ops"
 	"minedeck/internal/tunnel"
@@ -21,8 +23,15 @@ import (
 type Env struct {
 	Mgr      *inst.Manager
 	Tun      *tunnel.Manager
-	Port     int    // 实际监听端口
-	Shutdown func() // 退出程序（「退出 MineDeck」和自动更新用）
+	AI       *ai.Service // nil 时按程序目录建一个（main 自己建好传进来，好在启动时调 Start）
+	Port     int         // 实际监听端口
+	Shutdown func()      // 退出程序（「退出 MineDeck」和自动更新用）
+}
+
+// NewAI 按程序目录建 AI 接入层：设置、价格缓存和用量放在 <程序目录>/data/ai/，Key 用 DPAPI 加密存进
+// secrets.json（键名 ai.key），价格数据经 GitHub 加速镜像下载。只读设置，不联网。
+func NewAI() *ai.Service {
+	return ai.NewService(ai.Options{Dir: filepath.Join(app.Base, "data", "ai"), Keys: app.Secrets(), Mirrors: dl.GHMirrors})
 }
 
 type cat struct {
@@ -34,6 +43,9 @@ type cat struct {
 // 定时任务和崩溃自动重启也经 inst 的回调各记一条（来源 schedule）。
 func New(env Env) *ops.Registry {
 	reg := ops.NewRegistry(ops.NewLog(filepath.Join(app.Base, "logs", "ops")))
+	if env.AI == nil {
+		env.AI = NewAI()
+	}
 	c := &cat{Env: env, reg: reg}
 	c.appOps()
 	c.instanceOps()
@@ -43,6 +55,7 @@ func New(env Env) *ops.Registry {
 	c.mcOps()
 	c.tunnelOps()
 	c.logOps()
+	c.aiOps()
 	if env.Mgr != nil {
 		env.Mgr.SetAutoHook(func(a inst.AutoAction) {
 			reg.Record(ops.Caller{Source: ops.SrcSchedule, Actor: a.Actor, Local: true}, a.Op, ops.ArgsOf(a.Args), a.Err, a.Dur)

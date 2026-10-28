@@ -3,14 +3,19 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
+	"minedeck/internal/ai"
 	"minedeck/internal/app"
+	"minedeck/internal/dl"
 	"minedeck/internal/inst"
 	"minedeck/internal/ops"
 	"minedeck/internal/tunnel"
@@ -18,14 +23,38 @@ import (
 
 // fullEnv 一套完整的后端，离线可跑：临时程序目录里两个停止的实例（vanilla 核心：搜索 / 安装模组在联网之前就会被拒；
 // 没有 Java：启动在起进程之前就会失败）、一条樱花隧道（启动在下载 frpc 之前就会失败）；
-// 设好了 CurseForge Key、访问密码（开着局域网访问）和 Webhook。
+// 设好了 CurseForge Key、访问密码（开着局域网访问）和 Webhook。AI 接入层用一拨号就报错的 HTTP 客户端，
+// 记下它想连的地址；Key 用真的 DPAPI 存进 secrets.json。
 type fullEnv struct {
 	h       http.Handler
 	secrets []string // 任何响应里都不能出现的东西
 	tunID   string
+	dials   *noDial
+}
+
+// noDial 一拨号就报错，记下想连的地址：用来证明没配置 AI 时没有任何对外连接。
+type noDial struct {
+	mu    sync.Mutex
+	addrs []string
+}
+
+func (d *noDial) client() *http.Client {
+	return &http.Client{Transport: &http.Transport{DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
+		d.mu.Lock()
+		d.addrs = append(d.addrs, addr)
+		d.mu.Unlock()
+		return nil, errors.New("测试里不许联网")
+	}}}
+}
+
+func (d *noDial) list() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]string(nil), d.addrs...)
 }
 
 const (
+	aiKey     = "sk-ai-secret-key-8e1b"
 	cfKey     = "cf-secret-key-4f8a"
 	lanPass   = "lan-secret-pw-9c1d"
 	sakuraKey = "sakura-secret-key-7b2e"
@@ -77,7 +106,9 @@ func newFullEnv(t *testing.T) *fullEnv {
 	if err := app.SetCFKey(cfKey); err != nil {
 		t.Fatal(err)
 	}
-	e := &fullEnv{h: New(mgr, tun, 27333), tunID: tt.ID}
+	nd := &noDial{}
+	aiSvc := ai.NewService(ai.Options{Dir: filepath.Join(app.Base, "data", "ai"), Keys: app.Secrets(), HTTP: nd.client(), Mirrors: dl.GHMirrors})
+	e := &fullEnv{h: New(mgr, tun, aiSvc, 27333), tunID: tt.ID, dials: nd}
 	e.call(t, "PUT", "/api/config", `{"lanPassword":"`+lanPass+`","listenLan":true,"webhookUrl":"https://hook.example/x?access_token=`+hookToken+`"}`, 200)
 	e.secrets = []string{cfKey, lanPass, sakuraKey, frpsToken, app.GetConfig().AccessPasswordHash}
 	return e
@@ -202,6 +233,15 @@ func TestRoutesKeepPathsAndSemantics(t *testing.T) {
 		{"PUT", ip + "/settings", `{"consoleEncoding":"big5"}`, 400, "不支持的控制台编码", nil},
 		{"DELETE", "/api/instances/%E5%88%A0%E9%99%A4%E6%B5%8B%E8%AF%95", "", 200, "", nil}, // 删除测试
 		{"GET", "/api/ops/log", "", 200, "", nil},
+		// AI 设置（第二阶段新增）：修改类的仅本机；没配置时测试连接、刷新价格报「未启用」
+		{"GET", "/api/ai/settings", "", 200, "", nil},
+		{"POST", "/api/ai/test", "", 400, "AI 未启用", nil},
+		{"POST", "/api/ai/prices/refresh", "", 400, "AI 未启用", nil},
+		{"POST", "/api/ai/models", `{}`, 400, "先选择服务商", nil},
+		{"PUT", "/api/ai/quota", `{"assistant":200000}`, 200, "", nil},
+		{"PUT", "/api/ai/prices", `{"prices":[{"model":"deepseek-v4-flash","currency":"CNY","input":2,"output":8}]}`, 200, "", nil},
+		{"PUT", "/api/ai/provider", `{"preset":"deepseek"}`, 403, "AI 设置仅支持在本机修改", []reqOpt{fromLAN}},
+		{"PUT", "/api/ai/provider", `{"preset":"ollama","model":"qwen3:8b"}`, 200, "", nil},
 	}
 	seen := map[string]bool{}
 	for _, c := range cases {
@@ -238,8 +278,11 @@ func TestRoutesKeepPathsAndSemantics(t *testing.T) {
 		t.Errorf("GET /bg/x.png：HTTP %d %q", rec.Code, rec.Header().Get("Content-Type"))
 	}
 	seen["GET "+pattern("/bg/x.png")] = true
-	if n := len(seen); n != 47+1 { // 47 个旧接口 + 新增的 /api/ops/log
-		t.Errorf("覆盖了 %d 个接口，应为 48", n)
+	if n := len(seen); n != 47+1+7 { // 47 个旧接口 + 第一阶段的 /api/ops/log + 第二阶段的 7 个 /api/ai/*
+		t.Errorf("覆盖了 %d 个接口，应为 55", n)
+	}
+	if d := e.dials.list(); len(d) != 0 {
+		t.Errorf("只配了 Ollama，不该有任何对外连接：%v", d)
 	}
 
 	// 改动确实生效了（只看几处）
@@ -260,13 +303,16 @@ func TestRoutesKeepPathsAndSemantics(t *testing.T) {
 	}
 }
 
-// 各接口的响应里搜不到 Key：CurseForge Key、访问密码（明文和哈希）、穿透凭据；
-// config.json、tunnels.json 和操作记录里也搜不到（操作记录里 Webhook 的令牌也要写成 ***）。
+// 各接口的响应里搜不到 Key：CurseForge Key、AI 的 Key、访问密码（明文和哈希）、穿透凭据；
+// config.json、tunnels.json、AI 的设置文件、secrets.json 和操作记录里也搜不到明文（操作记录里 Webhook 的令牌也要写成 ***）。
 func TestResponsesNeverLeakSecrets(t *testing.T) {
 	e := newFullEnv(t)
+	e.secrets = append(e.secrets, aiKey)
 	ip := "/api/instances/%E7%94%9F%E5%AD%98%E6%9C%8D"
 	var bodies []string
 	for _, c := range []struct{ method, path, body string }{
+		{"PUT", "/api/ai/provider", `{"preset":"deepseek","key":"` + aiKey + `"}`}, {"GET", "/api/ai/settings", ""},
+		{"PUT", "/api/ai/provider", `{"model":"deepseek-v4-pro"}`}, {"PUT", "/api/ai/quota", `{"gamechat":1000}`},
 		{"GET", "/api/app", ""}, {"PUT", "/api/config", `{"cfApiKey":"` + cfKey + `","lanPassword":"` + lanPass + `"}`},
 		{"GET", "/api/instances", ""}, {"GET", ip + "/properties", ""}, {"GET", ip + "/players", ""},
 		{"GET", ip + "/policies", ""}, {"GET", ip + "/backups", ""}, {"GET", "/api/javas", ""},
@@ -284,7 +330,8 @@ func TestResponsesNeverLeakSecrets(t *testing.T) {
 			}
 		}
 	}
-	files := []string{filepath.Join(app.Base, "config.json"), filepath.Join(app.Base, "tunnels.json")}
+	files := []string{filepath.Join(app.Base, "config.json"), filepath.Join(app.Base, "tunnels.json"),
+		filepath.Join(app.Base, "data", "ai", "settings.json"), filepath.Join(app.Base, "secrets.json")}
 	logs, _ := filepath.Glob(filepath.Join(app.Base, "logs", "ops", "*.jsonl"))
 	if len(logs) == 0 {
 		t.Fatal("没有写操作记录")

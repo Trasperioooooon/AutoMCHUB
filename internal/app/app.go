@@ -157,9 +157,10 @@ func saveLocked() {
 
 // ---------- 密钥（secrets.json，DPAPI 加密） ----------
 
-const cfKeyName = "cf.key" // secrets.json 里 CurseForge API Key 的键名
+const cfKeyName = "cf.key" // secrets.json 里 CurseForge API Key 的键名（AI 的 Key 叫 ai.key，见 internal/ai）
 
-func secrets() *secret.Store { return secret.NewStore(filepath.Join(Base, "secrets.json")) }
+// Secrets 程序目录下的 secrets.json（DPAPI 加密的密钥都放这里）。
+func Secrets() *secret.Store { return secret.NewStore(filepath.Join(Base, "secrets.json")) }
 
 // CFKey 返回 CurseForge API Key 的明文；没设置或解不开时返回空串。
 // config.json 里的旧明文只在迁移没成功时才会还在，这时照旧用它。
@@ -167,7 +168,7 @@ func CFKey() string {
 	if k := GetConfig().CFApiKey; k != "" {
 		return k
 	}
-	k, _ := secrets().Get(cfKeyName)
+	k, _ := Secrets().Get(cfKeyName)
 	return k
 }
 
@@ -176,12 +177,12 @@ func CFKeyState() (set, unreadable bool) {
 	if GetConfig().CFApiKey != "" {
 		return true, false
 	}
-	return secrets().State(cfKeyName)
+	return Secrets().State(cfKeyName)
 }
 
 // SetCFKey 加密保存 CurseForge API Key（空串表示清除），并清掉 config.json 里可能残留的旧明文。
 func SetCFKey(k string) error {
-	if err := secrets().Set(cfKeyName, strings.TrimSpace(k)); err != nil {
+	if err := Secrets().Set(cfKeyName, strings.TrimSpace(k)); err != nil {
 		return err
 	}
 	if GetConfig().CFApiKey != "" {
@@ -198,7 +199,7 @@ func migrateCFKey() {
 	if k == "" {
 		return
 	}
-	if err := secrets().Set(cfKeyName, k); err != nil {
+	if err := Secrets().Set(cfKeyName, k); err != nil {
 		log.Println("CurseForge API Key 加密失败，暂时保留 config.json 里的明文:", err)
 		return
 	}

@@ -60,7 +60,9 @@ func TestLevelsFollowDesign(t *testing.T) {
 		ops.Danger: {"instance.stop", "instance.kill", "instance.command", "instance.backup.restore", "instance.players.op",
 			"instance.players.deop", "instance.players.kick", "instance.players.ban", "instance.players.pardon", "tunnel.stop"},
 		ops.HumanOnly: {"app.config.set", "app.shutdown", "app.update.apply", "host.pickdir", "host.openpath", "instance.import",
-			"instance.delete", "instance.opendir", "instance.backup.delete", "java.add", "tunnel.add", "tunnel.update", "tunnel.delete"},
+			"instance.delete", "instance.opendir", "instance.backup.delete", "java.add", "tunnel.add", "tunnel.update", "tunnel.delete",
+			// AI 设置（第二阶段）：AI 永远看不到、也改不了自己的设置和 Key（§3.3）
+			"ai.settings.get", "ai.provider.set", "ai.models.list", "ai.test", "ai.quota.set", "ai.prices.set", "ai.prices.refresh"},
 	}
 	n := 0
 	for level, names := range want {
@@ -94,7 +96,8 @@ func TestLevelsFollowDesign(t *testing.T) {
 		}
 	}
 	slices.Sort(local)
-	if strings.Join(local, ",") != "host.openpath,host.pickdir,instance.opendir,java.add" {
+	if strings.Join(local, ",") != "ai.models.list,ai.prices.refresh,ai.prices.set,ai.provider.set,ai.quota.set,ai.test,"+
+		"host.openpath,host.pickdir,instance.opendir,java.add" {
 		t.Errorf("仅本机的操作：%v", local)
 	}
 }

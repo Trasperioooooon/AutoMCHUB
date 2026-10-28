@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"strings"
 
+	"minedeck/internal/ai"
 	"minedeck/internal/app"
 	"minedeck/internal/inst"
 	"minedeck/internal/ops"
@@ -32,9 +33,10 @@ type Server struct {
 	ops *ops.Registry
 }
 
-func New(mgr *inst.Manager, tun *tunnel.Manager, port int) http.Handler {
+// New 建好路由。aiSvc 是 AI 接入层（main 建好传进来；nil 时按程序目录建一个，只读设置、不联网）。
+func New(mgr *inst.Manager, tun *tunnel.Manager, aiSvc *ai.Service, port int) http.Handler {
 	s := &Server{mgr: mgr, tun: tun}
-	s.ops = catalog.New(catalog.Env{Mgr: mgr, Tun: tun, Port: port, Shutdown: func() {
+	s.ops = catalog.New(catalog.Env{Mgr: mgr, Tun: tun, AI: aiSvc, Port: port, Shutdown: func() {
 		if OnShutdown != nil { // main 在 New 之后才注入 OnShutdown，用到时再取
 			OnShutdown()
 		}
@@ -100,6 +102,14 @@ func New(mgr *inst.Manager, tun *tunnel.Manager, port int) http.Handler {
 	mux.HandleFunc("PUT /api/instances/{name}/settings", s.handleSetSettings)
 
 	mux.HandleFunc("GET /api/ops/log", s.handleOpLog)
+
+	mux.HandleFunc("GET /api/ai/settings", s.handleAISettings)
+	mux.HandleFunc("PUT /api/ai/provider", s.handleAIProvider)
+	mux.HandleFunc("POST /api/ai/models", s.handleAIModels)
+	mux.HandleFunc("POST /api/ai/test", s.handleAITest)
+	mux.HandleFunc("PUT /api/ai/quota", s.handleAIQuota)
+	mux.HandleFunc("PUT /api/ai/prices", s.handleAIPrices)
+	mux.HandleFunc("POST /api/ai/prices/refresh", s.handleAIPricesRefresh)
 
 	return secure(mux)
 }

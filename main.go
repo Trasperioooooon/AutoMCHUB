@@ -20,6 +20,7 @@ import (
 	"minedeck/internal/autostart"
 	"minedeck/internal/inst"
 	"minedeck/internal/java"
+	"minedeck/internal/ops/catalog"
 	"minedeck/internal/procutil"
 	"minedeck/internal/tunnel"
 	"minedeck/internal/update"
@@ -51,6 +52,9 @@ func main() {
 	tun := tunnel.NewManager()
 	webhook.Init()
 	go java.Scan() // 后台扫描本机已装 Java，创建实例时可直接复用
+	// AI 接入层：没配置 AI 时什么也不做、不联网；配置了要花钱的服务商，才在后台检查价格数据（缓存超过 7 天才下载）
+	aiSvc := catalog.NewAI()
+	aiSvc.Start()
 
 	bindHost := "127.0.0.1"
 	if cfg := app.GetConfig(); cfg.ListenLAN && cfg.AccessPasswordHash != "" {
@@ -70,7 +74,7 @@ func main() {
 		// 显式 http.Server 以设 ReadHeaderTimeout，防局域网模式下的 slowloris 半开连接；
 		// 不设 WriteTimeout，以兼容控制台 SSE 长连接。
 		srv := &http.Server{
-			Handler:           web.New(mgr, tun, addr.Port),
+			Handler:           web.New(mgr, tun, aiSvc, addr.Port),
 			ReadHeaderTimeout: 10 * time.Second,
 		}
 		if err := srv.Serve(ln); err != nil {
