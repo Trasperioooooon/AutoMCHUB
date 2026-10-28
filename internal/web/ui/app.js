@@ -1492,6 +1492,7 @@ async function renderDetail(name, tab = "console") {
       tabs.push(["tasks", "定时任务"]);
       if (info.core !== "vanilla") tabs.push(["res", "资源"]);
       if (window.MDMusic && MDMusic.applies(info.core)) tabs.push(["music", "音乐共享"]); // 第五阶段，见 music.js
+      if (window.MDGameChat && MDGameChat.applies(info)) tabs.push(["gameai", "游戏内 AI"]); // 第四阶段，见 gamechat.js
       if (!isProxy) tabs.push(["common", "常用设置"], ["raw", "全部配置"]);
       tabs.push(["jvm", "内存 / 启动"]);
       const base = "#/inst/" + encodeURIComponent(name) + "/";
@@ -2009,6 +2010,9 @@ async function renderDetail(name, tab = "console") {
 
   } else if (tab === "music" && window.MDMusic) { // 音乐共享（第五阶段）：整块在 music.js
     await MDMusic.render(body, info, gen, refreshHead);
+
+  } else if (tab === "gameai" && window.MDGameChat) { // 游戏内 AI（第四阶段）：整块在 gamechat.js
+    await MDGameChat.render(body, info, gen);
 
   } else if (tab === "jvm") {
     const appInfo = await api("/api/app").catch(() => ({ ramMb: 8192, availRamMb: 4096 }));

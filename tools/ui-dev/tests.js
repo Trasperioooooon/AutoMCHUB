@@ -1109,6 +1109,149 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
   });
   // ============================== 第三阶段结束 ==============================
 
+  // ==================== 第四阶段：游戏内 AI（gamechat.js）====================
+  // 仿真后端的场景见 server.js 的 gcMockState；改设置的 PUT 记在 reqs 里（路径要解码），一键开白名单的 POST 记在 posts 里（第五阶段那块登记的）
+  const gcState = b => page.evaluate(x => fetch("/__mock/state", { method: "POST", body: JSON.stringify(x) }).then(r => r.json()).then(j => j.data), b);
+  const gcPuts = since => reqs.slice(since).filter(x => x.m === "PUT" && decodeURIComponent(x.u).endsWith("/gameai")).map(x => JSON.parse(x.b || "{}"));
+  const openGC = async (name = "生存服 · 朋友") => { await page.goto(url("#/inst/" + encodeURIComponent(name) + "/gameai")); await settle(900); };
+  const gcReady = { gc: { reset: true }, ai: { reset: true, ...AI_DEEPSEEK, key: "sk-x" } };
+  const resetGC = () => gcState({ gc: { reset: true }, ai: { reset: true } });
+
+  await run("游戏内 AI：代理端没有这个标签；没配置 AI 时先提示去设置；开关即时生效", async () => {
+    try {
+      await resetGC();
+      await page.goto(url("#/inst/" + encodeURIComponent("群组代理") + "/console")); await settle();
+      assert(!(await page.$('.tabs [data-t="gameai"]')), "代理端不该有游戏内 AI 标签");
+      await openGC();
+      assert(await page.$('.tabs [data-t="gameai"].cur'), "应有游戏内 AI 标签并选中");
+      const gate = await page.textContent("#gc-gate");
+      assert(gate.includes("AI 还没配置") && await page.$('#gc-gate a[href="#/settings/ai"]'), "没配置 AI 时应提示去设置：" + gate);
+      await gcState(gcReady);
+      await openGC();
+      assert((await page.textContent("#gc-gate")).trim() === "" && (await page.textContent("#gc-prov")).includes("提问会发给 DeepSeek"), "配置了 AI 后不再提示");
+      const t0 = reqs.length;
+      await page.click("#gc-on + .sw"); await settle(300);
+      assert(JSON.stringify(gcPuts(t0)) === JSON.stringify([{ enabled: true }]), "开关应即时发 PUT：" + JSON.stringify(gcPuts(t0)));
+      assert(await toastHas("已打开游戏内 AI"), "应提示已打开");
+    } finally { await resetGC(); }
+  });
+
+  await run("游戏内 AI：授权玩家时没开白名单就提醒；一键开启白名单先列出要加的人（默认全选，已在白名单的、名字不合规的另外说明），确认后提醒消失", async () => {
+    try {
+      await gcState(gcReady);
+      await openGC();
+      assert(!(await page.$("#gc-wl-warn")), "还没授权时不提醒");
+      const t0 = reqs.length;
+      await page.click('[data-allow="Notch_CN"] + .sw'); await settle(400);
+      assert(JSON.stringify(gcPuts(t0).pop()) === JSON.stringify({ allowed: ["Notch_CN"] }), "授权应即时发 PUT：" + JSON.stringify(gcPuts(t0)));
+      const warn = await page.textContent("#gc-wl-warn");
+      assert(warn.includes("这个服没开白名单") && warn.includes("Notch_CN 的名字进服"), "没开白名单应提醒：" + warn);
+      await page.click("#gc-wl"); await page.waitForSelector(".modal");
+      const items = await page.$$eval(".gc-wl-item", ls => ls.map(l => l.querySelector("span").textContent + (l.querySelector("input").checked ? "✓" : "")));
+      assert(JSON.stringify(items) === JSON.stringify(["Notch_CN✓", "Herobrine✓"]), "要加进白名单的人：" + items);
+      const body = (await page.textContent(".modal")).replace(/\s+/g, " ");
+      assert(body.includes("Mr-X 的名字") && body.includes("已经在白名单里：Alex、Steve") && body.includes("whitelist on"), "说明：" + body);
+      await page.uncheck('.gc-wl-item input[data-k="Herobrine"]');
+      const p0 = posts.length;
+      await page.click('.modal [data-x="ok"]'); await settle(500);
+      const wl = postsTo(p0, "/gameai/whitelist");
+      assert(wl.length === 1 && JSON.stringify(JSON.parse(wl[0].b)) === JSON.stringify({ players: ["Notch_CN"] }), "一键开白名单的请求：" + JSON.stringify(wl));
+      assert(!(await page.$("#gc-wl-warn")) && await toastHas("已把 Notch_CN 加进白名单"), "开启后提醒消失");
+      const t1 = reqs.length;
+      await page.click('[data-allow="Notch_CN"] + .sw'); await settle(300);
+      assert(JSON.stringify(gcPuts(t1).pop()) === JSON.stringify({ allowed: [] }) && await toastHas("已收回 Notch_CN 的执行权限"), "收回授权");
+      await page.fill("#gc-add-name", "@a"); await page.press("#gc-add-name", "Enter"); await settle(200);
+      assert((await page.textContent("#gc-add-err")).includes("@ 开头"), "以 @ 开头的名字应就近提示");
+      await page.fill("#gc-add-name", "Bob_2"); await page.click("#gc-add"); await settle(400);
+      assert(await page.$('[data-allow="Bob_2"]:checked') && (await page.inputValue("#gc-add-name")) === "", "按名字授权后列出并勾上");
+    } finally { await resetGC(); }
+  });
+
+  await run("游戏内 AI：命令模板即时保存（gamemode、give 默认关）；限流和前缀单字段保存，填错就近提示", async () => {
+    try {
+      await gcState(gcReady);
+      await openGC();
+      const tpl = await page.$$eval("#gc-tpl [data-tpl]", cs => cs.map(c => c.dataset.tpl + (c.checked ? "+" : "-")));
+      assert(tpl.join(",") === "time+,weather+,tp+,effect+,spawnpoint+,locate+,gamemode-,give-,difficulty-,seed-", "模板的默认开关：" + tpl);
+      assert((await page.$$("#gc-tpl .tag")).length === 4, "默认关的四个要标出来");
+      let t0 = reqs.length;
+      await page.click('[data-tpl="gamemode"] + .sw'); await settle(300);
+      assert(JSON.stringify(gcPuts(t0).pop()) === JSON.stringify({ templates: { gamemode: true } }), "模板开关即时保存");
+      assert(await page.$eval("#gc-l-save-cooldown", b => b.disabled), "没改时保存键置灰");
+      await page.fill("#gc-l-cooldown", "-1"); await page.press("#gc-l-cooldown", "Enter"); await settle(200);
+      assert((await page.textContent("#gc-l-err-cooldown")).includes("不小于 0") && await page.$("#gc-l-cooldown.invalid"), "填错应就近提示");
+      t0 = reqs.length;
+      await page.fill("#gc-l-cooldown", "20"); await page.press("#gc-l-cooldown", "Enter"); await settle(300);
+      await page.fill("#gc-l-budget", "80"); await page.click("#gc-l-save-budget"); await settle(300);
+      assert(JSON.stringify(gcPuts(t0)) === JSON.stringify([{ cooldown: 20 }, { budget: 800000 }]), "限流的请求：" + JSON.stringify(gcPuts(t0)));
+      assert((await page.textContent("#gc-l-err-cooldown")).trim() === "" && await toastHas("全服每天的 token：80 万 token"), "保存后错误消失");
+      await page.fill("#gc-prefix", "/ai"); await page.press("#gc-prefix", "Enter"); await settle(300);
+      assert((await page.textContent("#gc-prefix-err")).includes("不能用的字符"), "不合规的前缀应就近提示");
+      await page.fill("#gc-prefix", "@小助手"); await page.press("#gc-prefix", "Enter"); await settle(300);
+      assert(await toastHas("触发前缀改成了 @小助手") && (await page.textContent("#gc-prefix-err")).trim() === "", "前缀保存");
+    } finally { await resetGC(); }
+  });
+
+  await run("游戏内 AI：识别测试显示认出的玩家、正文、选项和怎么处理；还没保存的别名也能试", async () => {
+    try {
+      await gcState(gcReady);
+      await openGC();
+      await page.click("#gc-run"); await settle(200);
+      assert((await page.textContent("#gc-test-err")).includes("先贴一行日志"), "空的时候就近提示");
+      await page.click("#gc-sample"); await page.click("#gc-run"); await settle(400);
+      const kv = await page.$$eval(".gc-kv dt", ds => ds.map(d => d.textContent + "=" + d.nextElementSibling.textContent.replace(/\s+/g, " ").trim()));
+      assert(kv.includes("日志格式=Forge / NeoForge") && kv.includes("玩家=Steve 在线") && kv.includes("选项=/私") && kv.includes("问题=今晚怎么打末影龙"), "识别结果：" + kv);
+      assert((await page.textContent(".gc-result")).includes("只发给 Steve") && await page.$(".gc-result.hit"), "结论");
+      await page.fill("#gc-alias", "@小助手");
+      await page.fill("#gc-line", "[20:15:31] [Server thread/INFO]: <Alex> @小助手 你好"); await page.press("#gc-line", "Enter"); await settle(400);
+      assert((await page.textContent(".gc-result")).includes("Alex 提问「你好」"), "还没保存的别名也能试：" + await page.textContent(".gc-result"));
+      await page.fill("#gc-line", "[20:15:31] [Server thread/INFO]: <Alex> @AIbot 你好"); await page.press("#gc-line", "Enter"); await settle(400);
+      assert((await page.textContent(".gc-result")).includes("不触发") && await page.$(".gc-result.miss"), "@AIbot 不触发");
+      await page.fill("#gc-alias", ""); // 还原，免得离开时被未保存守卫拦下
+    } finally { await resetGC(); }
+  });
+
+  await run("游戏内 AI：最近的问答显示完整的回答、执行的命令（没执行的写明原因）和用量；没有记录时给出怎么试", async () => {
+    try {
+      await gcState(gcReady);
+      await openGC();
+      const recs = await page.$$eval("#gc-log .gc-rec", rs => rs.map(r => r.textContent.replace(/\s+/g, " ")));
+      assert(recs.length === 6, "应列出 6 条：" + recs.length);
+      assert(recs[0].includes("把天气改晴") && recs[0].includes("/weather clear") && recs[0].includes("Set the weather to clear") && recs[0].includes("约 $"), "第一条：" + recs[0]);
+      assert(recs[1].includes("/op Steve") && recs[1].includes("没执行：op 命令永远不允许"), "没执行的命令写明原因：" + recs[1]);
+      assert(recs[2].includes("（只发给 Alex）") && recs[2].includes("（游戏里截断了）") && recs[2].includes("龙蛋"), "完整的回答：" + recs[2]);
+      assert(await page.$("#gc-log .gc-cmd.bad") && await page.$("#gc-log .gc-cmd.ok"), "命令的成败要标出来");
+      await openGC("机械动力整合包");
+      assert((await page.textContent("#gc-log")).includes("还没有人问过"), "空状态");
+    } finally { await resetGC(); }
+  });
+
+  await run("游戏内 AI：局域网打开只能看——控件禁用、写明要在主机上改，识别测试照样能用；手机宽度不横向溢出", async () => {
+    try {
+      await gcState({ gc: { reset: true }, ai: { reset: true, ...AI_DEEPSEEK, key: "sk-x", local: false } });
+      await openGC();
+      const d = await page.evaluate(() => ({ note: document.querySelector("#gc-gate").textContent,
+        enabled: [...document.querySelectorAll("#gc input, #gc button")].filter(e => !e.disabled).map(e => e.id).sort() }));
+      assert(d.note.includes("局域网打开") && d.note.includes("那台电脑上"), "应写明在主机上改：" + d.note);
+      assert(JSON.stringify(d.enabled) === JSON.stringify(["gc-line", "gc-run", "gc-sample"]), "局域网只有识别测试能用：" + d.enabled);
+      await page.click("#gc-sample"); await page.click("#gc-run"); await settle(400);
+      assert(await page.$(".gc-result.hit"), "局域网也能做识别测试");
+    } finally { await resetGC(); }
+    await gcState(gcReady);
+    const c = await hostCtx({ host: false }, { viewport: { width: 390, height: 844 } });
+    try {
+      const p = await c.newPage();
+      p.on("pageerror", e => errors.push(e.message));
+      await p.goto(ORIGIN + "#/inst/" + encodeURIComponent("生存服 · 朋友") + "/gameai"); await p.waitForTimeout(1200);
+      await p.click('[data-allow="Notch_CN"] + .sw'); await p.waitForTimeout(400);
+      await p.click("#gc-sample"); await p.click("#gc-run"); await p.click("#gc-adv-head"); await p.waitForTimeout(400);
+      const w = await p.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth,
+        wide: [...document.querySelectorAll("#tab-body *")].filter(e => e.getClientRects().length && e.getBoundingClientRect().right > innerWidth + 1).map(e => e.id || e.className).slice(0, 5) }));
+      assert(w.sw <= w.cw && w.wide.length === 0, "横向溢出：" + JSON.stringify(w));
+    } finally { await c.close(); await resetGC(); }
+  });
+  // ==================== 第四阶段结束 ====================
+
   await run("全程无页面报错", async () => { assert(errors.length === 0, errors.slice(0, 3).join(" | ")); });
 
   await browser.close();

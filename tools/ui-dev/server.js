@@ -60,6 +60,7 @@ function newState(ui) {
     taskStage: 2,
     ai: newAIState(),
     music: newMusicState(), // 第五阶段
+    gc: newGcState(), // 第四阶段：游戏内 AI
     asst: newAsstState(), // 第三阶段：应用内 AI 助手
   };
   state.props = catalog(ui).map(p => ({ key: p.key, value: p.key === "motd" ? "§a生存服 §7· §e一起来玩！" : String(p.def ?? "") }));
@@ -686,6 +687,218 @@ async function asstHandler(state, req, res, p, m, u) {
 }
 // ============================== 第三阶段结束 ==============================
 
+// ================================ 第四阶段：游戏内 AI ================================
+// 同 /api/instances/{name}/gameai（GET / PUT）、/gameai/test、/gameai/log、/gameai/whitelist（见 web/gamechat.go、chatai.View）。
+// 设置只在内存里；state.ai.local 为 false 时模拟局域网打开（改设置、一键开白名单报 403）。识别测试是后端规则（chatai）的简化版，
+// 够看界面就行：认三种日志格式、名字规则、前缀和别名、/私 /问 /额度 /帮助 和几种写错的情况。
+// 「生存服 · 朋友」（运行中，Steve、Alex、Notch_CN 在线）带几条最近的问答；白名单里有 Steve、Alex，最近来过 Herobrine、Mr-X。
+const GC_TEMPLATES = [
+  { id: "time", title: "改时间、查时间", usage: "time set day|night|noon|midnight；time query daytime|gametime|day", limit: "只允许这些值", default: true },
+  { id: "weather", title: "改天气", usage: "weather clear|rain|thunder [秒]", limit: "秒数 ≤ 6000", default: true },
+  { id: "tp", title: "传送自己", usage: "tp <自己> <在线玩家>；tp <自己> x y z", limit: "只能传送自己", default: true },
+  { id: "effect", title: "给自己加状态效果", usage: "effect give <自己> <效果> [秒] [等级]；effect clear <自己>", limit: "秒 ≤ 600，等级 ≤ 4", default: true },
+  { id: "spawnpoint", title: "设出生点", usage: "spawnpoint <自己>", limit: "只能设自己的，设在现在站的地方", default: true },
+  { id: "locate", title: "找结构和生物群系、看谁在线", usage: "locate structure|biome <ID>；list", limit: "只读", default: true },
+  { id: "gamemode", title: "改自己的游戏模式", usage: "gamemode survival|creative|adventure|spectator <自己>", limit: "只能改自己的（含创造模式）", default: false },
+  { id: "give", title: "给自己物品", usage: "give <自己> <物品> [数量]", limit: "数量 ≤ 64；模组物品的 ID 没法提前校验，交给服务器报错", default: false },
+  { id: "difficulty", title: "改难度", usage: "difficulty peaceful|easy|normal|hard", limit: "影响所有人", default: false },
+  { id: "seed", title: "看种子", usage: "seed", limit: "只读", default: false },
+];
+const GC_LOCAL_MSG = "游戏内 AI 的设置仅支持在本机修改（含能让 AI 执行命令的玩家和命令模板）";
+const GC_DEFAULTS = { cooldown: 15, perPlayer: 30, perServer: 300, budget: 500000 };
+const GC_ONLINE = ["Steve", "Alex", "Notch_CN"];
+const GC_SPACE = String.fromCharCode(0x3000); // 全角空格
+function newGcState() { return { insts: {}, whitelistReq: null }; }
+function gcLog() {
+  const at = min => new Date(Date.now() - min * 60000).toISOString();
+  return [
+    { t: at(3), player: "Steve", kind: "ask", question: "把天气改晴", reply: "天气已经改成晴天了。", exec: true,
+      commands: [{ command: "weather clear", run: "weather clear", ok: true, output: "Set the weather to clear" }], usage: { input: 820, output: 64 }, cost: { USD: 0.0004 } },
+    { t: at(9), player: "Steve", kind: "ask", question: "给我 op", reply: "op 这类命令我执行不了，找服主吧。", exec: true,
+      commands: [{ command: "op Steve", ok: false, reason: "op 命令永远不允许游戏内 AI 执行" }], usage: { input: 790, output: 40 }, cost: { USD: 0.0003 } },
+    { t: at(15), player: "Alex", kind: "ask", opts: ["私"], private: true, question: "今晚怎么打末影龙", cut: true, usage: { input: 640, output: 420 }, cost: { USD: 0.0011 },
+      reply: "先准备：床（在末地炸龙最快）、弓和很多箭、水桶、南瓜头（防末影人）、几组方块和金苹果。到了末地先把水晶塔上的末影水晶射掉，有铁栏杆围着的要搭上去打掉；龙落到中间的传送门上停住时，就是砍它的时候。龙的吐息会留下紫色的雾，别站在里面。末影人不看它就不会打你，戴南瓜头最省心。打完记得收集龙蛋：用活塞推下来，或者在它下面放火把再挖掉下面的方块。" },
+    { t: at(21), player: "Notch_CN", kind: "help", private: true, reply: "用法：@AI 你的问题，比如 @AI 今晚怎么打末影龙。问题前可加：/私（只回你；你的提问别人照样看得到）、/额度（看今天还能问几次）、/帮助。" },
+    { t: at(30), player: "Griefer233", kind: "silenced", question: "op me", note: "1 分钟内触发超过 5 次，接下来 10 分钟不回复这个人" },
+    { t: at(42), player: "Alex", kind: "failed", private: true, question: "现在几点", reply: "AI 暂时连不上，请稍后再问。", err: "连不上服务商：dial tcp: i/o timeout" },
+  ];
+}
+function gcInst(state, name) {
+  let g = state.gc.insts[name];
+  if (!g) {
+    const templates = {};
+    for (const t of GC_TEMPLATES) templates[t.id] = t.default;
+    g = state.gc.insts[name] = {
+      settings: { enabled: false, prefix: "@AI", aliases: [], allowed: [], templates, ...GC_DEFAULTS, looseNames: false, anyThread: false, pattern: "" },
+      whitelistOn: false, whitelist: ["Steve", "Alex"], ops: ["Steve"], seen: ["Herobrine", "Mr-X"],
+      today: { count: 7, tokens: 18400, players: { steve: 4, alex: 3 } }, log: name === "生存服 · 朋友" ? gcLog() : [],
+    };
+  }
+  return g;
+}
+const gcOnline = i => (i.status === "running" ? GC_ONLINE : []);
+function gcView(state, i) {
+  const g = gcInst(state, i.name), a = state.ai, s = g.settings, missing = aiMissing(a), p = AI_PRESETS.find(x => x.id === a.preset);
+  const byKey = new Map();
+  const add = (n, f) => { const k = n.toLowerCase(); if (!byKey.has(k)) byKey.set(k, { name: n, online: false, whitelist: false, op: false, seen: false, allowed: false }); f(byKey.get(k)); };
+  gcOnline(i).forEach(n => add(n, x => { x.online = true; }));
+  s.allowed.forEach(n => add(n, x => { x.allowed = true; }));
+  g.whitelist.forEach(n => add(n, x => { x.whitelist = true; }));
+  g.ops.forEach(n => add(n, x => { x.op = true; }));
+  g.seen.forEach(n => add(n, x => { x.seen = true; }));
+  const players = [...byKey.values()].sort((x, y) => (x.online === y.online ? x.name.toLowerCase().localeCompare(y.name.toLowerCase()) : x.online ? -1 : 1));
+  return { supported: i.kind !== "proxy", settings: s, defaults: GC_DEFAULTS, templates: GC_TEMPLATES, today: g.today, players,
+    ai: { enabled: !missing, missing, provider: p ? p.name : "", model: a.model, quotaUsed: (a.today.gamechat || {}).tokens || 0, quotaLimit: a.quota.gamechat || 0 },
+    whitelistOn: g.whitelistOn, running: i.status === "running", local: a.local };
+}
+// 同 chatai.Patch.Apply：只改传了的字段；不合规时整次不改
+function gcCheckPrefix(p) {
+  if (!p || [...p].length > 16) return `前缀要 1–16 个字："${p}"`;
+  if (/[\s/／、:：,，<>"\\§]/.test(p) || p.includes(GC_SPACE)) return `前缀「${p}」里有不能用的字符（空格、/、、、冒号、逗号、< > " \\ §）`;
+  return "";
+}
+function gcPatch(g, b) {
+  const s = JSON.parse(JSON.stringify(g.settings));
+  if ("enabled" in b) s.enabled = !!b.enabled;
+  if ("prefix" in b) { const e = gcCheckPrefix(String(b.prefix).trim()); if (e) return e; s.prefix = String(b.prefix).trim(); }
+  if ("aliases" in b) {
+    const out = [];
+    for (const x of b.aliases) { const a = String(x).trim(); if (!a) continue; const e = gcCheckPrefix(a); if (e) return "别名" + e.replace(/^前缀/, ""); if (!out.some(y => y.toLowerCase() === a.toLowerCase())) out.push(a); }
+    s.aliases = out;
+  }
+  if ("allowed" in b) {
+    const out = [];
+    for (const x of b.allowed) {
+      const n = String(x).trim();
+      if (!n || [...n].length > 16 || n.startsWith("@") || /["\\<>]|[^\x21-\x7e]/.test(n)) return `「${n}」不能授权：名字不合规`;
+      if (!out.some(y => y.toLowerCase() === n.toLowerCase())) out.push(n);
+    }
+    s.allowed = out.sort((x, y) => x.toLowerCase().localeCompare(y.toLowerCase()));
+  }
+  for (const [id, on] of Object.entries(b.templates || {})) { if (!GC_TEMPLATES.some(t => t.id === id)) return `没有这个命令模板：${id}`; s.templates[id] = !!on; }
+  for (const [k, max] of [["cooldown", 3600], ["perPlayer", 100000], ["perServer", 1000000], ["budget", 1e11]]) {
+    if (!(k in b)) continue;
+    if (!Number.isInteger(b[k]) || b[k] < 0 || b[k] > max) return `参数 ${k} 应在 0 到 ${max} 之间`;
+    s[k] = b[k];
+  }
+  if ("looseNames" in b) s.looseNames = !!b.looseNames;
+  if ("anyThread" in b) s.anyThread = !!b.anyThread;
+  if ("pattern" in b) {
+    const v = String(b.pattern).trim();
+    if (v && !(v.includes("(?P<name>") && v.includes("(?P<msg>"))) return "自定义正则要有两个命名分组：(?P<name>…) 是名字，(?P<msg>…) 是聊天内容";
+    s.pattern = v;
+  }
+  g.settings = s;
+  return "";
+}
+// 同 chatai.ParseAsk（简化）：认前缀和别名，解析 /私 /问 /额度 /帮助
+function gcParseAsk(msg, prefixes) {
+  msg = msg.trim();
+  const fold = s => s.replace(/^＠/, "@").toLowerCase();
+  const isSep = c => " :：,，".includes(c) || c === GC_SPACE;
+  const isMark = c => "/／、".includes(c);
+  let best = "", rest = "";
+  for (const p of prefixes) {
+    if (!p || p.length <= best.length || fold(msg.slice(0, p.length)) !== fold(p)) continue;
+    const r = msg.slice(p.length);
+    if (r && !isSep(r[0]) && !isMark(r[0])) continue;
+    best = p; rest = r;
+  }
+  if (!best) return null;
+  const names = { "私": "私", p: "私", "帮助": "帮助", h: "帮助", help: "帮助", "问": "问", ask: "问", "额度": "额度", quota: "额度" };
+  const a = { prefix: msg.slice(0, msg.length - rest.length), opts: [], private: false, noExec: false, question: "", action: "ask" };
+  const unknown = [];
+  let i = 0;
+  const skip = () => { while (i < rest.length && isSep(rest[i])) i++; };
+  skip();
+  while (i < rest.length) {
+    if (!isMark(rest[i])) { a.question = rest.slice(i).trim(); break; }
+    let j = i + 1;
+    while (j < rest.length && !isSep(rest[j])) j++;
+    const n = rest.slice(i + 1, j), o = names[n] || (/^[a-z]+$/i.test(n) ? names[n.toLowerCase()] : "");
+    if (o) { if (!a.opts.includes(o)) a.opts.push(o); } else unknown.push(n);
+    i = j; skip();
+  }
+  a.private = a.opts.includes("私"); a.noExec = a.opts.includes("问");
+  const words = a.question.split(/\s+/);
+  if (a.opts.includes("帮助")) a.action = "help";
+  else if (unknown.length) { a.unknown = [...unknown[0]].slice(0, 16).join(""); a.action = /^(帮助|额度|私|问)./.test(unknown[0]) ? "nospace" : "unknown"; }
+  else if (a.opts.includes("额度")) a.action = "quota";
+  else if (!a.question) a.action = "help";
+  else if (words.length > 1 && /^[/／、](私|p)$/i.test(words[words.length - 1])) a.action = "misplaced";
+  return a;
+}
+function gcTest(state, i, g, b) {
+  const s = JSON.parse(JSON.stringify(g.settings));
+  if ("prefix" in b) { const e = gcCheckPrefix(String(b.prefix).trim()); if (e) return { error: e }; s.prefix = String(b.prefix).trim(); }
+  if (Array.isArray(b.aliases)) s.aliases = b.aliases.filter(Boolean);
+  const line = String(b.line).replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/§./g, "");
+  let fmt = "", thread = "", level = "", logger = "", body = "", mm;
+  if (/^> |^\[MineDeck\]/.test(line)) return { format: "", chat: false, reason: "MineDeck 自己写进控制台的行（命令回显、提示），不看", result: "不触发：MineDeck 自己写进控制台的行（命令回显、提示），不看" };
+  if ((mm = line.match(/^\[(\d\d:\d\d:\d\d)\] \[([^\]]+)\/([A-Z]+)\] \[([^\]]*)\]: (.*)$/))) [fmt, thread, level, logger, body] = ["forge", mm[2], mm[3], mm[4], mm[5]];
+  else if ((mm = line.match(/^\[(\d\d:\d\d:\d\d)\] \[([^\]]+)\/([A-Z]+)\]: (.*)$/))) [fmt, thread, level, body] = ["vanilla", mm[2], mm[3], mm[4]];
+  else if ((mm = line.match(/^\[(\d\d:\d\d:\d\d) ([A-Z]+)\]: (.*)$/))) [fmt, level, body] = ["paper", mm[2], mm[3]];
+  const miss = (reason, extra = {}) => ({ format: fmt, thread, chat: false, ...extra, reason, result: (extra.chat ? `${extra.player} 的聊天，不触发：` : "不触发：") + reason });
+  if (!fmt) return miss("认不出这一行的日志格式（Forge / NeoForge、原版 / Fabric、Paper 三种都对不上）；装了改聊天格式的插件或模组的服，可以填自定义正则");
+  if (level !== "INFO") return miss("不是 INFO 级别的日志，不是聊天");
+  if (fmt !== "paper" && !s.anyThread && thread !== "Server thread" && !/^Async Chat Thread - #\d+$/.test(thread)) return miss(`线程「${thread}」不是记录聊天的线程；线程名对不上的服，可以打开「不看线程名」`);
+  if (fmt === "forge" && logger !== "minecraft/MinecraftServer" && logger !== "minecraft/DedicatedServer") return miss(`记录器「${logger}」不是记录聊天的 MinecraftServer`);
+  const cm = body.match(s.looseNames ? /^(\[Not Secure\] )?<([^\s<>]{1,16})> (.*)$/ : /^(\[Not Secure\] )?<([A-Za-z0-9_]{1,16})> (.*)$/);
+  if (!cm) return miss(/^(\[Not Secure\] )?</.test(body) ? "名字只认 1–16 位字母、数字、下划线；离线服的名字带别的字符时，可以打开「放宽名字规则」" : "不是玩家的聊天（聊天的正文形如 <名字> 内容）");
+  const player = cm[2], message = cm[3], online = gcOnline(i).includes(player), authorized = s.allowed.some(x => x.toLowerCase() === player.toLowerCase());
+  const base = { format: fmt, thread, chat: true, player, message, online, authorized };
+  const ask = gcParseAsk(message, [s.prefix, ...s.aliases]);
+  if (!ask) return { ...base, reason: `正文不是以触发前缀（${[s.prefix, ...s.aliases].join("、")}）开头的，或者前缀后面直接跟着别的字`, result: `${player} 的聊天，不触发：正文不是以触发前缀开头的` };
+  let out = {
+    help: `私发帮助给 ${player}，不调用 AI`, quota: `私发 ${player} 今天还能问几次，不调用 AI`, unknown: `未知选项 /${ask.unknown}：私发提示给 ${player}，不调用 AI`,
+    nospace: `选项和问题之间没有空格：私发提示给 ${player}，不调用 AI`, misplaced: `选项写在了问题后面：私发提示给 ${player}，不调用 AI（免得想私聊的回答被全服看到）`,
+  }[ask.action];
+  if (!out) out = `${player} 提问「${ask.question}」：回答${ask.private ? "只发给 " + player : "全服可见"}；` +
+    (authorized && ask.noExec ? "用了 /问，这次不给执行命令的工具" : authorized ? `${player} 有执行权限，可以让 AI 执行打开了的命令` : `${player} 没有执行权限，只回答`);
+  if (!online) out += `。注意：${player} 现在不在线，实际运行时不在线的人说的话不处理`;
+  if (!s.enabled) out += "。游戏内 AI 现在是关着的";
+  return { ...base, ask, result: out };
+}
+async function gcHandler(state, req, res, m, seg, u) {
+  const i = state.instances.find(x => x.name === seg[3]);
+  if (!i) return err(res, 404, "实例不存在");
+  const g = gcInst(state, i.name), sub = seg[5] || "";
+  if (!sub && m === "GET") return ok(res, gcView(state, i));
+  if (!sub && m === "PUT") {
+    if (!state.ai.local) return err(res, 403, GC_LOCAL_MSG);
+    const e = gcPatch(g, await readBody(req));
+    return e ? err(res, 400, e) : ok(res, gcView(state, i));
+  }
+  if (sub === "test" && m === "POST") {
+    const b = await readBody(req);
+    if (!b.line) return err(res, 400, "缺少参数 line");
+    const r = gcTest(state, i, g, b);
+    return r.error ? err(res, 400, r.error) : ok(res, r);
+  }
+  if (sub === "log" && m === "GET") return ok(res, g.log.slice(0, Math.min(+u.searchParams.get("limit") || 50, 100)));
+  if (sub === "whitelist" && m === "POST") {
+    if (!state.ai.local) return err(res, 403, GC_LOCAL_MSG);
+    const b = await readBody(req);
+    for (const n of b.players || []) if (!/^[A-Za-z0-9_]{1,16}$/.test(n)) return err(res, 400, `「${n}」加不进白名单：玩家名只能是 1–16 位字母、数字、下划线`);
+    for (const n of b.players || []) if (!g.whitelist.some(x => x.toLowerCase() === n.toLowerCase())) g.whitelist.push(n);
+    g.whitelistOn = true;
+    state.gc.whitelistReq = b.players || [];
+    return ok(res, gcView(state, i));
+  }
+  return err(res, 404, "not found");
+}
+// /__mock/state 的 gc：{ reset: true 回到初始数据, inst: { 名称: { whitelistOn, seen, log, settings… } } }；响应里的 gc.whitelistReq 是上一次一键开白名单加的人
+function gcMockState(state, b) {
+  if (b.reset) state.gc = newGcState();
+  for (const [n, x] of Object.entries(b.inst || {})) {
+    const g = gcInst(state, n);
+    const { settings, ...rest } = x;
+    Object.assign(g, rest);
+    if (settings) Object.assign(g.settings, settings);
+  }
+}
+// ============================== 第四阶段结束 ==============================
+
 const VERSIONS = ["26.2", "26.1", "1.21.4", "1.21.3", "1.21.1", "1.21", "1.20.6", "1.20.4", "1.20.2", "1.20.1", "1.19.4", "1.19.2", "1.18.2", "1.17.1", "1.16.5", "1.12.2"];
 const SNAPS = ["26.3-snapshot-2", "26.3-snapshot-1", "26.2-rc1"];
 
@@ -726,6 +939,7 @@ function handler(state, ui, portOf) {
     //   cfKey: 已存的 CurseForge API Key（空串 = 未设置）；cfKeyBroken: true 模拟「Key 解不开」（换了电脑或 Windows 用户）
     //   credBroken: 隧道编号（如 "t2"），模拟这条隧道的凭据解不开；空串还原
     //   ai: { reset: true 回到没配置, local: false 模拟局域网打开（只能看）, keyBroken, testFail, priceUpdated, 以及 preset/baseUrl/model/key 等直接写入 }
+    //   gc（第四阶段）: { reset: true 回到初始数据, inst: { 名称: { whitelistOn, seen, log, settings… } } }；响应里的 gc.whitelistReq 是上一次一键开白名单加的人
     //   music（第五阶段）: { reset, cap: "win11" | "win10", local, systemConfirmed, voiceTunnel: true 多一条语音隧道, inst: { 名称: { svc, bridge, voiceHost, … } } }
     //   asst（第三阶段）: { reset: true 清空会话和执行记录, lan: false 关掉「局域网可用 AI 助手」, slow: 流式回复每块的间隔（毫秒）}；响应里的 asst.executed 是确认后执行过的操作
     if (p === "/__mock/state" && m === "POST") {
@@ -741,6 +955,7 @@ function handler(state, ui, portOf) {
       if ("credBroken" in b) for (const t of state.tunnels) t.credBroken = t.id === b.credBroken;
       if (b.ai) { if (b.ai.reset) state.ai = newAIState(); const { reset, ...rest } = b.ai; Object.assign(state.ai, rest); }
       if (b.music) musicMockState(state, b.music); // 第五阶段
+      if (b.gc) gcMockState(state, b.gc); // 第四阶段
       if (b.asst) { if (b.asst.reset) { for (const x of state.asst.sessions) for (const r of x.subs) r.end(); state.asst = newAsstState(); } const { reset, ...rest } = b.asst; Object.assign(state.asst, rest); } // 第三阶段
       if (b.status) for (const [n, st] of Object.entries(b.status)) { const i = state.instances.find(x => x.name === n); if (i) { i.status = st; i.uptimeSec = st === "stopped" ? 0 : st === "starting" ? 9 : i.uptimeSec; i.onlineCount = st === "running" ? i.onlineCount : 0; } }
       return ok(res, state);
@@ -765,6 +980,7 @@ function handler(state, ui, portOf) {
       }
       if (await asstHandler(state, req, res, p, m, u)) return; // 第三阶段：应用内 AI 助手（含 GET /api/ai/settings 的 lanAssistant）
       if (p.startsWith("/api/ai/")) return aiHandler(state, req, res, p, m);
+      if (seg[2] === "instances" && seg[4] === "gameai") return gcHandler(state, req, res, m, seg, u); // 第四阶段
       if (p.startsWith("/api/music/") || (seg[2] === "instances" && seg[4] === "music") || (p === "/api/tunnels" && m === "POST")) return musicHandler(state, req, res, p, m, seg); // 第五阶段
       if (p === "/api/cores") return ok(res, CORES);
       if (p === "/api/config" && m === "PUT") {
