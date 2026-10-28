@@ -9,15 +9,15 @@
    amh_theme = auto | light | dark（auto 解析为系统色）；amh_scheme = 配色方案；amh_accent = 强调色（auto=跟随方案）。
    优先级：URL 参数 > 记忆 > 默认。 */
 (function () {
-  var SCHEMES = ["fluent", "github", "graphite", "nord", "catppuccin", "solarized"];
+  var SCHEMES = ["craft", "fluent", "github", "graphite", "nord", "catppuccin", "solarized"];
   var ACCENTS = ["auto", "blue", "indigo", "violet", "teal", "green", "orange", "rose", "graphite"];
   var q = new URLSearchParams(location.search);
   var get = function (k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } };
   var pref = q.get("theme") || get("amh_theme", "auto");
-  var scheme = q.get("scheme") || get("amh_scheme", "fluent");
+  var scheme = q.get("scheme") || get("amh_scheme", "craft");
   var accent = q.get("accent") || get("amh_accent", "auto");
   if (["auto", "light", "dark"].indexOf(pref) < 0) pref = "auto";
-  if (SCHEMES.indexOf(scheme) < 0) scheme = "fluent";
+  if (SCHEMES.indexOf(scheme) < 0) scheme = "craft";
   if (ACCENTS.indexOf(accent) < 0) accent = "auto";
   var sys = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
   var root = document.documentElement;

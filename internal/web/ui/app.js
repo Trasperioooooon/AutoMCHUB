@@ -209,7 +209,8 @@ const icon = (name, cls = "") => `<svg class="ico${cls ? " " + cls : ""}" viewBo
    index.html 已在样式生效前把三项偏好落到 <html> 的 data 属性；这里负责切换与持久化。
    偏好存 localStorage（每台设备各自记忆，局域网手机可与主机不同）；配色取值见 themes.css。 */
 const SCHEMES = [
-  { id: "fluent", name: "Fluent", desc: "Windows 11 默认风格" },
+  { id: "craft", name: "方块", desc: "暖沙纸底 + 草绿（默认）" },
+  { id: "fluent", name: "Fluent", desc: "Windows 11 风格" },
   { id: "github", name: "GitHub", desc: "Primer 设计系统" },
   { id: "graphite", name: "石墨", desc: "中性灰阶，Vercel / shadcn 风格" },
   { id: "nord", name: "Nord", desc: "北极冷色调" },
@@ -228,7 +229,7 @@ let appearanceView = null; // 「设置 → 外观」打开时登记的重绘函
 const Appearance = {
   get() {
     const d = document.documentElement.dataset;
-    return { mode: d.themePref || "auto", scheme: d.scheme || "fluent", accent: d.accent || "auto" };
+    return { mode: d.themePref || "auto", scheme: d.scheme || "craft", accent: d.accent || "auto" };
   },
   set(patch) {
     const a = { ...this.get(), ...patch };

@@ -5,8 +5,8 @@
 | 文件 | 作用 |
 |---|---|
 | `server.js` | 仿真后端：直接托管 `internal/web/ui/`，`/api/*` 返回内存里的假数据（4 台服务器、2 条隧道等） |
-| `tests.js` | 交互回归测试，共 24 条：切页后的轮询、未保存守卫、删除确认、新建向导、外观设置、远程访问二维码、局域网登录框、log4shell 参数保留等 |
-| `shoot.js` | 截图：逐页截图（深色、浅色各一套），以及 6 套配色 × 浅色 / 深色 |
+| `tests.js` | 交互回归测试：切页后的轮询、未保存守卫、删除确认、新建向导、外观设置、远程访问二维码、局域网登录框、log4shell 参数保留等 |
+| `shoot.js` | 截图：逐页截图（深色、浅色各一套），以及 7 套配色 × 浅色 / 深色 |
 
 ## 准备（只需一次）
 
@@ -25,7 +25,7 @@ npm test                            # 跑全部交互测试，全部通过时退
 npm test -- 外观                     # 只跑名字里含「外观」的测试（参数是正则）
 npm run shots                       # 全部截图，存到 shots/pages 与 shots/schemes
 npm run shots -- pages --only=wiz   # 只截名字匹配 wiz 的页面（新建向导各步）
-npm run shots -- schemes            # 只截 6 套配色
+npm run shots -- schemes            # 只截 7 套配色
 ```
 
 `npm test` 和 `npm run shots` 会各自启动一份全新的仿真后端（随机端口），不用先开 `npm run mock`，每次都从同一份初始数据开始。`npm run mock` 默认用 27390 端口，避开 MineDeck 自己的 27333；要换端口就运行 `node server.js <端口>`。

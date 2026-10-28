@@ -276,11 +276,23 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
     assert(before !== after && on === after, `before=${before} after=${after} 选中=${on}`);
   });
 
-  await run("外观：存储了无效方案名时回退到默认 Fluent", async () => {
+  await run("外观：存储了无效方案名时回退到默认「方块」", async () => {
     await page.evaluate(() => localStorage.setItem("amh_scheme", "bogus"));
     await page.goto(url("#/instances")); await settle();
-    assert((await page.evaluate(() => document.documentElement.dataset.scheme)) === "fluent", "未回退");
-    await page.evaluate(() => { localStorage.setItem("amh_scheme", "fluent"); localStorage.setItem("amh_accent", "auto"); });
+    assert((await page.evaluate(() => document.documentElement.dataset.scheme)) === "craft", "未回退");
+    await page.evaluate(() => { localStorage.removeItem("amh_scheme"); localStorage.setItem("amh_accent", "auto"); });
+  });
+
+  await run("外观：没有记忆时默认方案是「方块」，外观页第一张卡即「方块」且为选中态", async () => {
+    await page.evaluate(() => localStorage.removeItem("amh_scheme"));
+    await page.goto(url("#/settings/appearance")); await settle();
+    assert((await page.evaluate(() => document.documentElement.dataset.scheme)) === "craft", "默认方案不是 craft");
+    const first = await page.$eval(".scheme-card", b => [b.dataset.schemePick, b.classList.contains("on"), b.querySelector(".sc-name").textContent]);
+    assert(first[0] === "craft" && first[1] && first[2] === "方块", "第一张方案卡：" + first);
+    assert((await page.$$(".scheme-card")).length === 7, "方案卡数量不是 7");
+    const theme = await page.evaluate(() => document.documentElement.dataset.theme);
+    const want = await cssVal(`[data-scheme="craft"][data-theme="${theme}"]`, "--bg");
+    assert((await rootVar("--bg")) === want, `--bg=${await rootVar("--bg")}，应为 ${want}`);
   });
 
   await run("局域网未登录：密码框保留，不被「无法连接」错误页覆盖；真故障仍显示错误页", async () => {
