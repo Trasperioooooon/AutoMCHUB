@@ -248,7 +248,7 @@ const ICON = {
   plus: '<path d="M8 3v10M3 8h10"/>',
   copy: '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V4A1.5 1.5 0 009 2.5H4A1.5 1.5 0 002.5 4v5A1.5 1.5 0 004 10.5h1.5"/>',
   download: '<path d="M8 2.5v7.5M4.7 6.8L8 10l3.3-3.2M3 13h10"/>',
-  refresh: '<path d="M12.4 5.5A5 5 0 103.6 5.5"/><path d="M12.8 2.3V5.6H9.5"/>',
+  refresh: '<path d="M13 8a5 5 0 1 1-1.46-3.54"/><path d="M12.3 1.9v2.8H9.5"/>',
   camera: '<path d="M2.6 5.6h2.1l1-1.5h4.6l1 1.5h2.1v7.4h-10.8z"/><circle cx="8" cy="9" r="2.2"/>',
   restore: '<path d="M7.5 4.6 3 8l4.5 3.4zM13 4.6 8.5 8l4.5 3.4z" fill="currentColor"/>',
   save: '<path d="M3.4 2.6h7l3 3v7.8h-10z"/><path d="M5.4 2.6v3.2h4.4V2.6M5.4 13.4V9.2h5.2v4.2"/>',
@@ -324,6 +324,9 @@ const Appearance = {
     const root = document.documentElement;
     root.dataset.themePref = a.mode;
     root.dataset.theme = a.mode === "auto" ? (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark") : a.mode;
+    // 换外观时整页一次性换色：先暂停过渡，两帧后恢复（否则按钮、卡片各按自己的过渡时长慢慢变色，参差不齐）
+    root.classList.add("no-transition");
+    requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove("no-transition")));
     root.dataset.scheme = a.scheme;
     root.dataset.accent = a.accent;
     try { localStorage.setItem("amh_theme", a.mode); localStorage.setItem("amh_scheme", a.scheme); localStorage.setItem("amh_accent", a.accent); } catch {}

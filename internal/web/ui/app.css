@@ -1036,9 +1036,18 @@ html[data-splash="play"] .splash-word { animation: label-in var(--dur-3) var(--e
 .splash-bar i.on { background: var(--accent); }
 .splash-skip { position: absolute; bottom: 18px; left: 0; right: 0; text-align: center; font-size: var(--fs-xs); color: var(--muted); }
 
+/* 换外观（主题 / 配色 / 强调色）的那一帧暂停过渡，整页一次换色 */
+.no-transition *, .no-transition *::before, .no-transition *::after { transition: none !important; }
+
 /* 「减少动态」：系统设置开启时，一律关停动画与过渡（状态直接切换） */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* Windows 高对比度（强制颜色）：投影与底色会被系统接管，当前项改用系统高亮色描边标出 */
+@media (forced-colors: active) {
+  .nav-item.active, .set-nav.cur, .tabs > .tab.cur, .seg > button.on, .row-item.choice.sel, .core-card.sel, .scheme-card.on { outline: 2px solid Highlight; outline-offset: -2px; }
+  .dot, .xp i.on, .mem-xp i.alloc { forced-color-adjust: none; }
 }
 
 /* ---------- 响应式 ---------- */
