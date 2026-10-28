@@ -10,8 +10,10 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"minedeck/internal/app"
+	"minedeck/internal/events"
 	"minedeck/internal/secret"
 )
 
@@ -229,5 +231,78 @@ func TestTunnelsJSONShape(t *testing.T) {
 	}
 	if data.Seq != 1 || len(data.Tunnels) != 1 || data.Tunnels[0]["id"] != "tun1" || data.Tunnels[0]["proxyId"] != "1" {
 		t.Fatalf("tunnels.json 结构变了：%+v", data)
+	}
+}
+
+// 用途（第五阶段）：老数据没有这一项按「游戏」算；语音隧道照样存取；写错了报错。自定义 frps 可以选 UDP
+// （语音隧道用），配置里生成 type = "udp"；樱花、OpenFrp 的协议在服务商后台定，传了也清掉。
+func TestTunnelPurposeAndProto(t *testing.T) {
+	tempBase(t)
+	legacy := `{"seq":1,"tunnels":[{"id":"tun1","provider":"natfrp","name":"老隧道","credential":"","proxyId":"9","localPort":25565,"autoStart":false}]}`
+	if err := os.WriteFile(filepath.Join(app.Base, "tunnels.json"), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := NewManager()
+	voice, err := m.Add(Tunnel{Provider: "natfrp", Name: "语音", Credential: "k", ProxyID: "10", Purpose: PurposeVoice, Proto: "udp", Bound: "生存服", AutoStart: true})
+	if err != nil || voice.Purpose != PurposeVoice || voice.Proto != "" {
+		t.Fatalf("加语音隧道：%+v %v", voice, err)
+	}
+	udp, err := m.Add(Tunnel{Provider: "custom", Name: "自建语音", ServerAddr: "frp.example.com", ServerPort: 7000, RemotePort: 24454, LocalPort: 24454, Purpose: PurposeVoice, Proto: "udp"})
+	if err != nil || udp.Proto != "udp" {
+		t.Fatalf("加自定义 UDP 隧道：%+v %v", udp, err)
+	}
+	tcp, err := m.Add(Tunnel{Provider: "custom", Name: "自建游戏", ServerAddr: "frp.example.com", ServerPort: 7000, RemotePort: 25566, LocalPort: 25565})
+	if err != nil || tcp.Proto != "tcp" || tcp.Purpose != PurposeGame {
+		t.Fatalf("自定义隧道默认 TCP、用途游戏：%+v %v", tcp, err)
+	}
+	got := map[string]string{}
+	for _, st := range m.List() {
+		got[st.Name] = st.Purpose
+	}
+	if got["老隧道"] != PurposeGame || got["语音"] != PurposeVoice || got["自建语音"] != PurposeVoice {
+		t.Fatalf("列表里的用途：%v", got)
+	}
+	if _, err := m.Add(Tunnel{Provider: "natfrp", Name: "x", Credential: "k", ProxyID: "1", Purpose: "music"}); err == nil || !strings.Contains(err.Error(), "未知的用途") {
+		t.Fatalf("写错用途应报错：%v", err)
+	}
+	if _, err := m.Add(Tunnel{Provider: "custom", Name: "x", ServerAddr: "a", ServerPort: 1, RemotePort: 2, LocalPort: 3, Proto: "quic"}); err == nil {
+		t.Fatal("自定义 frps 的协议写错应报错")
+	}
+	for tun, want := range map[*Tunnel]string{udp: `type = "udp"`, tcp: `type = "tcp"`} {
+		args, _, err := customProvider{}.Launch(tun)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg := readFile(t, args[1]); !strings.Contains(cfg, want) || !strings.Contains(cfg, "localPort = "+strconv.Itoa(tun.LocalPort)) {
+			t.Fatalf("%s 的配置应有 %s：\n%s", tun.Name, want, cfg)
+		}
+	}
+}
+
+// 拿到公网地址时发 tunnel.up，带上隧道编号（音乐共享按编号找到绑定的实例，把语音隧道的地址写进 voice_host）。
+func TestTunnelUpEventHasID(t *testing.T) {
+	tempBase(t)
+	got := make(chan map[string]any, 4)
+	events.Subscribe(func(e events.Event) {
+		if e.Type == "tunnel.up" {
+			got <- e.Data
+		}
+	})
+	m := NewManager()
+	tt, err := m.Add(Tunnel{Provider: "natfrp", Name: "语音", Credential: "k", ProxyID: "10", Purpose: PurposeVoice})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.handleLine(m.get(tt.ID), &runState{}, "2026/10/28 20:00:00 [I] [语音] UDP 隧道启动成功，使用 frp-abc.natfrp.cloud:12345 来连接")
+	select {
+	case d := <-got:
+		if d["id"] != tt.ID || d["addr"] != "frp-abc.natfrp.cloud:12345" || d["tunnel"] != "语音" {
+			t.Fatalf("事件内容：%v", d)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("没有收到 tunnel.up")
+	}
+	if st := m.List()[0]; st.PublicAddr != "frp-abc.natfrp.cloud:12345" {
+		t.Fatalf("公网地址：%+v", st)
 	}
 }

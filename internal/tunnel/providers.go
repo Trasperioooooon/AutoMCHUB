@@ -247,14 +247,18 @@ func (customProvider) Launch(t *Tunnel) ([]string, []string, error) {
 serverPort = %d
 loginFailExit = false
 `, t.ServerAddr, t.ServerPort)
+	proto := "tcp"
+	if t.Proto == "udp" { // 语音隧道：Simple Voice Chat 走 UDP
+		proto = "udp"
+	}
 	cfg += fmt.Sprintf(`
 [[proxies]]
 name = "minedeck-%s"
-type = "tcp"
+type = %q
 localIP = "127.0.0.1"
 localPort = %d
 remotePort = %d
-`, t.ID, t.LocalPort, t.RemotePort)
+`, t.ID, proto, t.LocalPort, t.RemotePort)
 	dir := frpcDir("custom")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, nil, err

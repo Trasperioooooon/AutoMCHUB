@@ -21,6 +21,8 @@ var tunnelFields = map[string]*ops.Schema{
 	"localPort":     ops.Integer("本地端口（MC 服务器端口）"),
 	"boundInstance": ops.String("绑定的实例名"),
 	"autoStart":     ops.Boolean("绑定的实例启动时跟着启动"),
+	"purpose":       ops.String("用途：game 游戏（默认）、voice 语音（Simple Voice Chat 的 UDP 隧道，公网地址会自动写进绑定实例的 voice_host）"),
+	"proto":         ops.String("自定义 frps 的协议：tcp（默认）、udp（语音隧道用）"),
 }
 
 type tunnelArgs struct {

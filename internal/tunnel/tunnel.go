@@ -38,7 +38,20 @@ type Tunnel struct {
 	Bound      string `json:"boundInstance,omitempty"`
 	AutoStart  bool   `json:"autoStart"` // 跟随绑定实例启动
 	PublicAddr string `json:"publicAddr,omitempty"`
+	// Purpose 用途：game（游戏，默认；老数据没有这一项也按游戏算）或 voice（语音：Simple Voice Chat 的 UDP 端口，
+	// 公网地址会自动写进绑定实例的 voice_host）。樱花、OpenFrp 的隧道类型在服务商后台定，MineDeck 看不出来，只能让用户标。
+	Purpose string `json:"purpose,omitempty"`
+	// Proto 自定义 frps 的协议：tcp（默认）或 udp（语音隧道用）。樱花、OpenFrp 的协议在服务商后台定，这一项不用。
+	Proto string `json:"proto,omitempty"`
 }
+
+const (
+	PurposeGame  = "game"
+	PurposeVoice = "voice"
+)
+
+// IsVoice 是不是语音隧道。
+func (t Tunnel) IsVoice() bool { return t.Purpose == PurposeVoice }
 
 type runState struct {
 	cmd     *exec.Cmd
@@ -148,6 +161,9 @@ func (m *Manager) List() []Status {
 	for _, t := range m.tunnels {
 		st := Status{Tunnel: *t, Running: m.running[t.ID] != nil, LastError: m.lastErr[t.ID], CredBroken: m.broken[t.ID]}
 		st.Credential = "" // 凭据绝不下发（前端无需回显）
+		if st.Purpose == "" {
+			st.Purpose = PurposeGame
+		}
 		out = append(out, st)
 	}
 	return out
@@ -260,6 +276,25 @@ func validate(t *Tunnel) error {
 	t.Credential = strings.TrimSpace(t.Credential)
 	if t.Name == "" {
 		return fmt.Errorf("请填写隧道名称")
+	}
+	switch t.Purpose {
+	case "", PurposeGame:
+		t.Purpose = PurposeGame
+	case PurposeVoice:
+	default:
+		return fmt.Errorf("未知的用途：%s（可选 game 游戏、voice 语音）", t.Purpose)
+	}
+	if t.Provider != "custom" {
+		t.Proto = ""
+	} else {
+		switch t.Proto {
+		case "", "tcp", "udp":
+			if t.Proto == "" {
+				t.Proto = "tcp"
+			}
+		default:
+			return fmt.Errorf("自定义 frps 的协议只能是 tcp 或 udp")
+		}
 	}
 	switch t.Provider {
 	case "openfrp", "natfrp":
@@ -415,8 +450,12 @@ func (m *Manager) setPublicAddr(t *Tunnel, addr string) {
 	}
 	m.mu.Unlock()
 	if changed {
-		m.Console(t.ID).Append("[MineDeck] ✔ 公网地址: " + addr + "（把它发给朋友直连）")
-		events.Publish("tunnel.up", map[string]any{"tunnel": t.Name, "addr": addr})
+		if t.IsVoice() {
+			m.Console(t.ID).Append("[MineDeck] ✔ 语音公网地址: " + addr + "（MineDeck 会把它写进绑定实例的 voice_host）")
+		} else {
+			m.Console(t.ID).Append("[MineDeck] ✔ 公网地址: " + addr + "（把它发给朋友直连）")
+		}
+		events.Publish("tunnel.up", map[string]any{"tunnel": t.Name, "id": t.ID, "addr": addr})
 	}
 }
 
