@@ -64,6 +64,27 @@ MineDeck 的 GUI 与后端通过本地 HTTP API 通信，该 API 同时对外开
 
 凭据 `credential` 只写不读：用 Windows DPAPI 加密后存进 `tunnels.json`（`"dpapi:…"`），任何响应都不下发；`PUT` 时留空表示不修改。旧版的明文凭据在启动时自动加密写回。自定义 frps 的 token 不再写进 frpc 的配置文件，而是经环境变量交给 frpc 进程（配置里只有 `{{ .Envs.… }}` 模板）。OpenFrp 和樱花的 frpc 仍然只能从命令行参数接收凭据。
 
+### 音乐共享（第五阶段）
+
+把主机这台电脑上一个程序（Win11）或整机（只能录整机时）的声音，经服务器上的 Simple Voice Chat（SVC）播给玩家（设计文档 §8）。只有 NeoForge 1.20.5 以上、Forge 1.20.1 以上（Mohist 也算，还没实测）的实例能用；服务器上要有 SVC 和 MineDeck 内置的桥接模组。开始广播、列音源、确认整机录音都**仅本机**（录的是主机的声音），局域网会话调用返回 403；局域网会话可以看状态、停止广播、改设置。这几个接口都经过操作层：开始、停止广播和设置类是「仅人工」，AI 永远调不了；看状态是读操作；装桥接模组、改 voice_host 是写操作，AI 发起的要人确认。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/instances/{name}/music` | 「音乐共享」页的全部内容，只读。字段：<br>• `supported`、`reason`、`note`：核心和版本支不支持、为什么。<br>• `serverStatus`：实例状态。<br>• `svc`：`{installed, file?, version?, loader?, disabled?}`，按 jar 里的元数据找模组 ID `voicechat`，不看文件名。<br>• `bridge`：`{installed, file?, variant?, current, others?, version, config?, loaded?}`。`variant` 是加载方式 `main`（默认）或 `javafml`（备用）；`others` 是别的版本，安装时会删掉；`config` 是实例 `config/minedeck/voicebridge.properties` 里的 `{enabled, port, exclude, selftest, bypassGroupIsolation}`，令牌不下发；`loaded` 只在服务器运行中才有：SVC 加载了它为 true，SVC 加载完插件却没有它为 false。<br>• `voice`：SVC 服务端配置 `{found, port, voiceHost, path}`，`port` 为 -1 表示和游戏同一个端口；`voicePort`：这次开服 SVC 实际监听的 UDP 端口（从控制台认出来的）。<br>• `remote`：远程好友的语音 `{tunnels, addr?, state, managed}`。`tunnels` 是绑定到这个实例的语音隧道；`state` 为 `none`（没有语音隧道）、`waiting`（隧道还没拿到公网地址）、`pending`（下次开服前写进 voice_host，或 SVC 还没生成配置）、`same`（voice_host 已是隧道地址）、`differ`（voice_host 是别的值，不自动覆盖）；`managed` 表示 voice_host 是 MineDeck 写的。<br>• `players`：`{known, voice, excluded, noVoice, incompatible}`，从这次开服以后的控制台认出谁连上了语音、谁在排除名单里、谁在线却没连上语音、谁的 SVC 版本不兼容（`{name, client, server}`）；`known` 为 false 表示中途才开始看控制台，可能漏人。<br>• `capability`：`{os, mode, warn, warning}`，这台电脑能怎么录：`mode` 为 `process`（只录一个程序）、`system`（只能录整机）或空（录不了）；`warn` 为 true 时开始前要确认 `warning` 这段提醒。<br>• `systemConfirmed`：这台电脑确认过整机录音的提醒。<br>• `settings`：`{exclude, volume, mode?, exe?}`，后两项是上次用的采集方式和程序。<br>• `broadcast`：正在给这个实例广播时才有，字段见下。`elsewhere`：正在给别的实例广播时，那个实例的名字。`last`：上一次广播怎么结束的 `{reason, at, error}`。<br>• `restart`：服务器运行中改的、要重启才生效的项（「桥接模组」「voice_host」）。<br>• `guide`：可以直接发给好友的说明。`local`：请求是否来自本机。 |
+| POST | `/api/instances/{name}/music/start` | 开始广播：`{mode, pid?, exe?, device?}`。`mode` 为 `process` 时要给 `pid`（`exe` 只用来显示，下次默认选它）；为 `system` 时 `device` 可选（播放设备 ID，不填用上次选的，没选过用系统默认）。返回 `broadcast`。服务器要在运行、装了桥接模组（装好后重启过）和 SVC，否则返回 400。同一时间只能有一个广播，已经在广播时返回 409；整机录音还没确认过时也返回 409，先调 `/api/music/confirm-system`。**仅本机** |
+| POST | `/api/instances/{name}/music/stop` | 停止广播：通知桥接模组收尾、停掉采集。没在给这个实例广播时返回 400 |
+| PUT | `/api/instances/{name}/music/settings` | `{exclude?, volume?}`，只改传了的。`exclude` 是「我在游戏里的名字」：几个名字用逗号隔开，写进桥接模组的配置，2 秒内生效，这些人不再收到音乐（自己已经在听原声）；名字里不能有 `\ = # ! :`，每个最多 36 个字。`volume` 是音量 0–200（%），正在广播时立刻生效 |
+| POST | `/api/instances/{name}/music/install` | 把内置的桥接模组装进实例的 mods：`{variant?}`，`main`（默认）或 `javafml`（备用加载方式）。删掉别的版本，写好它的配置（打开共享、端口、令牌）。返回 `{installed, file, variant, current, version, removed?, restart}`。没有 SVC 时返回 400（桥接模组离不开它，装了服务器起不来）；服务器运行中要替换已经装着的版本返回 409（文件被占用，先停服）；运行中新装的 `restart` 为 true |
+| PUT | `/api/instances/{name}/music/voicehost` | 改 SVC 配置里的 `voice_host`：`{fromTunnel: true}` 用语音隧道的公网地址（以后隧道地址变了也跟着改），或 `{value}` 手动填（MineDeck 不会自动覆盖；空串清掉）。只改这一行，改前把原文件备份成 `.bak`。返回 `{before, after, changed, restart}`。SVC 的配置还没生成（没开过服）时返回 400 |
+| GET | `/api/music/sources` | 这台电脑上正在用声音的程序 `sources: [{pid, exe, name?, playing, peak, devices?}]`（`peak` 是当前电平 0–1；游戏本身的 java 不列出来）、播放设备 `devices: [{id, name, default}]`，以及 `capability`、`systemConfirmed`、`device`（上次选的播放设备）、`error?`。**仅本机** |
+| POST | `/api/music/confirm-system` | 记下「这台电脑确认过：整机录音会把游戏声音、语音聊天一起播出去」，每台电脑一次。**仅本机** |
+
+`broadcast` 的字段：`{inst, phase, since, mode, source, volume, listeners, buffered, rttMs, sent, dropped, silent, modDropped, underruns, lastError?, busy?, warning?, input?}`。`phase` 为 `connecting`（连接中）、`live`（正在播）、`retrying`（断线重连中）；`listeners` 是桥接模组报的听众数，还没连上时为 -1；`busy` 表示模组那边已经有别的广播连着；`sent` / `dropped` / `silent` 是发给模组的、没连上或发不及丢掉的、静音没发的帧数，`modDropped` / `underruns` 是模组缓冲满了丢掉的帧数和缓冲取空的次数。
+
+- **自动做的事**：开服前（手动、定时重启、崩溃重启都算）补好桥接模组的配置；语音隧道拿到公网地址时（`tunnel.up`）和开服前，把地址写进 voice_host——只在 voice_host 为空、或者还是 MineDeck 上次写的值时写，用户自己填的不覆盖。服务器停止、音乐软件退出、连不上桥接模组、退出 MineDeck 时广播自己停下，并记一条操作记录：`op` 为 `music.stop`，`src` 为 `schedule`，`actor` 为「自动停止」，`args` 里有 `reason`；出错停下的记为失败。
+- **存放**：整机录音的确认、播放设备、每个实例的音量和上次的选择存在 `<程序目录>/data/music/settings.json`；排除名单、端口和令牌在实例的 `config/minedeck/voicebridge.properties`。
+- **隧道的新字段**（`/api/tunnels`）：`purpose` 为 `game`（游戏，默认，老数据没有这一项也按游戏算）或 `voice`（SVC 的 UDP 隧道，公网地址会写进绑定实例的 voice_host）；自定义 frps 的 `proto` 为 `tcp`（默认）或 `udp`，樱花和 OpenFrp 的协议在服务商后台定，传了也会清掉。Webhook 和事件流里的 `tunnel.up` 多了隧道编号 `id`。
+
 ### AI（可选）
 
 AI 是可选功能。没配置时（`enabled` 为 false）MineDeck 不连接任何 AI 服务，不起后台任务，也不下载价格数据。下表标了「联网」的三个接口才会对外连接，而且都要人在设置页里点了才发：取模型列表、测试连接、刷新价格。AI 的设置和 Key 只能由人来改：它们在操作层里是「仅人工」的操作，以后的 AI 功能看不到也调不了。修改类的接口都**仅本机**，局域网会话只能看。
