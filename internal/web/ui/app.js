@@ -30,9 +30,9 @@ async function api(path, opts = {}) {
 function showLogin() {
   if ($("#login-mask")) return;
   const d = document.createElement("div");
-  d.className = "modal-mask";
+  d.className = "modal-mask enter";
   d.id = "login-mask";
-  d.innerHTML = `<div class="modal"><h3>${icon("lock")} MineDeck 远程访问</h3>
+  d.innerHTML = `<div class="modal"><div class="brand-head">${logoImg()}<h3>MineDeck 远程访问</h3></div>
     <div class="m-body">请输入访问密码（在主机的「设置 → 远程访问」中配置）</div>
     <input type="password" id="login-pw" style="width:100%;margin-bottom:16px" autofocus>
     <div class="m-actions"><button class="btn primary" id="login-go">登录</button></div></div>`;
@@ -56,17 +56,82 @@ function showLogin() {
 /* ---------- 工具 ---------- */
 const $ = (sel, el = document) => el.querySelector(sel);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+/* ---------- 动效工具 ----------
+   时长 / 缓动与 app.css 的 --dur-* / --ease-* 令牌一致；WAAPI 只动 transform / opacity。
+   系统开启「减少动态」时一律不播（CSS 侧也全局关停了动画与过渡），状态直接切换。 */
+const MOTION = { d2: 160, d3: 220, out: "cubic-bezier(.22,1,.36,1)" };
+const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+/* 重播一个 CSS 动画类：先摘掉、强制回流、再加上；播完自动摘掉 */
+function playClass(el, cls) {
+  if (!el || reducedMotion()) return;
+  el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls);
+  el.addEventListener("animationend", function h(e) { if (e.target === el) { el.classList.remove(cls); el.removeEventListener("animationend", h); } });
+}
+/* 列表 FLIP：增删元素后，其余元素从旧位置平移到新位置（提示堆叠用） */
+function flipList(parent, mutate) {
+  const before = new Map([...parent.children].map(e => [e, e.getBoundingClientRect().top]));
+  mutate();
+  if (reducedMotion()) return;
+  [...parent.children].forEach(e => {
+    const t = before.get(e);
+    if (t == null) return;
+    const dy = t - e.getBoundingClientRect().top;
+    if (Math.abs(dy) > .5) e.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], { duration: MOTION.d3, easing: MOTION.out });
+  });
+}
+/* 浮层离场：加 leave 类播离场动画（比进场短），播完移除；只移除这一个元素，期间新开的浮层不受影响 */
+function dismiss(el, ms = 160) {
+  if (!el || el.dataset.leaving) return;
+  if (reducedMotion()) { el.remove(); return; }
+  el.dataset.leaving = "1";
+  el.classList.remove("enter");
+  el.classList.add("leave");
+  setTimeout(() => el.remove(), ms);
+}
+/* 键帽滑动（FLIP）：切换前记下各处当前项（侧栏 / 详情标签 / 设置导航 / 分段控件）的位置，
+   重绘后让新当前项的键帽底板（::after）从旧位置滑到新位置，文字不动 */
+const KEYCAPS = { nav: "#sidebar .nav-item.active", tab: ".tabs > .tab.cur", set: ".set-nav.cur", seg: ".seg > button.on" };
+function keyRects() {
+  const out = {};
+  for (const [k, sel] of Object.entries(KEYCAPS)) { const e = document.querySelector(sel); if (e) out[k] = e.getBoundingClientRect(); }
+  return out;
+}
+function slideKeys(before, which) {
+  if (!before || reducedMotion()) return;
+  for (const k of which) {
+    const a = before[k], e = document.querySelector(KEYCAPS[k]);
+    if (!a || !e) continue;
+    const b = e.getBoundingClientRect();
+    if (!b.width || !b.height) continue;
+    const dx = a.left - b.left, dy = a.top - b.top, sx = a.width / b.width, sy = a.height / b.height;
+    if (Math.abs(dx) < .5 && Math.abs(dy) < .5 && Math.abs(sx - 1) < .01) continue;
+    e.animate([{ transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` }, { transform: "none" }], { duration: MOTION.d3, easing: MOTION.out, pseudoElement: "::after" });
+    if (k === "nav") e.animate([{ opacity: 0 }, { opacity: 0, offset: .5 }, { opacity: 1 }], { duration: MOTION.d3, pseudoElement: "::before" });
+  }
+}
+
+/* 提示：标题栏下方右侧，从上方落入；离场向右淡出，其余提示平移补位；可点击关闭 */
 function toast(msg, isErr = false) {
+  const box = $("#toasts");
   const d = document.createElement("div");
-  d.className = "toast" + (isErr ? " error" : "");
-  d.innerHTML = icon(isErr ? "warn" : "check");
+  d.className = "toast enter" + (isErr ? " error" : "");
+  d.innerHTML = `<span class="t-ico">${icon(isErr ? "warn" : "check")}</span>`;
   const t = document.createElement("span");
   t.textContent = msg;
   d.appendChild(t);
   d.title = "点击关闭";
-  $("#toasts").appendChild(d);
+  box.appendChild(d);
   let gone = false;
-  const kill = () => { if (gone) return; gone = true; d.classList.add("leaving"); d.addEventListener("animationend", () => d.remove(), { once: true }); setTimeout(() => d.remove(), 400); };
+  const kill = () => {
+    if (gone) return;
+    gone = true;
+    if (reducedMotion()) { flipList(box, () => d.remove()); return; }
+    d.classList.remove("enter"); d.classList.add("leave");
+    let removed = false;
+    const done = () => { if (removed) return; removed = true; if (d.isConnected) flipList(box, () => d.remove()); };
+    d.addEventListener("animationend", done, { once: true });
+    setTimeout(done, 400);
+  };
   d.onclick = kill;
   setTimeout(kill, isErr ? 6500 : 3500);
 }
@@ -89,33 +154,38 @@ function fmtBytes(n) {
   while (n >= 1024 && i < 3) { n /= 1024; i++; }
   return n.toFixed(i ? 1 : 0) + " " + u[i];
 }
-/* 按钮写出后果（如「保留 / 删除服务器」），不读正文也能作答；危险操作默认聚焦「取消」，误按回车不会直接执行 */
-function confirmModal({ title, body, okText = "确定", cancelText = "取消", danger = false, extra = "" }) {
+/* 按钮写出后果（如「保留 / 删除服务器」），不读正文也能作答；危险操作默认聚焦「取消」，误按回车不会直接执行。
+   危险确认框：标题前带危险色图标瓦片（icon 指定图标），最终键为实底红。遮罩淡入、对话框上浮放大进场，离场更短 */
+function confirmModal({ title, body, okText = "确定", cancelText = "取消", danger = false, extra = "", icon: ic = "warn" }) {
   return new Promise(resolve => {
     const root = $("#modal-root");
     const prev = document.activeElement; // 关闭后归还焦点
-    root.innerHTML = `<div class="modal-mask"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-      <h3 id="modal-title">${esc(title)}</h3><div class="m-body">${body}</div>${extra}
+    root.innerHTML = `<div class="modal-mask enter"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <h3 id="modal-title">${danger ? `<span class="m-ico">${icon(ic)}</span>` : ""}<span>${esc(title)}</span></h3><div class="m-body">${body}</div>${extra}
       <div class="m-actions">
         <button class="btn" data-x="cancel">${esc(cancelText)}</button>
-        <button class="btn ${danger ? "danger" : "primary"}" data-x="ok">${esc(okText)}</button>
+        <button class="btn ${danger ? "danger solid" : "primary"}" data-x="ok">${esc(okText)}</button>
       </div></div></div>`;
+    const mask = root.firstElementChild;
+    let closed = false;
     const close = val => {
-      root.innerHTML = "";
+      if (closed) return;
+      closed = true;
       document.removeEventListener("keydown", onKey);
+      dismiss(mask);
       if (prev && prev.focus) prev.focus();
       resolve(val);
     };
     const onKey = e => { if (e.key === "Escape") close(null); };
     document.addEventListener("keydown", onKey);
-    root.querySelector(".modal-mask").addEventListener("mousedown", e => { if (e.target === e.currentTarget) close(null); });
-    root.querySelector('[data-x="cancel"]').onclick = () => close(null);
-    root.querySelector('[data-x="ok"]').onclick = () => {
+    mask.addEventListener("mousedown", e => { if (e.target === e.currentTarget) close(null); });
+    mask.querySelector('[data-x="cancel"]').onclick = () => close(null);
+    mask.querySelector('[data-x="ok"]').onclick = () => {
       const checks = {};
-      root.querySelectorAll("input[type=checkbox][data-k]").forEach(c => checks[c.dataset.k] = c.checked);
+      mask.querySelectorAll("input[type=checkbox][data-k]").forEach(c => checks[c.dataset.k] = c.checked);
       close(checks);
     };
-    root.querySelector(danger ? '[data-x="cancel"]' : '[data-x="ok"]').focus();
+    mask.querySelector(danger ? '[data-x="cancel"]' : '[data-x="ok"]').focus();
   });
 }
 
@@ -124,24 +194,23 @@ let CORES = {};
 const coreName = id => (CORES[id] && CORES[id].name) || id;
 const coreKind = id => (CORES[id] && CORES[id].kind) || "game";
 
-/* 核心头像：首字母 + 低饱和核心色（CSS 里与卡片底色混合，只作辨识，不铺大色块） */
-const CORE_COLORS = {
-  vanilla: "#5b8c3a", paper: "#6e7189", purpur: "#9b6bc7", leaves: "#3f9e57",
-  folia: "#2f9e94", fabric: "#a08a5a", neoforge: "#d0743a", forge: "#4f6a8f",
-  mohist: "#b05f36", banner: "#c4942f", velocity: "#2f9fb8", waterfall: "#3f7fc7",
-};
-const CORE_MARK = {
-  vanilla: "V", paper: "P", purpur: "Pu", leaves: "L", folia: "Fl", fabric: "Fa",
-  neoforge: "NF", forge: "F", mohist: "M", banner: "B", velocity: "Ve", waterfall: "W",
-};
-const avatarOf = (id, cls = "") =>
-  `<span class="avatar${cls ? " " + cls : ""}" style="--c:${CORE_COLORS[id] || "#7a8aa0"}" aria-hidden="true">${esc(CORE_MARK[id] || String(id || "?").slice(0, 2))}</span>`;
+/* 核心头像：像素图案（pixel.js，12 种核心各一枚）装在 squircle 瓦片里；核心色只作辨识，不铺大色块 */
+const avatarOf = (id, cls = "") => MDPixel.avatar(id, cls);
+/* 核心徽标：名称前一个核心色小方块，与像素头像呼应 */
+const coreBadge = id => `<span class="badge core" style="--c:${MDPixel.CORE_COLORS[id] || "#7a8aa0"}">${esc(coreName(id))}</span>`;
 
-/* 页头：标题 + 可选说明（允许富文本，调用方自负安全）+ 右侧操作区 + 可选面包屑 */
-const pageHead = (title, sub = "", actions = "", crumbs = "") =>
+/* 页头：可选眉标（像素小方块 + 上下文，如「共 4 台 · 运行中 1」，允许富文本）+ 标题 + 可选说明（允许富文本，
+   调用方自负安全）+ 右侧操作区 + 可选面包屑。eyebrowId 给需要随数据刷新的眉标一个 id */
+const pageHead = (title, sub = "", actions = "", crumbs = "", eyebrow = "", eyebrowId = "") =>
   (crumbs ? `<nav class="crumbs" aria-label="位置">${crumbs}</nav>` : "") +
-  `<div class="page-head"><div class="ph-text"><h1>${esc(title)}</h1>${sub ? `<div class="sub">${sub}</div>` : ""}</div>` +
+  `<div class="page-head"><div class="ph-text">${eyebrow || eyebrowId ? `<div class="eyebrow"${eyebrowId ? ` id="${eyebrowId}"` : ""}>${eyebrow}</div>` : ""}<h1>${esc(title)}</h1>${sub ? `<div class="sub">${sub}</div>` : ""}</div>` +
   (actions ? `<div class="ph-actions">${actions}</div>` : "") + `</div>`;
+const SEP = `<span class="sep">·</span>`;
+
+/* 应用 Logo：与 exe / 任务栏图标同一套逐尺寸绘制的像素画（img/logo-*.png）。
+   48px 版用于引导卡、关于页、登录框；按屏幕缩放挑原生网格的那一张，pixelated 保持像素锐利 */
+const logoImg = (cls = "logo-lg") =>
+  `<img class="${cls}" src="img/logo-48.png" srcset="img/logo-48.png 1x, img/logo-72.png 1.5x, img/logo-96.png 2x, img/logo-144.png 3x" width="48" height="48" alt="">`;
 
 /* ---------- 内联 SVG 图标 ----------
    对齐 win-ctrls 风格：16 视框、细线 currentColor、圆角端点。icon(name) 返回字符串供模板拼接；
@@ -179,7 +248,7 @@ const ICON = {
   plus: '<path d="M8 3v10M3 8h10"/>',
   copy: '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V4A1.5 1.5 0 009 2.5H4A1.5 1.5 0 002.5 4v5A1.5 1.5 0 004 10.5h1.5"/>',
   download: '<path d="M8 2.5v7.5M4.7 6.8L8 10l3.3-3.2M3 13h10"/>',
-  refresh: '<path d="M12.4 5.5A5 5 0 103.6 5.5"/><path d="M12.8 2.3V5.6H9.5"/>',
+  refresh: '<path d="M13 8a5 5 0 1 1-1.46-3.54"/><path d="M12.3 1.9v2.8H9.5"/>',
   camera: '<path d="M2.6 5.6h2.1l1-1.5h4.6l1 1.5h2.1v7.4h-10.8z"/><circle cx="8" cy="9" r="2.2"/>',
   restore: '<path d="M7.5 4.6 3 8l4.5 3.4zM13 4.6 8.5 8l4.5 3.4z" fill="currentColor"/>',
   save: '<path d="M3.4 2.6h7l3 3v7.8h-10z"/><path d="M5.4 2.6v3.2h4.4V2.6M5.4 13.4V9.2h5.2v4.2"/>',
@@ -204,11 +273,12 @@ const icon = (name, cls = "") => `<svg class="ico${cls ? " " + cls : ""}" viewBo
    index.html 已在样式生效前把三项偏好落到 <html> 的 data 属性；这里负责切换与持久化。
    偏好存 localStorage（每台设备各自记忆，局域网手机可与主机不同）；配色取值见 themes.css。 */
 const SCHEMES = [
-  { id: "fluent", name: "Fluent", desc: "Windows 11 默认风格" },
+  { id: "craft", name: "方块", desc: "暖沙纸底 + 草绿（默认）" },
+  { id: "fluent", name: "Fluent", desc: "Windows 11 风格" },
   { id: "github", name: "GitHub", desc: "Primer 设计系统" },
-  { id: "graphite", name: "石墨", desc: "中性灰阶，Vercel / shadcn 风格" },
+  { id: "graphite", name: "石墨", desc: "中性灰阶" },
   { id: "nord", name: "Nord", desc: "北极冷色调" },
-  { id: "catppuccin", name: "Catppuccin", desc: "Latte / Mocha 柔和粉彩" },
+  { id: "catppuccin", name: "Catppuccin", desc: "柔和粉彩" },
   { id: "solarized", name: "Solarized", desc: "经典护眼配色" },
 ];
 const ACCENTS = [
@@ -220,16 +290,43 @@ const ACCENTS = [
 const MODE_LABEL = { auto: "跟随系统", light: "浅色", dark: "深色" };
 const MODE_ICON = { auto: "monitor", light: "sun", dark: "moon" };
 let appearanceView = null; // 「设置 → 外观」打开时登记的重绘函数，外观变化（含侧栏快捷切换）后同步选中态
+
+/* 冷启动不白闪：原生窗口里把当前标题栏底色（--chrome）上报给后端存进 config.json（chromeColor），
+   下次启动时宿主在创建 WebView2 之前把它设成默认底色，页面画出来之前窗口就是这个颜色（见 webviewbg_windows.go）。
+   只在原生窗口里上报（局域网手机各有各的外观，不能覆盖主机的）；值没变不重复写，连点外观选项时合并成一次。 */
+const chromeReport = { last: null, timer: 0 }; // last：后端当前存的值（boot 读到配置后才开始上报）
+function hexColor(v) {
+  v = String(v || "").trim().toLowerCase();
+  let m = v.match(/^#([0-9a-f]{3})$/);
+  if (m) return "#" + m[1].split("").map(c => c + c).join("");
+  if (/^#[0-9a-f]{6}$/.test(v)) return v;
+  m = v.match(/^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/);
+  return m ? "#" + m.slice(1, 4).map(n => Math.min(255, +n).toString(16).padStart(2, "0")).join("") : "";
+}
+function reportChrome() {
+  if (typeof window.hostWinClose !== "function" || chromeReport.last === null) return;
+  clearTimeout(chromeReport.timer);
+  chromeReport.timer = setTimeout(() => {
+    const c = hexColor(getComputedStyle(document.documentElement).getPropertyValue("--chrome"));
+    if (!c || c === chromeReport.last) return;
+    const prev = chromeReport.last;
+    chromeReport.last = c;
+    api("/api/config", { method: "PUT", body: { chromeColor: c } }).catch(() => { chromeReport.last = prev; });
+  }, 400);
+}
 const Appearance = {
   get() {
     const d = document.documentElement.dataset;
-    return { mode: d.themePref || "auto", scheme: d.scheme || "fluent", accent: d.accent || "auto" };
+    return { mode: d.themePref || "auto", scheme: d.scheme || "craft", accent: d.accent || "auto" };
   },
   set(patch) {
     const a = { ...this.get(), ...patch };
     const root = document.documentElement;
     root.dataset.themePref = a.mode;
     root.dataset.theme = a.mode === "auto" ? (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark") : a.mode;
+    // 换外观时整页一次性换色：先暂停过渡，两帧后恢复（否则按钮、卡片各按自己的过渡时长慢慢变色，参差不齐）
+    root.classList.add("no-transition");
+    requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove("no-transition")));
     root.dataset.scheme = a.scheme;
     root.dataset.accent = a.accent;
     try { localStorage.setItem("amh_theme", a.mode); localStorage.setItem("amh_scheme", a.scheme); localStorage.setItem("amh_accent", a.accent); } catch {}
@@ -237,6 +334,7 @@ const Appearance = {
     // 卡片上的 MOTD 按明暗取色，切换后重绘
     document.querySelectorAll(".inst-meta[data-motd]").forEach(el => { if (el.dataset.motd) renderMotd(el, el.dataset.motd); });
     if (appearanceView) appearanceView();
+    reportChrome();
   },
 };
 function paintThemeBtn() {
@@ -433,30 +531,35 @@ function renderMemoryControl(mount, o) {
     <div class="mem-head"><span>最大内存 -Xmx</span><b class="mem-gb"></b>
       <span class="mem-mb"><input type="number" class="mem-num" min="${min}" max="${max}" step="256"> MB</span></div>
     <input type="range" id="${o.sliderId}" class="mem-range" min="${min}" max="${max}" step="512">
-    <div class="mem-bar"><i class="mem-used"></i><i class="mem-alloc"></i></div>
+    <div class="mem-xp" aria-hidden="true"></div>
     <div class="mem-stat"></div>
     ${o.hint ? `<div class="hint">${esc(o.hint)}</div>` : ""}`;
   const range = mount.querySelector(".mem-range");
   const num = mount.querySelector(".mem-num");
   const gb = mount.querySelector(".mem-gb");
-  const used = mount.querySelector(".mem-used");
-  const alloc = mount.querySelector(".mem-alloc");
+  const bar = mount.querySelector(".mem-xp");
   const stat = mount.querySelector(".mem-stat");
   const clamp = v => Math.min(max, Math.max(min, Math.round(+v || min)));
+  // 经验条式分段：1 格 = cellMb（默认 512 MB，内存很大时放大到最多约 48 格）；其他程序已用 / 本服分配 / 超出可用
+  const cellMb = Math.max(512, Math.ceil((totalMb || 8192) / 48 / 512) * 512);
+  const cells = Math.max(8, Math.round((totalMb || 8192) / cellMb));
+  bar.innerHTML = "<i></i>".repeat(cells);
+  bar.title = `1 格 = ${cellMb} MB`;
   const paint = v => {
     gb.textContent = g(v) + " GB";
-    const usedPct = totalMb ? Math.min(100, usedMb / totalMb * 100) : 0;
-    const allocPct = totalMb ? Math.min(100 - usedPct, v / totalMb * 100) : 0;
-    used.style.width = usedPct + "%";
-    alloc.style.left = usedPct + "%";
-    alloc.style.width = Math.max(0, allocPct) + "%";
+    const usedN = totalMb ? Math.min(cells, Math.round(usedMb / cellMb)) : 0;
+    const allocN = Math.max(1, Math.round(v / cellMb));
+    const availN = Math.max(0, cells - usedN);
+    const okN = Math.min(allocN, Math.round(Math.min(availMb, v) / cellMb));
+    [...bar.children].forEach((c, i) => {
+      c.className = i < usedN ? "used" : i < usedN + okN ? "alloc" : i < usedN + Math.min(allocN, availN) ? "over" : "";
+    });
     const over = v > availMb;
-    alloc.classList.toggle("over", over);
     let note = "";
     if (over) note = ` <span class="mem-warn">${icon("warn")} 超过当前可用 ${g(availMb)} GB，可能触发频繁 GC 或分配失败</span>`;
     else if (v > 16384) note = ` <span class="mem-warn">${icon("warn")} 过大的堆可能增加 GC 停顿</span>`;
     stat.innerHTML = totalMb
-      ? `已用 ${g(usedMb)} GB · 本服分配 <b>${g(v)} GB</b> / 共 ${g(totalMb)} GB${note}`
+      ? `其他程序已用 ${g(usedMb)} GB · 本服分配 <b>${g(v)} GB</b> / 共 ${g(totalMb)} GB · 1 格 = ${cellMb} MB${note}`
       : `本服分配 <b>${g(v)} GB</b>`;
   };
   const sync = v => { v = clamp(v); range.value = v; num.value = v; paint(v); };
@@ -496,9 +599,9 @@ function bindSaveInput(input, btn, save, gen) {
 
 function saveBar(saveText, note = "") {
   return `<div class="save-bar sticky">
-    <span class="sb-state">所有修改已保存</span>${note}
+    <span class="sb-state"><span class="dot" aria-hidden="true"></span><span class="sb-text">所有修改已保存</span></span>${note}
     <span class="grow"></span>
-    <button class="btn" data-sb="discard" hidden>放弃修改</button>
+    <button class="btn ghost" data-sb="discard" hidden>放弃修改</button>
     <button class="btn primary" data-sb="save" disabled>${icon("save")} ${esc(saveText)}</button>
   </div>`;
 }
@@ -512,10 +615,13 @@ function wireSaveBar(root, gen, read, save) {
   };
   const paint = () => {
     const n = diff();
+    const wasDirty = bar.classList.contains("dirty");
     bar.classList.toggle("dirty", n > 0);
-    $(".sb-state", bar).textContent = n ? `${n} 项修改未保存` : "所有修改已保存";
+    $(".sb-text", bar).textContent = n ? `${n} 项修改未保存` : "所有修改已保存";
     saveBtn.disabled = n === 0;
-    $('[data-sb="discard"]', bar).hidden = n === 0;
+    const discard = $('[data-sb="discard"]', bar);
+    discard.hidden = n === 0;
+    if (n > 0 && !wasDirty) playClass(discard, "swap-in"); // 「放弃修改」出现时轻轻换场
   };
   root.addEventListener("input", paint);
   root.addEventListener("change", paint);
@@ -531,13 +637,14 @@ function wireSaveBar(root, gen, read, save) {
 }
 
 /* 下拉菜单（fixed 定位，点外部 / Esc 关闭，再点触发按钮收起；下方放不下时向上展开）。
+   进场自锚点方向轻展开（160ms），离场更快更短（120ms）。
    items: {label, icon, onClick, danger?, disabled?, note?} | {sep: true} | {header: "…"} */
 function dropMenu(anchor, items) {
-  const open = document.querySelector(".dropmenu");
+  const open = document.querySelector(".dropmenu:not(.leave)");
   if (open && open._anchor === anchor) { open._close(); return; }
-  document.querySelectorAll(".dropmenu").forEach(x => x._close ? x._close() : x.remove());
+  document.querySelectorAll(".dropmenu:not(.leave)").forEach(x => x._close ? x._close() : x.remove());
   const m = document.createElement("div");
-  m.className = "dropmenu";
+  m.className = "dropmenu enter";
   m.setAttribute("role", "menu");
   m._anchor = anchor;
   items.forEach(it => {
@@ -555,12 +662,18 @@ function dropMenu(anchor, items) {
   });
   document.body.appendChild(m);
   const r = anchor.getBoundingClientRect();
-  m.style.left = Math.max(8, Math.min(r.right - m.offsetWidth, innerWidth - m.offsetWidth - 8)) + "px";
+  const left = Math.max(8, Math.min(r.right - m.offsetWidth, innerWidth - m.offsetWidth - 8));
+  m.style.left = left + "px";
   const h = m.offsetHeight;
-  m.style.top = (r.bottom + 4 + h > innerHeight - 8 ? Math.max(8, r.top - h - 4) : r.bottom + 4) + "px";
+  const up = r.bottom + 4 + h > innerHeight - 8;
+  m.style.top = (up ? Math.max(8, r.top - h - 4) : r.bottom + 4) + "px";
+  m.style.setProperty("--origin", `${up ? "bottom" : "top"} ${left + m.offsetWidth / 2 < r.left + r.width / 2 ? "left" : "right"}`);
   const onDoc = e => { if (!m.contains(e.target) && !anchor.contains(e.target)) close(); };
   const onKey = e => { if (e.key === "Escape") { close(); anchor.focus(); } };
-  function close() { m.remove(); document.removeEventListener("click", onDoc); document.removeEventListener("keydown", onKey); }
+  function close(instant) {
+    document.removeEventListener("click", onDoc); document.removeEventListener("keydown", onKey);
+    if (instant) m.remove(); else dismiss(m, 120);
+  }
   m._close = close;
   setTimeout(() => { document.addEventListener("click", onDoc); document.addEventListener("keydown", onKey); }, 0);
 }
@@ -573,6 +686,8 @@ let consoleES = null; // 当前 SSE 连接
 let pollTimer = null;
 let prTimer = null;   // 控制台在线玩家延迟刷新定时器（离开视图时清理）
 let lastAnimKey = null; // 页级入场动画的身份键（跨页判定用）
+let keysBefore = null;  // 切页前各处键帽的位置（详情标签 / 设置导航在异步重绘后据此滑动）
+let samePage = false;   // 本次切换是否只是页内（同一实例换标签、设置换分区）
 
 /* 视图代号：每次切页 +1。异步渲染在 await 之后先核对代号，过期即放弃（不再挂定时器、不再登记守卫），
    否则快速切页时旧视图的轮询会在 await 返回后才挂上，覆盖新视图的 pollTimer 并永远清不掉。 */
@@ -613,7 +728,8 @@ async function navigate() {
   if (consoleES) { consoleES.close(); consoleES = null; }
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   if (prTimer) { clearTimeout(prTimer); prTimer = null; }
-  document.querySelectorAll(".dropmenu").forEach(x => x._close ? x._close() : x.remove());
+  document.querySelectorAll(".dropmenu").forEach(x => x._close ? x._close(true) : x.remove());
+  keysBefore = keyRects();
   const m = hash.match(/^#\/([a-z]+)(?:\/(.+))?$/);
   const view = m ? m[1] : "instances";
   const arg = m && m[2] ? decodeURIComponent(m[2]) : null;
@@ -624,13 +740,12 @@ async function navigate() {
     a.classList.toggle("active", on);
     if (on) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
   });
+  slideKeys(keysBefore, ["nav"]); // 侧栏键帽从旧位置滑到新位置
   const mainEl = Main();
   // 页级入场动画只在真正跨页时重播：设置分区切换走 set-body 局部动效、详情 tab 走 tab-body 局部动效
   const animKey = view === "inst" && arg ? "inst/" + arg.split("/")[0] : view === "task" ? "task/" + arg : view;
-  if (animKey !== lastAnimKey) {
-    mainEl.classList.remove("view-enter"); void mainEl.offsetWidth; // 重触发跨页入场
-    mainEl.classList.add("view-enter");
-  }
+  samePage = animKey === lastAnimKey;
+  if (!samePage) playClass(mainEl, "view-enter"); // 重触发跨页入场（淡入 + 上移 8px，320ms）
   lastAnimKey = animKey;
   if (view === "create") renderCreate();
   else if (view === "inst" && arg) { const sl = arg.indexOf("/"); sl >= 0 ? renderDetail(arg.slice(0, sl), arg.slice(sl + 1)) : renderDetail(arg); }
@@ -705,7 +820,7 @@ function folderItems(info) {
    注意后端语义：不删文件时只是从内存列表移除，instance.json 还在，下次启动多根扫描会重新发现它——文案如实说明。 */
 async function deleteInstance(name) {
   const r = await confirmModal({
-    title: `删除服务器「${name}」？`, danger: true, okText: "删除服务器", cancelText: "保留",
+    title: `删除服务器「${name}」？`, danger: true, okText: "删除服务器", cancelText: "保留", icon: "trash",
     body: "已有的世界备份不受影响，仍保存在备份目录中。",
     extra: `<label class="switch" style="margin-bottom:4px"><input type="checkbox" data-k="files" checked><span class="sw"></span>
         <span class="sw-label">同时删除服务器文件夹（含世界存档，无法恢复）</span></label>
@@ -719,17 +834,56 @@ async function deleteInstance(name) {
   } catch (e) { toast(e.message, true); return false; }
 }
 
-/* 运行状态：点 + 文字（不能只靠颜色） */
+/* 运行状态：像素状态灯 + 文字（不能只靠颜色） */
 const ST_TEXT = { running: "运行中", starting: "启动中…", stopping: "正在停止…", stopped: "已停止" };
-const stPill = st => `<span class="st-pill ${st}"><span class="dot ${st}"></span>${ST_TEXT[st] || esc(st)}</span>`;
+const stPill = (st, meta = "") => `<span class="st-pill ${st}"><span class="dot ${st}"></span><span class="st-label">${ST_TEXT[st] || esc(st)}</span>${meta}</span>`;
+/* 状态切换的动效：胶囊从旧颜色过渡到新颜色（220ms）、文字上下换场、进入「运行中」时状态灯放一圈像素波纹。
+   pill 须是刚按新状态渲染好的胶囊；from 为旧状态 */
+function animatePill(pill, from, to) {
+  if (!pill || !from || from === to || reducedMotion()) return;
+  const dot = pill.querySelector(".dot"), label = pill.querySelector(".st-label");
+  pill.classList.replace(to, from); dot.classList.replace(to, from); // 先退回旧颜色，回流后再切，颜色过渡才看得见
+  void pill.offsetWidth;
+  pill.classList.replace(from, to); dot.classList.replace(from, to);
+  const old = document.createElement("span");
+  old.className = "st-label out";
+  old.textContent = ST_TEXT[from] || from;
+  pill.insertBefore(old, label);
+  old.addEventListener("animationend", () => old.remove(), { once: true });
+  setTimeout(() => old.remove(), 400);
+  label.classList.add("in");
+  if (to === "running") playClass(dot, "ping");
+}
+
+/* 经验条：n 格，前 on 格点亮；head = 最前面那一格闪烁（进行中）。--n 供「忙碌」态逐格错峰 */
+const xpBar = (n, on, cls = "", head = false) =>
+  `<div class="xp${cls ? " " + cls : ""}" aria-hidden="true">${Array.from({ length: n }, (_, i) =>
+    `<i class="${i < on ? "on" : ""}${head && i === on - 1 ? " head" : ""}" style="--n:${i}"></i>`).join("")}</div>`;
+
+/* 实例卡的状态行：运行中 = 在线人数经验条（每格 1 人，人数上限大于 20 时每格多人）+ 运行时长；
+   启动中 = 按已用时间推进的分段条（每 3 秒一格），最前一格闪烁；正在停止 = 亮格扫过的忙碌条；已停止不显示 */
+function statRow(i) {
+  if (i.status === "running" && i.kind !== "proxy") {
+    const max = Math.max(1, i.maxPlayers || 20), per = max <= 20 ? 1 : Math.ceil(max / 20), n = Math.ceil(max / per);
+    const on = Math.min(n, Math.ceil((i.onlineCount || 0) / per));
+    return `<div class="xp-row" title="在线人数（每格 ${per} 人）">${icon("player")}<b>${i.onlineCount}/${i.maxPlayers}</b>${xpBar(n, on, "success")}<span class="num">${icon("clock")} ${fmtDur(i.uptimeSec)}</span></div>`;
+  }
+  if (i.status === "running") return `<div class="xp-row">${icon("clock")}<span class="num">已运行 ${fmtDur(i.uptimeSec)}</span></div>`;
+  if (i.status === "starting") {
+    const on = Math.min(19, 1 + Math.floor((i.uptimeSec || 0) / 3));
+    return `<div class="xp-row" title="正在启动">${icon("clock")}<b>启动中</b>${xpBar(20, on, "warn run", true)}<span class="num">${fmtDur(i.uptimeSec)}</span></div>`;
+  }
+  if (i.status === "stopping") return `<div class="xp-row" title="正在保存世界并停止">${icon("clock")}<b>保存世界</b>${xpBar(20, 0, "warn busy")}</div>`;
+  return "";
+}
 
 /* 列表骨架占位：首屏加载态（reduced-motion 下由全局关停微光，静态显示凹陷块）。 */
-const skeletonCards = (n = 6) => `<div class="cards">` + Array.from({ length: n }, () => `
+const skeletonCards = (n = 6) => `<div class="cards sk-cards">` + Array.from({ length: n }, () => `
   <div class="sk-card" aria-hidden="true">
-    <div class="sk sk-line" style="width:52%"></div>
+    <div class="sk-head"><span class="sk av"></span><div><span class="sk" style="width:55%"></span><span class="sk" style="width:30%;height:10px"></span></div></div>
     <div class="sk-badges"><span class="sk sk-chip"></span><span class="sk sk-chip" style="width:76px"></span></div>
-    <div class="sk sk-line" style="width:64%;height:11px"></div>
-    <div class="sk-actions"><span class="sk sk-btn"></span><span class="sk sk-btn" style="width:96px"></span></div>
+    <div class="sk" style="width:64%;height:10px"></div>
+    <div class="sk-actions"><span class="sk sk-btn"></span><span class="sk sk-btn" style="width:52px"></span></div>
   </div>`).join("") + `</div>`;
 
 /* 紧凑单列表（版本/构建）行骨架 */
@@ -741,48 +895,65 @@ async function renderInstances() {
   // 标题与搜索/排序工具栏包进 #inst-chrome：没有实例时整块隐藏（空态自身即整页主体），
   // 常驻 DOM 只切换 hidden，轮询重绘不重建输入框、不丢焦点
   Main().innerHTML = `<div id="inst-chrome" hidden>` +
-    pageHead("服务器", "", `<a class="btn primary" href="#/create">${icon("plus")} 新建服务器</a>`) + `
+    pageHead("服务器", "", `<a class="btn primary" href="#/create">${icon("plus")} 新建服务器</a>`, "", "", "inst-summary") + `
     <div class="toolbar">
-      <div class="search-field">${icon("search", "sf-ico")}<input type="text" id="inst-q" placeholder="搜索服务器名称" aria-label="搜索服务器名称"></div>
-      <select id="inst-sort" style="width:170px" aria-label="排序方式"><option value="recent">排序：最近创建</option><option value="running">排序：运行中优先</option><option value="name">排序：名称</option></select>
-      <span class="grow"></span><span class="sub" id="inst-summary" style="margin:0"></span>
+      <div class="search-field">${icon("search", "sf-ico")}<input type="text" id="inst-q" placeholder="搜索服务器名称" aria-label="搜索服务器名称" style="width:280px"></div>
+      <select id="inst-sort" style="width:180px" aria-label="排序方式"><option value="recent">排序：最近创建</option><option value="running">排序：运行中优先</option><option value="name">排序：名称</option></select>
     </div></div>
-    <div id="inst-cards">${skeletonCards()}</div>`;
-  let lastSig = "", curList = [];
-  const cardHTML = i => {
+    <div id="inst-cards">${skeletonCards(4)}</div>`;
+  let lastSig = "", curList = [], prevByName = null; // prevByName：上次渲染时各实例的数据（判定状态切换、播切换动效）
+  const cardHTML = (i, n, enter, prev) => {
     const proxy = i.kind === "proxy";
     const gb = (i.xmxMb / 1024).toFixed(1) + "G";
-    const cfg = proxy ? `Java ${i.javaMajor} · ${gb}` : `Java ${i.javaMajor} · :${i.port} · ${gb}`;
     const href = `#/inst/${encodeURIComponent(i.name)}`;
-    // 删除、打开文件夹收进「···」：危险操作不与「启动」同排同尺寸，多一步才够得着
+    const changed = prev && prev.status !== i.status;
+    const stat = statRow(i), prevStat = changed ? statRow(prev) : "";
+    // 状态行展开 / 收起（grid 0fr ↔ 1fr）：状态切换时先按旧样子渲染（无 → 有：先收起；有 → 无：先展开旧内容），渲染后再切
+    const collapse = stat
+      ? `<div class="collapse${changed && !prevStat ? " closed" : ""}" data-stat><div>${stat}</div></div>`
+      : `<div class="collapse${changed && prevStat ? "" : " closed"}" data-stat${changed && prevStat ? " data-close" : ""}><div>${changed ? prevStat : ""}</div></div>`;
+    // 删除、打开文件夹收进「···」：危险操作不与「启动」同排同尺寸，多一步才够得着；「管理」「···」是第三级按钮
     return `
-    <div class="card st-${i.status}" data-name="${esc(i.name)}">
-      <div class="inst-head">${avatarOf(i.core)}<a class="inst-name grow" href="${href}">${esc(i.name)}</a>${stPill(i.status)}</div>
-      <div class="badges">
-        <span class="badge core">${coreName(i.core)}</span>
-        <span class="badge">${proxy ? "v" : "MC "}${esc(i.mc)}</span>
-        ${proxy ? `<span class="badge">代理端</span>` : ""}
-      </div>
-      <div class="inst-config">${cfg}</div>
-      ${i.status === "running" ? `<div class="inst-stat">${icon("clock")} ${fmtDur(i.uptimeSec)}${!proxy ? ` · ${icon("player")} ${i.onlineCount}/${i.maxPlayers}` : ""}</div>` : ""}
+    <div class="card st-${i.status}${enter ? " item-enter" : ""}" style="--i:${n}" data-name="${esc(i.name)}">
+      <div class="inst-head">${avatarOf(i.core)}<div class="inst-title"><a class="inst-name" href="${href}">${esc(i.name)}</a><div class="inst-sub">${proxy ? "群组代理" : "游戏服务器"}</div></div>${stPill(i.status)}</div>
+      <div class="badges">${coreBadge(i.core)}<span class="badge">${proxy ? "v" : "MC "}${esc(i.mc)}</span>${proxy ? `<span class="badge">代理端</span>` : ""}</div>
+      <div class="kv inst-config">${proxy ? "" : `<span>端口<b>:${i.port}</b></span>`}<span>内存<b>${gb}</b></span><span>Java<b>${i.javaMajor}</b></span></div>
+      ${collapse}
       <div class="inst-meta" data-motd="${esc(i.motd || "")}"></div>
       <div class="inst-actions">
         ${i.status === "stopped" ? `<button class="btn sm primary" data-act="start">${icon("play")} 启动</button>`
           : `<button class="btn sm" data-act="stop" ${i.status === "stopping" ? "disabled" : ""}>${icon("stop")} 停止</button>`}
-        <a class="btn sm" href="${href}">管理</a>
+        <a class="btn sm ghost" href="${href}">管理</a>
         <span class="grow"></span>
-        <button class="btn sm icon-only" data-act="more" title="更多操作" aria-label="更多操作" aria-haspopup="menu">${icon("more")}</button>
+        <button class="btn sm ghost icon-only" data-act="more" title="更多操作" aria-label="更多操作" aria-haspopup="menu">${icon("more")}</button>
       </div>
     </div>`;
   };
-  const applyView = () => {
+  // 状态切换的卡片：胶囊变色 + 文字换场 + 波纹、在线人数格逐个点亮、操作按钮换场、状态行展开 / 收起
+  const animateChanges = prev => {
+    if (!prev || reducedMotion()) return;
+    $("#inst-cards").querySelectorAll(".card").forEach(card => {
+      const i = curList.find(x => x.name === card.dataset.name), p = prev.get(card.dataset.name);
+      if (!i || !p || p.status === i.status) return;
+      animatePill(card.querySelector(".st-pill"), p.status, i.status);
+      if (i.status === "running") card.querySelectorAll(".xp i.on").forEach((c, n) => { c.style.animationDelay = (120 + n * 40) + "ms"; c.classList.add("lit"); });
+      playClass(card.querySelector('[data-act="start"], [data-act="stop"]'), "swap-in");
+      const box = card.querySelector("[data-stat]");
+      void box.offsetHeight;
+      if (box.hasAttribute("data-close")) box.classList.add("closed"); else box.classList.remove("closed");
+    });
+  };
+  const applyView = (enter = false) => {
     const q = ($("#inst-q").value || "").trim().toLowerCase();
     const sort = $("#inst-sort").value;
     let list = curList.filter(i => !q || i.name.toLowerCase().includes(q));
     if (sort === "name") list = list.slice().sort((a, b) => a.name.localeCompare(b.name));
     else if (sort === "running") list = list.slice().sort((a, b) => (b.status === "running") - (a.status === "running"));
-    if (!list.length) { $("#inst-cards").innerHTML = `<div class="empty" style="padding:40px 0">没有匹配「${esc(q)}」的实例</div>`; return; }
-    $("#inst-cards").innerHTML = `<div class="cards">` + list.map(cardHTML).join("") + `</div>`;
+    const prev = prevByName;
+    prevByName = new Map(curList.map(i => [i.name, i]));
+    if (!list.length) { $("#inst-cards").innerHTML = `<div class="empty" style="padding:40px 0">没有匹配「${esc(q)}」的服务器</div>`; return; }
+    $("#inst-cards").innerHTML = `<div class="cards">` + list.map((i, n) => cardHTML(i, n, enter, prev && prev.get(i.name))).join("") + `</div>`;
+    animateChanges(prev);
     $("#inst-cards").querySelectorAll(".inst-meta").forEach(el => { if (el.dataset.motd) renderMotd(el, el.dataset.motd); });
     $("#inst-cards").querySelectorAll("[data-act]").forEach(b => b.onclick = async ev => {
       ev.stopPropagation();
@@ -809,6 +980,7 @@ async function renderInstances() {
       location.hash = `#/inst/${encodeURIComponent(c.dataset.name)}`;
     });
   };
+  let first = true;
   const draw = async () => {
     let list;
     try { list = await api("/api/instances"); } catch (e) { if (!stale(gen)) $("#inst-cards").innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
@@ -816,24 +988,32 @@ async function renderInstances() {
     curList = list;
     const running = list.filter(i => i.status === "running").length;
     const online = list.reduce((s, i) => s + (i.onlineCount || 0), 0);
-    $("#inst-summary").textContent = list.length ? `共 ${list.length} 台 · 运行中 ${running}${online ? ` · 在线 ${online} 人` : ""}` : "";
+    $("#inst-summary").innerHTML = list.length ? `共 ${list.length} 台${SEP}运行中 ${running}${online ? `${SEP}在线 ${online} 人` : ""}` : "";
     if (!list.length) {
-      $("#inst-chrome").hidden = true; // 没有实例时不显示「我的服务器」标题与搜索/排序
+      $("#inst-chrome").hidden = true; // 没有实例时不显示「服务器」标题与搜索/排序
       $("#inst-cards").classList.add("page-fill");
       // 一个主行动 + 一个安静的次要入口（两个同权重按钮等于没有主按钮）
-      $("#inst-cards").innerHTML = `<div class="empty"><div class="empty-ico">${icon("server")}</div>
+      $("#inst-cards").innerHTML = `<div class="empty${first ? " sec-enter" : ""}">${MDPixel.emptySVG(240)}
         <div class="empty-title">还没有服务器</div>
         一键创建一台推荐配置的服务器，Java 与服务端会自动下载。<br>
-        <button class="btn primary" id="quick-start" style="margin-top:14px">${icon("bolt")} 一键开服（Paper 最新正式版）</button><br>
+        <button class="btn primary" id="quick-start">${icon("bolt")} 一键开服（Paper 最新正式版）</button><br>
         <a class="quiet-link" href="#/create">或使用向导，自选核心与版本 →</a></div>`;
-      $("#quick-start").onclick = quickStart; lastSig = "empty"; return;
+      $("#quick-start").onclick = quickStart; lastSig = "empty"; first = false; return;
     }
     $("#inst-chrome").hidden = false;
     $("#inst-cards").classList.remove("page-fill");
-    const sig = list.map(i => `${i.name}:${i.status}:${i.status === "running" ? Math.floor(i.uptimeSec / 60) + "/" + i.onlineCount : ""}`).join("|") + "#" + $("#inst-q").value + "#" + $("#inst-sort").value;
-    if (sig === lastSig) return; // 数据无实质变化则跳过重绘，消除周期性闪烁与焦点丢失
+    // 签名：数据无实质变化则跳过重绘（消除周期性闪烁与焦点丢失，也不重播动效）；启动中按秒推进分段条，所以带上时长
+    const sig = list.map(i => `${i.name}:${i.status}:${i.status === "running" ? Math.floor(i.uptimeSec / 60) + "/" + i.onlineCount : i.status === "starting" ? Math.floor(i.uptimeSec / 3) : ""}`).join("|") + "#" + $("#inst-q").value + "#" + $("#inst-sort").value;
+    if (sig === lastSig) return;
     lastSig = sig;
-    applyView();
+    // 首屏：骨架淡出（160ms）后卡片逐项入场（错峰 28ms）；之后的重绘不再播入场
+    const sk = first && !reducedMotion() ? $("#inst-cards .sk-cards") : null;
+    const enter = first;
+    first = false;
+    if (sk) {
+      sk.classList.add("fade-out");
+      setTimeout(() => { if (!stale(gen) && sk.isConnected) applyView(enter); }, MOTION.d2 - 40);
+    } else applyView(enter);
   };
   $("#inst-q").oninput = () => { lastSig = ""; draw(); };
   $("#inst-sort").onchange = () => { lastSig = ""; draw(); };
@@ -846,7 +1026,7 @@ const wiz = { step: 0, core: null, mc: null, build: null, snapshots: false, root
 
 async function renderCreate() {
   wiz.step = 0; wiz.core = null; wiz.mc = null; wiz.build = null; wiz.root = "";
-  Main().innerHTML = pageHead("新建服务器", "选择一种方式开始") + `
+  Main().innerHTML = pageHead("新建服务器", "选择一种方式开始", "", "", `两种方式${SEP}Java 与服务端自动下载`) + `
     <div class="recipe-grid">
       <div class="core-card" id="mode-new" role="button" tabindex="0"><span class="recipe-ico">${icon("plusBox")}</span><div><div class="cn">从零创建</div><div class="cd">选择核心与版本，自动下载 Java 与服务端</div></div></div>
       <div class="core-card" id="mode-import" role="button" tabindex="0"><span class="recipe-ico">${icon("package")}</span><div><div class="cn">导入整合包</div><div class="cd">支持 Modrinth / CurseForge 整合包，自动识别版本</div></div></div>
@@ -927,16 +1107,17 @@ async function drawImport() {
 
 function wizardShell(inner) {
   const names = ["选择核心", "选择版本", "选择构建", "基本设置"];
-  // 步骤条：圆圈序号 + 连线；已完成打勾且可点回，当前步实底，未到达描边
-  Main().innerHTML = pageHead("新建服务器", "选好核心与版本后，Java 与服务端会自动下载并完成配置。") + `
+  // 步骤条：方块序号 + 像素虚线；已完成打勾且可点回，当前步实底，未到达描边；眉标写明第几步
+  Main().innerHTML = pageHead("新建服务器", "选好核心与版本后，Java 与服务端会自动下载并完成配置。", "", "",
+    `第 ${wiz.step + 1} 步<span class="sep">/</span>共 ${names.length} 步`) + `
     <div class="steps">${names.map((n, i) => {
       const skipped = i === 2 && wiz.core === "vanilla"; // 原版没有「选择构建」，该步不可点回
       const cls = i === wiz.step ? "cur" : i < wiz.step && !skipped ? "done" : "";
       const tip = cls === "done" ? `title="回到「${n}」"` : skipped ? `title="原版无需选择构建" tabindex="-1"` : `tabindex="-1"`;
-      return (i ? `<span class="step-line"></span>` : "") +
+      return (i ? `<span class="step-line${i <= wiz.step ? " done" : ""}"></span>` : "") +
         `<button type="button" class="step-pill ${cls}" data-step="${i}" ${tip}><span class="sn">${cls === "done" ? icon("check") : i + 1}</span>${n}</button>`;
     }).join("")}</div>
-    <div id="wiz-body">${inner}</div>`;
+    <div id="wiz-body" class="sec-enter">${inner}</div>`;
   document.querySelectorAll(".step-pill.done").forEach(p => p.onclick = () => { wiz.step = +p.dataset.step; drawWizard(); });
 }
 
@@ -977,6 +1158,7 @@ async function drawWizard() {
         ${avatarOf(c.id)}
         <div><div class="cn">${esc(c.name)} <span class="badge">${esc(c.tag)}</span>${c.id === REC ? `<span class="rec-badge">新手推荐</span>` : ""}</div>
         <div class="cd">${esc(c.desc)}</div></div>
+        <span class="check" aria-hidden="true">${icon("check")}</span>
       </div>`;
     const byId = Object.fromEntries(cores.map(c => [c.id, c]));
     const used = new Set();
@@ -1189,37 +1371,83 @@ async function drawWizard() {
 /* ---------- 视图：创建任务进度 ---------- */
 async function renderTaskPage(taskId) {
   const gen = viewGen;
-  Main().innerHTML = pageHead("正在部署服务器", "自动下载 Java 与服务端核心，全程无需手动配置") + `
-    <div id="task-box">加载中…</div>`;
-  const icons = { pending: icon("pending"), running: icon("spinner"), done: icon("check"), error: icon("x") };
+  Main().innerHTML = pageHead("正在部署服务器", "自动下载 Java 与服务端核心，全程无需手动配置", "", "", "", "task-eyebrow") + `
+    <div id="task-box"><div class="sub">加载中…</div></div>`;
+  // 骨架只建一次，之后每轮轮询只改变化的部分：新完成的步骤对勾弹出，经验条只点亮新增的格子（逐格错峰），不整块重绘重播
+  const CELLS = 30;
   let ended = false; // 已结束就不再轮询 / 重复提示（首轮即结束时旧逻辑仍会挂上轮询，成功提示弹两次）
+  let built = false, label = null, lit = 0, stepState = [];
   const stopPoll = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } };
   const draw = async () => {
     let t;
     try { t = await api(`/api/tasks/${taskId}`); }
     catch (e) { if (stale(gen) || ended) return; ended = true; stopPoll(); $("#task-box").innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
     if (stale(gen) || ended) return;
-    const pct = t.total > 0 ? Math.min(100, t.done / t.total * 100) : 0;
-    $("#task-box").innerHTML = `
-      <div class="task-steps">${(t.steps || []).map(s =>
-        `<div class="task-step ${s.status}"><span class="ts-ico">${icons[s.status] || ""}</span>${esc(s.name)}</div>`).join("")}</div>
-      ${t.label ? `<div class="progress-wrap"><div class="progress-bar"><div style="width:${pct}%"></div></div>
-        <div class="progress-text">${esc(t.label)} · ${fmtBytes(t.done)}${t.total > 0 ? " / " + fmtBytes(t.total) : ""}</div></div>` : ""}
-      ${t.error ? `<div class="err-box"><b>创建失败：</b>${esc(t.error)}<br><br>可返回重试（已下载的文件有缓存，重试很快）。</div>` : ""}
-      ${(t.warnings || []).map(w => `<div class="warn-card">
+    if (!built) {
+      $("#task-box").innerHTML = `
+        <div class="task-steps" id="t-steps"></div>
+        <div class="progress-wrap" id="t-prog" hidden>
+          <div class="progress-head"><b id="t-label"></b><span class="grow"></span><span class="xp-level num" id="t-pct"></span></div>
+          ${xpBar(CELLS, 0, "lg")}
+          <div class="progress-text" id="t-sub"></div>
+        </div>
+        <div id="t-msgs"></div>
+        <div class="task-log" id="task-log"></div>
+        <div class="save-bar" id="t-foot"></div>`;
+      built = true;
+    }
+    // 步骤：图标随状态换，新完成的对勾弹出（首轮直接画）
+    const steps = t.steps || [];
+    const stepsEl = $("#t-steps");
+    if (stepsEl.children.length !== steps.length) {
+      stepsEl.innerHTML = steps.map(() => `<div class="task-step"><span class="ts-ico"></span><span></span></div>`).join("");
+      stepState = [];
+    }
+    steps.forEach((st, k) => {
+      const row = stepsEl.children[k];
+      row.lastElementChild.textContent = st.name;
+      if (stepState[k] === st.status) return;
+      const changed = stepState[k] !== undefined;
+      stepState[k] = st.status;
+      row.className = "task-step " + st.status;
+      row.firstElementChild.innerHTML = st.status === "done" ? `<span class="${changed ? "pop" : ""}">${icon("check")}</span>`
+        : st.status === "running" ? icon("spinner") : st.status === "error" ? icon("x") : `<i class="ts-px"></i>`;
+    });
+    const doneN = steps.filter(s => s.status === "done").length;
+    $("#task-eyebrow").innerHTML = steps.length
+      ? (t.ended && !t.error ? `已完成${SEP}共 ${steps.length} 步` : `第 ${Math.min(steps.length, doneN + 1)} 步<span class="sep">/</span>共 ${steps.length} 步`) : "";
+    // 经验条式进度：30 格，一格 = 当前下载项的 1/30；换了下载项就清空重来；部署完成时填满并整条闪一下
+    const success = t.ended && !t.error;
+    const prog = $("#t-prog"), cells = prog.querySelectorAll(".xp i");
+    const cur = success ? "部署完成" : t.label;
+    prog.hidden = !cur;
+    if (cur) {
+      if (cur !== label) { label = cur; lit = 0; cells.forEach(c => { c.className = ""; c.style.animationDelay = ""; }); }
+      const pct = success ? 100 : t.total > 0 ? Math.min(100, t.done / t.total * 100) : 0;
+      const n = Math.floor(pct / 100 * CELLS + 1e-6);
+      for (let k = lit; k < n; k++) {
+        cells[k].className = reducedMotion() ? "on" : "on lit";
+        cells[k].style.animationDelay = Math.min(k - lit, 12) * 24 + "ms";
+      }
+      lit = Math.max(lit, n);
+      $("#t-label").textContent = cur;
+      $("#t-pct").textContent = Math.round(pct) + "%";
+      $("#t-sub").textContent = success ? "Java、服务端与配置均已就绪" : `${fmtBytes(t.done) || "0 B"}${t.total > 0 ? " / " + fmtBytes(t.total) : ""}`;
+      if (success) playClass(prog.querySelector(".xp"), "flash");
+    }
+    $("#t-msgs").innerHTML = (t.error ? `<div class="err-box"><b>创建失败：</b>${esc(t.error)}<br><br>可返回重试（已下载的文件有缓存，重试很快）。</div>` : "") +
+      (t.warnings || []).map(w => `<div class="warn-card">
         <div class="wc-title">${icon("warn")} ${esc(w.title)}</div>
         ${w.note ? `<div class="wc-note">${esc(w.note)}</div>` : ""}
         ${(w.items || []).length ? `<ul class="wc-list">${w.items.map(it =>
           `<li>${/^https?:\/\//i.test(it.url || "") ? `<a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.name)}</a>` : esc(it.name)}</li>`).join("")}</ul>` : ""}
-      </div>`).join("")}
-      <div class="task-log" id="task-log">${(t.log || []).map(esc).join("\n")}</div>
-      <div class="save-bar">
-        ${t.ended && !t.error ? `<a class="btn primary" href="#/inst/${encodeURIComponent(t.result)}">${icon("check")} 完成，进入控制台</a>` : ""}
-        ${t.ended && t.error ? `<a class="btn" href="#/create">${icon("arrowLeft")} 返回重试</a>` : ""}
-        ${!t.ended ? `<span class="warn-text">部署中，请勿关闭程序…</span>` : ""}
-      </div>`;
-    const lg = $("#task-log");
-    lg.scrollTop = lg.scrollHeight;
+      </div>`).join("");
+    const lg = $("#task-log"), text = (t.log || []).join("\n");
+    if (lg.textContent !== text) { lg.textContent = text; lg.scrollTop = lg.scrollHeight; }
+    $("#t-foot").innerHTML = `
+      ${success ? `<a class="btn primary" href="#/inst/${encodeURIComponent(t.result)}">${icon("check")} 完成，进入控制台</a>` : ""}
+      ${t.ended && t.error ? `<a class="btn" href="#/create">${icon("arrowLeft")} 返回重试</a>` : ""}
+      ${!t.ended ? `<span class="warn-text">${icon("warn")} 部署中，请勿关闭程序…</span>` : ""}`;
     if (t.ended) { ended = true; stopPoll(); if (!t.error) toast("服务器创建成功"); }
   };
   // 首次 draw 若因任何原因抛错，也必须启动轮询——否则后续状态永远无法刷新，页面会永久停在「加载中…」。
@@ -1228,11 +1456,11 @@ async function renderTaskPage(taskId) {
 }
 
 /* ---------- 视图：实例详情 ---------- */
-/* 详情页头的状态胶囊：点 + 文字，运行中再带时长与在线人数 */
+/* 详情页头的状态胶囊：像素状态灯 + 文字，运行中再带时长与在线人数 */
 function headStatus(i) {
   const meta = i.status === "running"
     ? `<span class="st-meta">· ${fmtDur(i.uptimeSec)}${i.kind !== "proxy" ? ` · ${i.onlineCount}/${i.maxPlayers} 人` : ""}</span>` : "";
-  return `<span class="st-pill ${i.status}"><span class="dot ${i.status}"></span>${ST_TEXT[i.status] || esc(i.status)}${meta}</span>`;
+  return stPill(i.status, meta);
 }
 
 async function renderDetail(name, tab = "console") {
@@ -1242,14 +1470,12 @@ async function renderDetail(name, tab = "console") {
   if (stale(gen)) return; // 等待期间已切走：不再建 SSE / 定时器
   const info = list.find(i => i.name === name);
   if (!info) { Main().innerHTML = `<div class="err-box">实例不存在</div>`; return; }
+  // 页头：大号像素头像 + 标题，标题下一行是状态胶囊与徽标；操作按钮靠右
   Main().innerHTML = `<nav class="crumbs" aria-label="位置"><a href="#/instances">服务器</a>${icon("chevronRight")}<span>${esc(name)}</span></nav>
     <div class="detail-head">
       ${avatarOf(info.core, "lg")}
-      <h1>${esc(name)}</h1>
-      <span id="d-status">${headStatus(info)}</span>
-      <span class="badge core">${coreName(info.core)}</span>
-      <span class="badge">${info.kind === "proxy" ? "v" : "MC "}${esc(info.mc)}</span>
-      <span class="badge">Java ${info.javaMajor}</span>
+      <div class="dh-text"><h1>${esc(name)}</h1>
+        <div class="dh-line"><span id="d-status">${headStatus(info)}</span>${coreBadge(info.core)}<span class="badge">${info.kind === "proxy" ? "v" : "MC "}${esc(info.mc)}</span><span class="badge">Java ${info.javaMajor}</span></div></div>
       <span class="grow"></span>
       <button class="btn primary" id="d-start" ${info.status !== "stopped" ? "disabled" : ""}>${icon("play")} 启动</button>
       <button class="btn" id="d-stop" ${info.status === "stopped" || info.status === "stopping" ? "disabled" : ""}>${icon("stop")} 停止</button>
@@ -1267,6 +1493,7 @@ async function renderDetail(name, tab = "console") {
       return tabs.map(([id, label]) => `<a class="tab ${tab === id ? "cur" : ""}" data-t="${id}" href="${base}${id}"${tab === id ? ` aria-current="page"` : ""}>${label}</a>`).join("");
     })()}</div>
     <div id="tab-body" class="sec-enter"></div>`;
+  if (samePage) slideKeys(keysBefore, ["tab"]); // 同一实例换标签：键帽从旧标签滑到新标签
   $("#d-dir").onclick = () => dropMenu($("#d-dir"), folderItems(info));
   $("#d-start").onclick = async () => {
     try { $("#d-start").disabled = true; await api(`/api/instances/${encodeURIComponent(name)}/start`, { method: "POST" }); toast("正在启动，首次生成世界可能需要一两分钟"); refreshHead(); }
@@ -1282,8 +1509,10 @@ async function renderDetail(name, tab = "console") {
       if (stale(gen)) return;
       const cur = l.find(i => i.name === name);
       if (!cur) return;
+      const was = info.status;
       info.status = cur.status; // 各 tab 读到的状态随之更新
       $("#d-status").innerHTML = headStatus(cur);
+      animatePill($("#d-status .st-pill"), was, cur.status); // 状态变了：胶囊变色、文字换场，进入运行中放一圈波纹
       $("#d-start").disabled = cur.status !== "stopped";
       $("#d-stop").disabled = cur.status === "stopped" || cur.status === "stopping";
     } catch {}
@@ -1301,16 +1530,16 @@ async function renderDetail(name, tab = "console") {
         <select id="con-enc" style="width:110px">
           ${["auto", "utf-8", "gbk"].map(e => `<option value="${e}" ${info.consoleEncoding === e ? "selected" : ""}>${e}</option>`).join("")}
         </select>
-        <button class="btn sm" id="con-fs-dn" title="缩小字号">A-</button>
-        <button class="btn sm" id="con-fs-up" title="放大字号">A+</button>
-        <button class="btn sm" id="con-copy" title="复制全部" aria-label="复制全部">${icon("copy")}</button>
-        <button class="btn sm" id="con-export" title="导出为 txt" aria-label="导出为 txt">${icon("download")}</button>
+        <button class="btn sm ghost" id="con-fs-dn" title="缩小字号">A-</button>
+        <button class="btn sm ghost" id="con-fs-up" title="放大字号">A+</button>
+        <button class="btn sm ghost icon-only" id="con-copy" title="复制全部" aria-label="复制全部">${icon("copy")}</button>
+        <button class="btn sm ghost icon-only" id="con-export" title="导出为 txt" aria-label="导出为 txt">${icon("download")}</button>
       </div>
       <div class="console" id="console"></div>
       <div class="console-input">
         <div class="cmd-suggest" id="cmd-suggest"></div>
         <input type="text" id="cmd-in" autocomplete="off" placeholder="输入服务器命令（回车发送，Tab 补全，↑↓ 翻历史），如 op 玩家名 / say 大家好">
-        <button class="btn" id="cmd-send">发送</button>
+        <button class="btn primary" id="cmd-send">发送</button>
       </div>`;
     const con = $("#console");
     const filterEl = $("#con-filter");
@@ -1506,12 +1735,12 @@ async function renderDetail(name, tab = "console") {
           <button class="btn sm" id="bk-keep-save">保存</button>
         </div>
         <div class="hint" style="margin-bottom:14px">运行中自动热备（save-off → 压缩 → save-on）；备份数超过保留份数时自动滚动删除最旧的；删除实例不影响已有备份。保留份数为全局设置，对所有实例生效。</div>
-        <table class="raw">${(list || []).map(b => `
-          <tr><td>${esc(b.file)}</td><td>${b.sizeMb.toFixed(1)} MB · ${esc(b.time)}</td>
-          <td style="text-align:right;white-space:nowrap">
-            <button class="btn sm" data-restore="${esc(b.file)}">${icon("restore")} 还原</button>
-            <button class="btn sm danger" data-del="${esc(b.file)}">删除</button></td></tr>`).join("") ||
-          `<tr><td class="sub">暂无备份</td></tr>`}</table>`;
+        <div class="group has-ico bk-list">${(list || []).map(b => `
+          <div class="row-item"><div class="ri-head"><span class="ri-ico">${icon("package")}</span>
+            <div class="ri-main"><div class="ri-title">${esc(b.file)}</div><div class="ri-key">${b.sizeMb.toFixed(1)} MB · ${esc(b.time)}</div></div>
+            <div class="ri-right"><button class="btn sm" data-restore="${esc(b.file)}">${icon("restore")} 还原</button>
+              <button class="btn sm danger" data-del="${esc(b.file)}">删除</button></div></div></div>`).join("") ||
+          `<div class="row-item"><div class="ri-head"><div class="ri-main"><div class="ri-sub">暂无备份</div></div></div></div>`}</div>`;
       $("#bk-create").onclick = async () => {
         $("#bk-create").disabled = true;
         try {
@@ -1528,7 +1757,7 @@ async function renderDetail(name, tab = "console") {
       }, gen);
       body.querySelectorAll("[data-restore]").forEach(b => b.onclick = async () => {
         const r = await confirmModal({
-          title: "还原备份？", danger: true, okText: "还原",
+          title: "还原备份？", danger: true, okText: "还原", icon: "restore",
           body: `将把世界回滚到 <b>${esc(b.dataset.restore)}</b>。<br>需要服务器处于停止状态；当前世界会先自动备份一份。`,
         });
         if (!r) return;
@@ -1537,7 +1766,7 @@ async function renderDetail(name, tab = "console") {
         draw();
       });
       body.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
-        const r = await confirmModal({ title: "删除备份？", danger: true, okText: "删除", body: esc(b.dataset.del) });
+        const r = await confirmModal({ title: "删除备份？", danger: true, okText: "删除", icon: "trash", body: esc(b.dataset.del) });
         if (!r) return;
         try { await api(`/api/instances/${encodeURIComponent(name)}/backups?file=${encodeURIComponent(b.dataset.del)}`, { method: "DELETE" }); }
         catch (e) { toast(e.message, true); }
@@ -1612,7 +1841,7 @@ async function renderDetail(name, tab = "console") {
         const r = await api(`/api/instances/${encodeURIComponent(name)}/resources/search?q=${encodeURIComponent($("#res-q").value.trim())}`);
         $("#res-list").innerHTML = (r.hits || []).map(h => `
           <div class="java-row" style="max-width:880px">
-            ${h.icon_url ? `<img src="${esc(h.icon_url)}" width="34" height="34" style="border-radius:7px;flex:none" onerror="this.remove()">` : `<span class="res-noicon">${icon("package")}</span>`}
+            ${h.icon_url ? `<img class="res-icon" src="${esc(h.icon_url)}" width="34" height="34" alt="" onerror="this.remove()">` : `<span class="res-noicon">${icon("package")}</span>`}
             <div style="flex:1;min-width:0"><b>${esc(h.title)}</b>
               <div class="jp" style="white-space:normal;max-height:32px;overflow:hidden">${esc(h.description)}</div></div>
             <span class="jv" style="color:var(--muted);display:inline-flex;align-items:center;gap:4px">${h.downloads >= 1e6 ? (h.downloads / 1e6).toFixed(1) + "M" : Math.round(h.downloads / 1e3) + "k"}${icon("download")}</span>
@@ -1668,9 +1897,9 @@ async function renderDetail(name, tab = "console") {
       const notice = (p.key === "white-list" && verGte(mc, "26.3")) ? `<div class="pd" style="color:var(--warning-text)">注意：此版本起白名单默认开启</div>` : "";
       const grHint = (p.mode === "gamerule" && !running) ? "（服务器启动后可切换）" : "";
       if (p.key === "motd") return `<div class="prop-item wide" data-search="${esc(p.label)} ${p.key}"><div style="flex:1">
-        <div class="pl">${esc(p.label)} ${tags}</div><div class="pd">${esc(p.desc || "")}</div><div class="pd" style="font-family:var(--mono)">${p.key}</div>${fieldHTML(p)}</div></div>`;
+        <div class="pl">${esc(p.label)} ${tags}</div><div class="pd">${esc(p.desc || "")}</div><div class="pk">${p.key}</div>${fieldHTML(p)}</div></div>`;
       return `<div class="prop-item" data-search="${esc(p.label)} ${p.key}"><div>
-        <div class="pl">${esc(p.label)} ${tags}</div><div class="pd">${esc(p.desc || "")}${grHint}</div>${notice}<div class="pd" style="font-family:var(--mono)">${p.key}</div></div>${fieldHTML(p)}</div>`;
+        <div class="pl">${esc(p.label)} ${tags}</div><div class="pd">${esc(p.desc || "")}${grHint}</div>${notice}<div class="pk">${p.key}</div></div>${fieldHTML(p)}</div>`;
     };
     body.innerHTML = `
       <div class="common-bar">
@@ -1838,7 +2067,7 @@ async function renderTunnels() {
   if (stale(gen)) return;
   Main().innerHTML = pageHead("内网穿透",
     "把本地服务器映射到公网，异地朋友也能直接连接。基于 <b>OpenFrp OPENAPI</b>，并支持 SakuraFrp 与自建 frps。",
-    `<button class="btn primary" id="tn-toggle" aria-expanded="false" aria-controls="tn-form">${icon("plus")} 添加隧道</button>`) + `
+    `<button class="btn primary" id="tn-toggle" aria-expanded="false" aria-controls="tn-form">${icon("plus")} 添加隧道</button>`, "", "", "tun-summary") + `
     <div id="tun-list">${skeletonRows(4)}</div>
     <div id="tn-form" class="card" hidden style="margin-top:16px;max-width:var(--w-read)">
     <h3 style="margin-bottom:8px">添加隧道</h3>
@@ -1890,10 +2119,12 @@ async function renderTunnels() {
     let list;
     try { list = await api("/api/tunnels"); } catch (e) { if (!stale(gen)) $("#tun-list").innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
     if (stale(gen) || logOpen) return;
-    if (!list.length) { $("#tun-list").innerHTML = `<div class="empty"><div class="empty-ico">${icon("globe")}</div><div class="empty-title">还没有隧道</div>点右上角「添加隧道」，开服后就能把本地服务器映射到公网</div>`; return; }
+    const runN = list.filter(t => t.running).length;
+    $("#tun-summary").innerHTML = list.length ? `${list.length} 条隧道${SEP}运行中 ${runN}` : "";
+    if (!list.length) { $("#tun-list").innerHTML = `<div class="empty">${MDPixel.emptySVG(200)}<div class="empty-title">还没有隧道</div>点右上角「添加隧道」，开服后就能把本地服务器映射到公网</div>`; return; }
     $("#tun-list").innerHTML = list.map(t => `
       <div class="java-row" style="max-width:980px">
-        <span class="dot ${t.running ? "running" : ""}"></span>
+        ${stPill(t.running ? "running" : "stopped")}
         <b style="min-width:110px">${esc(t.name)}</b>
         <span class="badge core">${esc(PROV_NAMES[t.provider] || t.provider)}</span>
         ${t.boundInstance ? `<span class="badge">${icon("link")} ${esc(t.boundInstance)}${t.autoStart ? " · 跟随" : ""}</span>` : ""}
@@ -1907,8 +2138,14 @@ async function renderTunnels() {
         <button class="btn sm danger" data-tdel="${t.id}">删除</button>
       </div>
       <div class="task-log" id="tlog-${t.id}" style="display:none;height:150px;max-width:980px;margin:-2px 0 8px"></div>`).join("");
-    $("#tun-list").querySelectorAll("[data-copy]").forEach(b => b.onclick = () => {
-      copy(b.dataset.copy, "已复制公网地址：" + b.dataset.copy);
+    $("#tun-list").querySelectorAll("[data-copy]").forEach(b => b.onclick = async () => {
+      await copy(b.dataset.copy, "已复制公网地址：" + b.dataset.copy);
+      // 微交互：图标换成弹出的对勾、文字改「已复制」，1.3 秒后换回
+      if (b.dataset.busy) return;
+      b.dataset.busy = "1";
+      const old = b.innerHTML;
+      b.innerHTML = `<span class="pop" style="display:inline-grid">${icon("check")}</span> 已复制`;
+      setTimeout(() => { b.innerHTML = old; playClass(b, "swap-in"); delete b.dataset.busy; }, 1300);
     });
     $("#tun-list").querySelectorAll("[data-tstart]").forEach(b => b.onclick = async () => {
       b.disabled = true;
@@ -1921,7 +2158,7 @@ async function renderTunnels() {
       setTimeout(drawList, 400);
     });
     $("#tun-list").querySelectorAll("[data-tdel]").forEach(b => b.onclick = async () => {
-      const r = await confirmModal({ title: "删除隧道？", danger: true, okText: "删除", body: "仅删除本机配置，服务商侧隧道不受影响。" });
+      const r = await confirmModal({ title: "删除隧道？", danger: true, okText: "删除", icon: "trash", body: "仅删除本机配置，服务商侧隧道不受影响。" });
       if (!r) return;
       try { await api(`/api/tunnels/${b.dataset.tdel}`, { method: "DELETE" }); } catch (e) { toast(e.message, true); }
       drawList();
@@ -1970,7 +2207,9 @@ async function renderTunnels() {
   };
 }
 
-/* ---------- 视图：设置 ---------- */
+/* ---------- 视图：设置 ----------
+   左侧分区导航（当前项是凸起键帽，切分区时键帽滑动）+ 右侧 iOS 式分组列表：一组一张卡，
+   行与行之间是缩进的发丝线；行首可带强调色图标瓦片，右侧放开关 / 按钮 / 摘要。 */
 const SETTINGS_SECTIONS = [
   { id: "appearance", label: "外观", icon: "palette" },
   { id: "download", label: "下载与网络", icon: "globe" },
@@ -1989,22 +2228,44 @@ async function renderSettings(section) {
   // #set-body 仅存在于设置视图内，可据此判断壳是否已挂载。
   // 不套独立居中容器（旧 .settings-page 令标题与其他页错位、导航随内容横跳），直接落在全站内容列上
   if (!$("#set-body")) {
-    Main().innerHTML = pageHead("设置") + `
+    Main().innerHTML = pageHead("设置", "", "", "", "", "set-eyebrow") + `
       <div class="settings-layout">
-        <nav class="settings-nav">${SETTINGS_SECTIONS.map(s => `
+        <nav class="settings-nav" aria-label="设置分区">${SETTINGS_SECTIONS.map(s => `
           <a class="set-nav" data-sec="${s.id}" href="#/settings/${s.id}"><span class="sn-ico">${icon(s.icon)}</span>${s.label}</a>`).join("")}</nav>
         <div class="settings-body" id="set-body"><div class="sub">加载中…</div></div>
       </div>`;
   }
-  document.querySelectorAll(".set-nav").forEach(a => a.classList.toggle("cur", a.dataset.sec === section));
+  $("#set-eyebrow").innerHTML = `设置<span class="sep">/</span>${esc(SETTINGS_SECTIONS.find(s => s.id === section).label)}`;
+  document.querySelectorAll(".set-nav").forEach(a => {
+    const on = a.dataset.sec === section;
+    a.classList.toggle("cur", on);
+    if (on) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+  });
+  if (samePage) slideKeys(keysBefore, ["set"]); // 换分区：导航键帽从旧分区滑到新分区
   const body = $("#set-body");
   let info;
   try { info = await api("/api/app"); } catch (e) { if (!stale(gen)) body.innerHTML = `<div class="err-box">${esc(e.message)}</div>`; return; }
   if (stale(gen)) return; // 快速连点分区时，先发后至的旧响应不得覆盖当前分区
   ({ appearance: setAppearance, download: setDownload, storage: setStorage, java: setJava, remote: setRemote, notify: setNotify, startup: setStartup, about: setAbout }[section])(body, info);
-  body.classList.remove("sec-enter"); void body.offsetWidth; // 重触发局部入场
-  body.classList.add("sec-enter");
+  playClass(body, "sec-enter"); // 只动被替换的分区内容（上移 4px 淡入）
 }
+
+/* 分区标题；sub 允许富文本（调用方自负安全，标题走 esc） */
+function settingsHead(t, sub) {
+  return `<div class="set-sec-head"><h2>${esc(t)}</h2>${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
+}
+/* 分组：一组一张卡；ico = 行首带图标瓦片（发丝线随之缩进到文字起点） */
+const group = (rows, { ico = false, cls = "", attrs = "" } = {}) =>
+  `<div class="group${ico ? " has-ico" : ""}${cls ? " " + cls : ""}"${attrs ? " " + attrs : ""}>${rows}</div>`;
+/* 分组里的一行：可选图标瓦片 + 标题 / 说明（sub 允许富文本）/ 键名或路径 + 右侧控件 */
+function riRow({ ico = "", title = "", titleHTML = "", sub = "", key = "", right = "", cls = "", attrs = "", field = "" }) {
+  return `<div class="row-item${cls ? " " + cls : ""}"${attrs ? " " + attrs : ""}><div class="ri-head">${ico ? `<span class="ri-ico">${icon(ico)}</span>` : ""}
+    <div class="ri-main"><div class="ri-title">${titleHTML || esc(title)}</div>${sub ? `<div class="ri-sub">${sub}</div>` : ""}${key ? `<div class="ri-key">${esc(key)}</div>` : ""}</div>
+    ${right ? `<div class="ri-right">${right}</div>` : ""}</div>${field ? `<div class="ri-field">${field}</div>` : ""}</div>`;
+}
+/* 行式开关（标题 + 说明 + 右侧开关），data-cfg 携带配置键 */
+const switchRow = (ico, title, desc, key, on) => riRow({ ico, title, sub: esc(desc),
+  right: `<label class="switch" title="${esc(title)}"><input type="checkbox" data-cfg="${key}" ${on ? "checked" : ""} aria-label="${esc(title)}"><span class="sw"></span></label>` });
 
 /* — 外观 — 模式 / 配色方案 / 强调色，点选即时生效（只存在本机）。
    方案卡的预览区带上该方案的 data-scheme/data-theme/data-accent，直接用 themes.css 的令牌渲染缩略界面。 */
@@ -2016,7 +2277,7 @@ function setAppearance(body) {
     body.innerHTML = settingsHead("主题模式", "「跟随系统」会随 Windows 的浅色 / 深色设置自动切换。") +
       `<div class="seg" role="radiogroup" aria-label="主题模式">${["auto", "light", "dark"].map(m =>
         `<button type="button" role="radio" aria-checked="${a.mode === m}" class="${a.mode === m ? "on" : ""}" data-mode="${m}">${icon(MODE_ICON[m])}${MODE_LABEL[m]}</button>`).join("")}</div>` +
-      settingsHead("配色方案", "几套业界常用配色，浅色与深色下的文字对比度均已按 WCAG AA 校验。") +
+      settingsHead("配色方案", "浅色与深色下的文字对比度均已按 WCAG AA 校验。点一下整个界面都会换。") +
       `<div class="scheme-grid">${SCHEMES.map(s => `
         <button type="button" class="scheme-card ${a.scheme === s.id ? "on" : ""}" data-scheme-pick="${s.id}" aria-pressed="${a.scheme === s.id}">
           <div class="sc-preview" data-scheme="${s.id}" data-theme="${theme}" data-accent="${a.accent}" aria-hidden="true">
@@ -2031,7 +2292,12 @@ function setAppearance(body) {
         ${ACCENTS.map(c => `<button type="button" role="radio" aria-checked="${a.accent === c.id}" class="acc-swatch ${a.accent === c.id ? "on" : ""}" style="--sw:${c.sw}" data-accent-pick="${c.id}" title="${c.name}" aria-label="${c.name}">${a.accent === c.id ? icon("check") : ""}</button>`).join("")}
       </div>
       <div class="hint" style="margin-top:20px">想换背景图？在程序所在目录新建 <code>bg</code> 文件夹并放入图片，下次打开时随机选一张作为壁纸。</div>`;
-    body.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => { refocus = `[data-mode="${b.dataset.mode}"]`; Appearance.set({ mode: b.dataset.mode }); });
+    body.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => {
+      refocus = `[data-mode="${b.dataset.mode}"]`;
+      const before = keyRects();
+      Appearance.set({ mode: b.dataset.mode });
+      slideKeys(before, ["seg"]); // 分段控件的键帽滑到新选项
+    });
     body.querySelectorAll("[data-scheme-pick]").forEach(b => b.onclick = () => { refocus = `[data-scheme-pick="${b.dataset.schemePick}"]`; Appearance.set({ scheme: b.dataset.schemePick }); });
     body.querySelectorAll("[data-accent-pick]").forEach(b => b.onclick = () => { refocus = `[data-accent-pick="${b.dataset.accentPick}"]`; Appearance.set({ accent: b.dataset.accentPick }); });
     if (refocus) { body.querySelector(refocus)?.focus(); refocus = null; }
@@ -2040,28 +2306,15 @@ function setAppearance(body) {
   draw();
 }
 
-/* 分区标题；sub 允许富文本（调用方自负安全，标题走 esc） */
-function settingsHead(t, sub) {
-  return `<div class="set-sec-head"><h2>${esc(t)}</h2>${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
-}
-
-/* 行式开关（标题 + 副标题 + 右侧开关），data-cfg 携带配置键 */
-function switchRow(title, desc, key, on) {
-  return `<div class="row-item"><div class="ri-head"><div class="ri-main">
-      <div class="ri-title">${esc(title)}</div><div class="ri-sub">${esc(desc)}</div></div>
-    <div class="ri-right"><label class="switch"><input type="checkbox" data-cfg="${key}" ${on ? "checked" : ""}><span class="sw"></span></label></div>
-  </div></div>`;
-}
-
 /* — 启动与托盘 — */
 function setStartup(body, info) {
   const c = info.config || {};
   body.innerHTML = settingsHead("启动与托盘", "控制关闭窗口的行为与开机自启。托盘图标在程序运行时始终显示，右键可「打开面板 / 全部停止并退出」，左键点击恢复窗口。") +
-    `<div class="row-list">
-      ${switchRow("最小化到系统托盘", "开启后点窗口关闭按钮不退出程序，而是收进托盘、服务器继续运行；点托盘图标即可恢复窗口。关闭则保持现状——点关闭即停服退出。", "minimizeToTray", c.minimizeToTray)}
-      ${switchRow("开机自动启动", "登录 Windows 后自动在后台（托盘）启动 MineDeck。写入当前用户启动项（HKCU\\…\\Run，免管理员）；程序换目录后重新开关一次即修正路径。", "autoStart", info.autoStart)}
-    </div>
-    <div class="hint" style="margin-top:12px">开机自启以「静默进托盘」方式启动（附加 -minimized 参数），配合上面的托盘开关体验最佳。</div>`;
+    group(
+      switchRow("monitor", "最小化到系统托盘", "开启后点窗口关闭按钮不退出程序，而是收进托盘、服务器继续运行；点托盘图标即可恢复窗口。关闭则保持现状——点关闭即停服退出。", "minimizeToTray", c.minimizeToTray) +
+      switchRow("power", "开机自动启动", "登录 Windows 后自动在后台（托盘）启动 MineDeck。写入当前用户启动项（HKCU\\…\\Run，免管理员）；程序换目录后重新开关一次即修正路径。", "autoStart", info.autoStart),
+      { ico: true }) +
+    `<div class="hint">开机自启以「静默进托盘」方式启动（附加 -minimized 参数），配合上面的托盘开关体验最佳。</div>`;
   body.querySelectorAll("input[data-cfg]").forEach(inp => inp.onchange = async () => {
     const key = inp.dataset.cfg;
     try {
@@ -2072,7 +2325,7 @@ function setStartup(body, info) {
   });
 }
 
-/* — 下载与网络 — */
+/* — 下载与网络 — 下载源是一组单选行（选中行右侧打勾，点选即时生效）；API Key 是单字段保存 */
 function setDownload(body, info) {
   const src = info.config.source || "auto";
   const opts = [
@@ -2080,17 +2333,29 @@ function setDownload(body, info) {
     { v: "mirror", t: "仅国内镜像", d: "只用 BMCLAPI 与清华镜像（Paper/Purpur 无镜像，仍走官方）" },
     { v: "official", t: "仅官方源", d: "只用 Mojang / Forge / Adoptium 等官方源（海外网络适用）" },
   ];
+  const check = on => `<span class="ri-check${on ? " on" : ""}" aria-hidden="true">${icon("check")}</span>`;
   body.innerHTML = settingsHead("下载源", "下载 Java 与服务端核心时的线路选择。") +
-    `<div class="radio-cards" id="src-cards">${opts.map(o => `
-      <div class="radio-card ${src === o.v ? "sel" : ""}" data-v="${o.v}"><div><div class="rt">${o.t}</div><div class="rd">${o.d}</div></div></div>`).join("")}</div>` +
+    group(opts.map(o => riRow({ title: o.t, sub: esc(o.d), right: check(src === o.v), cls: "choice" + (src === o.v ? " sel" : ""),
+      attrs: `role="radio" tabindex="0" aria-checked="${src === o.v}" data-v="${o.v}"` })).join(""), { attrs: `id="src-cards" role="radiogroup" aria-label="下载源"` }) +
     settingsHead("CurseForge API Key（选填）", `导入 CurseForge 格式整合包时解析模组直链用，<a href="https://console.curseforge.com/" target="_blank">免费申请</a>；Modrinth 格式整合包无需配置。`) +
-    `<div class="row"><input type="password" id="cf-key" value="${esc(info.config.cfApiKey || "")}" placeholder="粘贴 API Key" style="max-width:420px"><button class="btn" id="cf-save">保存</button></div>`;
-  $("#src-cards").querySelectorAll(".radio-card").forEach(c => c.onclick = async () => {
+    group(riRow({ ico: "package", title: "API Key", sub: "只保存在本机的 config.json 里",
+      field: `<input type="password" id="cf-key" value="${esc(info.config.cfApiKey || "")}" placeholder="粘贴 API Key" aria-label="CurseForge API Key"><button class="btn" id="cf-save">保存</button>` }), { ico: true });
+  const pick = async c => {
+    if (c.classList.contains("sel")) return;
     try {
       await api("/api/config", { method: "PUT", body: { source: c.dataset.v } });
-      $("#src-cards").querySelectorAll(".radio-card").forEach(x => x.classList.toggle("sel", x === c));
+      $("#src-cards").querySelectorAll(".row-item").forEach(x => {
+        const on = x === c;
+        x.classList.toggle("sel", on);
+        x.setAttribute("aria-checked", String(on));
+        x.querySelector(".ri-check").classList.toggle("on", on);
+      });
       toast("下载源已切换");
     } catch (e) { toast(e.message, true); }
+  };
+  $("#src-cards").querySelectorAll(".row-item").forEach(c => {
+    c.onclick = () => pick(c);
+    c.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(c); } };
   });
   bindSaveInput($("#cf-key"), $("#cf-save"), async v => {
     await api("/api/config", { method: "PUT", body: { cfApiKey: v.trim() } });
@@ -2099,26 +2364,21 @@ function setDownload(body, info) {
 }
 
 /* — 存储位置 — */
-function storageRow(title, path, desc, pick) {
-  return `<div class="row-item"><div class="ri-head"><div class="ri-main">
-      <div class="ri-title">${esc(title)}</div><div class="ri-sub">${esc(desc)}</div><div class="ri-key">${esc(path || "")}</div></div>
-    <div class="ri-right">
+function storageRow(ico, title, path, desc, pick) {
+  return riRow({ ico, title, sub: esc(desc), key: path || "", right: `
       <button class="btn sm" data-open="${esc(path || "")}">${icon("folder")} 打开</button>
-      <button class="btn sm" data-pick="${pick}">更改…</button>
-      <button class="btn sm" data-reset="${pick}" title="恢复默认目录" aria-label="恢复默认目录">${icon("refresh")}</button>
-    </div></div></div>`;
+      ${pick ? `<button class="btn sm" data-pick="${pick}">更改…</button>
+      <button class="btn sm ghost icon-only" data-reset="${pick}" title="恢复默认目录" aria-label="恢复默认目录">${icon("refresh")}</button>` : ""}` });
 }
 function setStorage(body, info) {
   const draw = () => {
     body.innerHTML = settingsHead("存储位置", "服务器实例与备份的存放根目录。更改仅对之后新建的实例 / 备份生效，已有实例不会自动搬家。") +
-      `<div class="row-list">
-        ${storageRow("服务器存放目录", info.serversRoot, "新实例默认创建于此目录下（每个实例一个子文件夹，中文名自动生成英文目录）", "servers")}
-        ${storageRow("备份存放目录", info.backupsRoot, "世界热备份的存放位置", "backups")}
-        <div class="row-item"><div class="ri-head"><div class="ri-main">
-          <div class="ri-title">程序数据目录</div><div class="ri-sub">程序自身、Java 运行时与下载缓存所在（便携，随程序整体迁移）</div><div class="ri-key">${esc(info.base)}</div></div>
-          <div class="ri-right"><button class="btn sm" data-open="${esc(info.base)}">${icon("folder")} 打开</button></div></div></div>
-      </div>
-      <div class="hint" style="margin-top:12px">建议放到大容量分区（如 D 盘）以免占满系统盘；点「更改…」会弹出系统文件夹选择框（仅本机可用，手机远程管理时请在主机操作）。</div>`;
+      group(
+        storageRow("server", "服务器存放目录", info.serversRoot, "新实例默认创建于此目录下（每个实例一个子文件夹，中文名自动生成英文目录）", "servers") +
+        storageRow("package", "备份存放目录", info.backupsRoot, "世界热备份的存放位置", "backups") +
+        storageRow("folder", "程序数据目录", info.base, "程序自身、Java 运行时与下载缓存所在（便携，随程序整体迁移）", ""),
+        { ico: true }) +
+      `<div class="hint">建议放到大容量分区（如 D 盘）以免占满系统盘；点「更改…」会弹出系统文件夹选择框（仅本机可用，手机远程管理时请在主机操作）。</div>`;
     body.querySelectorAll("[data-open]").forEach(b => b.onclick = () =>
       api("/api/openpath", { method: "POST", body: { path: b.dataset.open } }).catch(e => toast(e.message, true)));
     body.querySelectorAll("[data-pick]").forEach(b => b.onclick = async () => {
@@ -2148,21 +2408,20 @@ function setStorage(body, info) {
 
 /* — Java 运行时 — */
 async function setJava(body, info) {
-  body.innerHTML = settingsHead("Java 运行时", "创建实例时优先复用本机已装 Java → 便携运行时 → 自动下载。") + `<div class="sub">加载中…</div>`;
+  const head = settingsHead("Java 运行时", "创建实例时优先复用本机已装 Java → 便携运行时 → 自动下载。");
+  body.innerHTML = head + `<div class="sub">加载中…</div>`;
   let javas = { portable: [], scanned: [] };
   try { javas = await api("/api/javas"); } catch {}
-  body.innerHTML = settingsHead("Java 运行时", "创建实例时优先复用本机已装 Java → 便携运行时 → 自动下载。") +
-    `${javas.portable.length ? `<div class="badges" style="margin-bottom:10px">${javas.portable.map(j => `<span class="badge core">便携 Java ${j.major}</span>`).join("")}</div>` : ""}
-    <div class="row-list">${javas.scanned.length ? javas.scanned.map(j => `
-      <div class="row-item"><div class="ri-head"><div class="ri-main">
-        <div class="ri-title">Java ${j.major} <span class="badge">${esc(j.version)}</span></div>
-        <div class="ri-key">${esc(j.path)}</div></div></div></div>`).join("")
-      : `<div class="sub">尚未发现本机安装的 Java，点击下方扫描</div>`}</div>
-    <div class="row" style="margin-top:12px;flex-wrap:wrap">
-      <button class="btn" id="java-scan">${icon("refresh")} 重新扫描本机 Java</button>
-      <input type="text" id="java-path" placeholder="手动添加：粘贴 java.exe 或 JDK 目录路径" style="max-width:420px">
-      <button class="btn" id="java-add">添加</button>
-    </div>`;
+  body.innerHTML = head +
+    group(
+      riRow({ ico: "package", title: "便携运行时", sub: "MineDeck 自动下载到程序目录 runtimes\\ 下，独立管理、不碰系统环境变量",
+        right: javas.portable.length ? `<span class="badges">${javas.portable.map(j => `<span class="badge core">Java ${j.major}</span>`).join("")}</span>` : `<span class="ri-summary">暂无</span>` }) +
+      (javas.scanned.length ? javas.scanned.map(j => riRow({ ico: "coffee", titleHTML: `Java ${j.major} <span class="badge">${esc(j.version)}</span>`, key: j.path })).join("")
+        : riRow({ ico: "coffee", title: "本机已安装的 Java", sub: "尚未发现，点下方「重新扫描」或手动添加" })),
+      { ico: true }) +
+    group(riRow({ ico: "plus", title: "手动添加", sub: "粘贴 java.exe 或 JDK 目录的路径",
+      field: `<input type="text" id="java-path" placeholder="如 C:\\Program Files\\Java\\jdk-21\\bin\\java.exe" aria-label="Java 路径"><button class="btn" id="java-add">添加</button>` }), { ico: true }) +
+    `<div class="row" style="margin-top:12px"><button class="btn" id="java-scan">${icon("refresh")} 重新扫描本机 Java</button></div>`;
   $("#java-scan").onclick = async () => {
     $("#java-scan").disabled = true; $("#java-scan").textContent = "扫描中…（约数秒）";
     try { const list = await api("/api/javas/scan", { method: "POST" }); toast(`扫描完成，发现 ${list.length} 个 Java`); setJava(body, info); }
@@ -2182,13 +2441,15 @@ const lanIPRank = ip => /^192\.168\./.test(ip) ? 0 : /^10\./.test(ip) ? 1 : /^17
 function setRemote(body, info) {
   const lanPort = info.port || location.port || "27333"; // 实际监听端口（被占用时会随机化）
   const ips = (info.ips || []).slice().sort((a, b) => lanIPRank(a) - lanIPRank(b));
+  // 开关与密码一起保存（开启局域网访问前必须先设好密码），改动重启程序后生效
   body.innerHTML = settingsHead("远程访问（手机 / 平板管理）", "开启后本机 IP 可从局域网访问管理界面（密码保护，改动需重启程序生效）。") +
-    `<div class="row" style="margin-bottom:10px;flex-wrap:wrap">
-      <label class="switch"><input type="checkbox" id="lan-on" ${info.config.listenLan ? "checked" : ""}><span class="sw"></span><span class="sw-label">允许局域网访问</span></label>
-      <input type="password" id="lan-pw" placeholder="${info.lanSet ? "已设置密码（留空则不修改）" : "设置访问密码（必填）"}" style="max-width:260px">
-      <button class="btn" id="lan-save">保存</button>
-    </div>
-    ${!info.config.listenLan ? "" : ips.length ? `<div class="qr-card">
+    group(
+      riRow({ ico: "phone", title: "允许局域网访问", sub: "手机与本机连在同一 Wi-Fi / 路由器下即可打开管理界面",
+        right: `<label class="switch"><input type="checkbox" id="lan-on" ${info.config.listenLan ? "checked" : ""} aria-label="允许局域网访问"><span class="sw"></span></label>` }) +
+      riRow({ ico: "lock", title: "访问密码", sub: info.lanSet ? "已设置；留空则不修改" : "开启局域网访问前必须先设置",
+        field: `<input type="password" id="lan-pw" placeholder="${info.lanSet ? "已设置密码（留空则不修改）" : "设置访问密码（必填）"}" aria-label="访问密码"><button class="btn" id="lan-save">保存</button>` }),
+      { ico: true }) +
+    (!info.config.listenLan ? "" : ips.length ? `<div class="qr-card">
       <div class="qr-box" id="qr-box" role="img"></div>
       <div class="qr-info">
         <div class="ri-title">手机扫码访问</div>
@@ -2197,8 +2458,8 @@ function setRemote(body, info) {
         ${ips.length > 1 ? `<div class="qr-ips">${ips.map((ip, i) => `<button type="button" class="qr-ip" data-i="${i}">${esc(ip)}</button>`).join("")}</div>
         <div class="hint">本机有多个网络地址：扫码打不开就换一个（家用路由器下通常是 192.168.x.x）。</div>` : ""}
       </div>
-    </div>` : `<div class="hint">未检测到本机局域网 IP，请确认已连接网络。</div>`}
-    <div class="hint">若无法访问，请以管理员运行一次放行防火墙：<code>netsh advfirewall firewall add rule name="MineDeck" dir=in action=allow protocol=TCP localport=${esc(String(lanPort))}</code></div>`;
+    </div>` : `<div class="hint">未检测到本机局域网 IP，请确认已连接网络。</div>`) +
+    `<div class="hint">若无法访问，请以管理员运行一次放行防火墙：<code>netsh advfirewall firewall add rule name="MineDeck" dir=in action=allow protocol=TCP localport=${esc(String(lanPort))}</code></div>`;
   $("#lan-save").onclick = async () => {
     const b = { listenLan: $("#lan-on").checked };
     if ($("#lan-pw").value) b.lanPassword = $("#lan-pw").value;
@@ -2224,8 +2485,9 @@ function setRemote(body, info) {
 
 /* — 通知与集成 — */
 function setNotify(body, info) {
-  body.innerHTML = settingsHead("Webhook 事件推送（选填）", "服务器启停/崩溃、玩家进出、备份完成、隧道上线等事件将 POST 到该地址（JSON），可接入群机器人等。") +
-    `<div class="row"><input type="text" id="wh-url" value="${esc(info.config.webhookUrl || "")}" placeholder="https://example.com/hook（留空关闭）" style="max-width:460px"><button class="btn" id="wh-save">保存</button></div>`;
+  body.innerHTML = settingsHead("通知与集成", "服务器启停 / 崩溃、玩家进出、备份完成、隧道上线等事件，可以推送到群机器人等外部服务。") +
+    group(riRow({ ico: "bell", title: "Webhook 事件推送（选填）", sub: "事件以 JSON POST 到该地址；留空即关闭",
+      field: `<input type="text" id="wh-url" value="${esc(info.config.webhookUrl || "")}" placeholder="https://example.com/hook（留空关闭）" aria-label="Webhook 地址"><button class="btn" id="wh-save">保存</button>` }), { ico: true });
   bindSaveInput($("#wh-url"), $("#wh-save"), async v => {
     await api("/api/config", { method: "PUT", body: { webhookUrl: v.trim() } });
     toast(v.trim() ? "Webhook 已保存，即时生效" : "已关闭 Webhook 推送");
@@ -2234,31 +2496,28 @@ function setNotify(body, info) {
 
 /* — 更新与关于 — */
 function setAbout(body, info) {
-  body.innerHTML = settingsHead("版本与更新", "") +
-    `<div class="row-list" style="margin-bottom:14px">
-      <div class="row-item"><div class="ri-head"><div class="ri-main"><div class="ri-title">当前版本</div><div class="ri-sub">MineDeck · Windows 本地 Minecraft 开服工具</div></div><div class="ri-right"><span class="badge core">v${esc(info.version)}</span></div></div></div>
-    </div>
-    <div class="row" style="flex-wrap:wrap;margin-bottom:10px">
-      <input type="text" id="up-repo" value="${esc(info.config.updateRepo || "")}" placeholder="GitHub 仓库，如 yourname/MineDeck" style="max-width:300px">
-      <button class="btn" id="up-save">保存</button>
-      <button class="btn" id="up-check">${icon("search")} 检查更新</button>
-      <span id="up-result" class="hint"></span>
-    </div>
-    <div class="row-list" style="margin-bottom:18px">
-      <div class="row-item"><div class="ri-head"><div class="ri-main"><div class="ri-title">启动时静默检查更新</div><div class="ri-sub">程序启动后在后台检查一次新版本（需已填写更新仓库）</div></div>
-        <div class="ri-right"><label class="switch"><input type="checkbox" id="up-silent" ${info.config.checkUpdateOnStart ? "checked" : ""}><span class="sw"></span></label></div></div></div>
-    </div>` +
+  body.innerHTML = `<div class="brand-head about-head">${logoImg()}<div><h2>MineDeck</h2><div class="sub">Windows 本地 Minecraft 开服工具 · v${esc(info.version)}</div></div></div>` +
+    settingsHead("版本与更新", "") +
+    group(
+      riRow({ ico: "info", title: "当前版本", sub: "MineDeck · Windows 本地 Minecraft 开服工具", right: `<span class="badge core">v${esc(info.version)}</span>` }) +
+      riRow({ ico: "arrowUp", title: "更新仓库", sub: "从该 GitHub 仓库的 Releases 检查新版本（国内加速镜像兜底）",
+        field: `<input type="text" id="up-repo" value="${esc(info.config.updateRepo || "")}" placeholder="GitHub 仓库，如 yourname/MineDeck" aria-label="更新仓库">
+          <button class="btn" id="up-save">保存</button><button class="btn" id="up-check">${icon("search")} 检查更新</button>` }) +
+      riRow({ ico: "refresh", title: "启动时静默检查更新", sub: "程序启动后在后台检查一次新版本（需已填写更新仓库）",
+        right: `<label class="switch"><input type="checkbox" id="up-silent" ${info.config.checkUpdateOnStart ? "checked" : ""} aria-label="启动时静默检查更新"><span class="sw"></span></label>` }),
+      { ico: true }) +
+    `<div class="hint" id="up-result" aria-live="polite"></div>` +
     settingsHead("关于", "") +
     `<div class="hint" style="line-height:1.9">
       内网穿透基于 <b>OpenFrp OPENAPI</b> 接入（<a href="https://www.openfrp.net" target="_blank">openfrp.net</a>）。<br>
+      界面字体：Geist、Geist Mono（© The Geist Project Authors）与 Noto Sans SC（© Adobe），均为 SIL Open Font License 1.1，
+      子集随程序内嵌，许可原文见 <a href="fonts/OFL-Geist.txt" target="_blank">OFL-Geist.txt</a>、<a href="fonts/OFL-NotoSansSC.txt" target="_blank">OFL-NotoSansSC.txt</a>。<br>
       本软件为开源项目，遵循仓库 LICENSE（MIT）。<br>
       Minecraft 是 Mojang Studios 的商标，本工具与 Mojang / Microsoft / 网易均无隶属或授权关系。<br>
       NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.
-    </div>
-    <div class="set-danger">
-      <div><div class="ri-title">退出程序</div><div class="ri-sub">优雅停止所有运行中的服务器（保存世界）后退出</div></div>
-      <button class="btn danger" id="quit-app">${icon("power")} 退出 MineDeck</button>
-    </div>`;
+    </div>` +
+    group(riRow({ ico: "power", title: "退出程序", sub: "优雅停止所有运行中的服务器（保存世界）后退出",
+      right: `<button class="btn danger" id="quit-app">${icon("power")} 退出 MineDeck</button>` }), { ico: true, cls: "danger-zone", attrs: `style="margin-top:28px"` });
   bindSaveInput($("#up-repo"), $("#up-save"), async v => {
     await api("/api/config", { method: "PUT", body: { updateRepo: v.trim() } });
     toast("更新仓库已保存");
@@ -2272,7 +2531,7 @@ function setAbout(body, info) {
     try {
       const r = await api("/api/update/check", { method: "POST" });
       if (r.hasUpdate) {
-        $("#up-result").innerHTML = `发现新版本 <b style="color:var(--accent-text)">${esc(r.latest.tag)}</b>（当前 v${esc(r.current)}）`;
+        $("#up-result").innerHTML = `发现新版本 <b style="color:var(--accent-text)">${esc(r.latest.tag)}</b>（当前 v${esc(r.current)}） `;
         const btn = document.createElement("button");
         btn.className = "btn sm primary";
         btn.innerHTML = icon("arrowUp") + " 立即更新并重启";
@@ -2288,7 +2547,7 @@ function setAbout(body, info) {
     } catch (e) { $("#up-result").textContent = e.message; }
   };
   $("#quit-app").onclick = async () => {
-    const r = await confirmModal({ title: "退出 MineDeck？", body: "将优雅停止所有运行中的服务器（保存世界）后退出程序。", okText: "退出", danger: true });
+    const r = await confirmModal({ title: "退出 MineDeck？", body: "将优雅停止所有运行中的服务器（保存世界）后退出程序。", okText: "退出", danger: true, icon: "power" });
     if (!r) return;
     try { await api("/api/shutdown", { method: "POST" }); document.body.innerHTML = `<div style="padding:80px;text-align:center;color:var(--muted)">MineDeck 正在停止服务器并退出，可以关闭此页面了。</div>`; }
     catch (e) { toast(e.message, true); }
@@ -2301,8 +2560,8 @@ function showOnboarding(info) {
   const root = $("#modal-root");
   const SRC = { auto: "自动（推荐）— 国内镜像优先，失败自动回退官方源", mirror: "镜像优先 — 国内下载更快", official: "仅官方源 — 网络直连国外" };
   const cur = (info.config && info.config.source) || "auto";
-  root.innerHTML = `<div class="modal-mask"><div class="modal onboard">
-    <h3>欢迎使用 MineDeck</h3>
+  root.innerHTML = `<div class="modal-mask enter"><div class="modal onboard" role="dialog" aria-modal="true">
+    <div class="brand-head">${logoImg()}<div><h3>欢迎使用 MineDeck</h3><div class="sub">Minecraft 一键开服工具</div></div></div>
     <div class="m-body">
       <div class="ob-sec" style="margin-top:0"><div class="ob-label">用户协议与免责声明</div>
         <div class="ob-terms">
@@ -2334,7 +2593,7 @@ function showOnboarding(info) {
     const sel = root.querySelector('input[name="ob-src"]:checked');
     try { await api("/api/config", { method: "PUT", body: { source: sel ? sel.value : cur, onboarded: true, tosAccepted: true } }); }
     catch (e) { toast(e.message, true); }
-    root.innerHTML = "";
+    dismiss(root.firstElementChild);
   };
 }
 
@@ -2360,10 +2619,13 @@ async function applyBackground() {
   } catch (e) {
     // 局域网访问（如手机扫码打开）尚未登录：api() 已弹出密码遮罩，保留它，不整页覆盖成「无法连接」；登录成功后 reload 重跑 boot
     if (e.needLogin) return;
-    document.body.innerHTML = `<div style="padding:60px;text-align:center;color:#e5644e">无法连接 MineDeck 后端：${esc(e.message)}<br><br>请通过程序窗口打开本页面。</div>`;
+    document.body.innerHTML = `<div style="padding:60px;text-align:center;color:var(--danger-text)">无法连接 MineDeck 后端：${esc(e.message)}<br><br>请通过程序窗口打开本页面。</div>`;
     return;
   }
   navigate();
+  document.dispatchEvent(new Event("md-ready")); // 启动画面（若在播）据此在方块拼完后淡出
+  chromeReport.last = (info.config && info.config.chromeColor) || "";
+  reportChrome();
   applyBackground();
   // 协议为新增项：老用户虽已 onboarded，但未同意过协议（tosAccepted）仍需补一次
   if (!info.config || !info.config.onboarded || !info.config.tosAccepted) showOnboarding(info);

@@ -72,3 +72,16 @@ func TestRememberRoot(t *testing.T) {
 		t.Fatalf("Roots = %v，应为 [%s]", got, d)
 	}
 }
+
+func TestParseHexColor(t *testing.T) {
+	for in, want := range map[string]string{"#202020": "#202020", "#EAE5D7": "#eae5d7", "#0e1210": "#0e1210"} {
+		if got, ok := ParseHexColor(in); !ok || got != want {
+			t.Errorf("ParseHexColor(%q) = %q, %v；应为 %q", in, got, ok, want)
+		}
+	}
+	for _, bad := range []string{"", "#fff", "202020", "#2020200", "#20202g", "red", "rgb(1,2,3)", " #202020", "#202020 ", "＃202020"} {
+		if got, ok := ParseHexColor(bad); ok {
+			t.Errorf("ParseHexColor(%q) 应拒绝，却得到 %q", bad, got)
+		}
+	}
+}

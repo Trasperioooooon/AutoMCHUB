@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"time"
 
 	"minedeck/internal/app"
@@ -121,6 +122,7 @@ func openWebView(url string, sig chan os.Signal, minimized bool) (ok bool) {
 	// Win32 窗口线程亲和：建窗与消息循环须固定在同一 OS 线程
 	runtime.LockOSThread()
 	scale := systemDPIScale() // 窗口尺寸按 DPI 放大，保持高分屏上的视觉大小
+	setWebViewBackground()    // 页面画出来之前的底色取界面标题栏色，冷启动不白闪（须在创建 WebView2 之前）
 	w := webview2.NewWithOptions(webview2.WebViewOptions{
 		Debug:     false,
 		AutoFocus: true,
@@ -156,6 +158,8 @@ func openWebView(url string, sig chan os.Signal, minimized bool) (ok bool) {
 		<-sig
 		postTrayQuit(hwnd)
 	}()
+	// 本次启动的 ID：前端据此只在冷启动后的第一次页面加载播放启动画面（刷新、托盘恢复都不再播）
+	w.Init("window.__MD_BOOT = " + strconv.Quote(bootID) + ";")
 	w.Navigate(url)
 	w.Run()
 	return true

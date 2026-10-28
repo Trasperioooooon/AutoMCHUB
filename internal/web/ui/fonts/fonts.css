@@ -1,0 +1,26 @@
+/* 由 tools/fonts/build_fonts.py 生成，请勿手改。字体：SIL OFL 1.1，许可原文见同目录 OFL-*.txt。
+   西文、等宽字体带 unicode-range（按子集实际字形表生成）：中文与全角标点落到 Noto Sans SC，
+   子集之外的生僻字由字体栈后面的系统字体（微软雅黑等）补上。 */
+@font-face {
+  font-family: "MD Geist";
+  src: url("Geist-latin.woff2") format("woff2");
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: block;
+  unicode-range: U+0020-007E, U+00A0-00AC, U+00AE-00FF, U+0131, U+0152-0153, U+02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+2013, U+2020-2022, U+2028-2029, U+2030, U+2032-2033, U+2039-203A, U+2044, U+20AC, U+2122, U+2190-2193, U+21B5, U+21E7, U+2212, U+221E, U+2248, U+2260, U+2264-2265;
+}
+@font-face {
+  font-family: "MD Geist Mono";
+  src: url("GeistMono-latin.woff2") format("woff2");
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: block;
+  unicode-range: U+0020-007E, U+00A0-00AC, U+00AE-00FF, U+0131, U+0152-0153, U+02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+2013, U+2020-2022, U+2028-2029, U+2030, U+2032-2033, U+2039-203A, U+2044, U+20AC, U+2122, U+2190-2193, U+21B5, U+21E7, U+2212, U+221E, U+2248, U+2260, U+2264-2265, U+2500-259F;
+}
+@font-face {
+  font-family: "MD Noto Sans SC";
+  src: url("NotoSansSC-gb2312.woff2") format("woff2");
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: block;
+}

@@ -1,25 +1,28 @@
-# MineDeck 设计系统 MASTER · v4「常规桌面应用 + 多配色方案」
+# MineDeck 设计系统 MASTER · v5「层次 + 方块」
 
 > **本文件是唯一事实来源（Single Source of Truth）。**
 > 屏幕级偏离写在 `design-system/pages/<screen>.md`，且必须注明偏离理由；没有对应文件 = 该屏幕完全遵循本文件。
 > 外部参考（uxpeak+ 课程、竞品、文章）只作灵感，**永不覆盖本文件**。
-> 来源：`internal/web/ui/themes.css`（配色令牌）、`app.css`（布局与组件）、`app.js`（组件实现）。
-> v4 起放弃 v3 的 Minecraft 游戏化外观（底部物品栏、体素方块、经验条、英文眉标、跳帧闪烁），改为常规桌面应用；
+> 来源：`internal/web/ui/themes.css`（配色令牌）、`app.css`（布局、组件与动效）、`app.js`（组件实现）、`pixel.js`（像素素材）、`fonts/`（内嵌字体）。
+> v5 只重做视觉层：布局、交互约定（§11）、配色的 data 属性机制都沿用 v4。v4 照着 Windows 11 搬来了「平」和「细线」，
+> v5 补上撑起层次的投影与立体描边，换成连续曲率圆角与内嵌字体，并借方块与像素语言找回个性（只做点缀）。
 > 标注 **[v3.3]** 的交互约定沿用不变。
 
 ---
 
 ## 1. 设计身份
 
-**一句话**：像一款正常的 Windows 管理工具——中性界面、一个强调色、状态一目了然；配色由用户自选。
+**一句话**：一款有层次的 Windows 管理工具——中性界面、一个强调色、状态一目了然；方块与像素只做点缀。
 
 - **布局参照**：Windows 11 设置 / WinUI NavigationView（标题栏 + 左侧导航 + 圆角内容层）。
 - **配色原则**（依据 uxpeak+《Make Any UI Look Premium》《The Psychology Behind Great UI》）：
   1. **界面保持中性，颜色留给操作**：强调色只用于主行动按钮、选中 / 当前指示、焦点环、链接与进度；同屏只有一个实底主按钮。
-  2. **状态用浅色底 + 同色系深字**（`.st-pill`、`.ri-restart` 等），**禁止在饱和色块上叠高饱和图标或文字**。
-  3. **卡片平铺**：实底 + 发丝边，不加阴影；阴影只给真正浮起的层（下拉菜单、弹窗、提示、吸底栏）。
-  4. **深色模式「越靠前越亮」**：页底最暗，卡片高一阶，浮层再高一阶；深色带一点色相（Nord / Catppuccin / Solarized 等方案自带）。
-- **保留的游戏相关元素**只有「内容本身」：MOTD 的 § 色码调色板与预览、控制台输出。
+  2. **状态用浅色底 + 同色系深字**（`.st-pill`、`.tag.warn` 等），**禁止在饱和色块上叠高饱和图标或文字**。
+  3. **层次靠明度 + 两档投影**：页面底（`--bg`）与卡片（`--surface`）拉开明度差（浅色 ≥ 1.12）；卡片带第一档投影，可点的卡片悬停浮起换第二档；浮层（菜单、提示、吸底条、弹窗）用第三、四档。
+  4. **可输入 = 凹陷，可点开 = 凸起**：输入框、轨道往里凹（内阴影）；按钮、下拉、键帽往外凸（上浅下深的描边 + 顶部内高光）。
+  5. **深色模式「越靠前越亮」**：页底最暗，卡片高一阶，控件与浮层再高一阶；深色带一点色相（方块 / Nord / Catppuccin / Solarized 等方案自带）。
+- **个性的边界**：像素元素只出现在核心头像、状态灯、眉标与侧栏指示、分段进度、MOTD 色块、空状态插画、启动画面与应用图标。正文、按钮、输入框、卡片外形一律是连续曲率的现代界面；像素画总是装在 squircle 瓦片「里面」、四周留白，不被圆角裁切。
+- **保留的游戏内容**：MOTD 的 § 色码调色板与预览、控制台输出。
 
 ## 2. 配色体系
 
@@ -28,39 +31,59 @@
 | 属性 | 取值 | 说明 |
 |---|---|---|
 | `data-theme` | `light` / `dark` | 实际明暗；「跟随系统」由前端解析为二者之一（`data-theme-pref` 记录用户选择 `auto/light/dark`） |
-| `data-scheme` | `fluent`（默认）/ `github` / `graphite` / `nord` / `catppuccin` / `solarized` | 配色方案：中性色 + 语义色 + 默认强调色 |
+| `data-scheme` | `craft`（方块，默认）/ `fluent` / `github` / `graphite` / `nord` / `catppuccin` / `solarized` | 配色方案：中性色 + 语义色 + 默认强调色 |
 | `data-accent` | `auto`（跟随方案）/ `blue` / `indigo` / `violet` / `teal` / `green` / `orange` / `rose` / `graphite` | 强调色覆盖（Tailwind 调色板取值） |
 
 - 偏好存 `localStorage`（`amh_theme` / `amh_scheme` / `amh_accent`），**每台设备各自记忆**；`index.html` 在样式表生效前写入属性，首帧无闪烁；非法值回退默认。
-- `themes.css` 的选择器**不带 `:root`**：任何元素带上这三个属性就按该方案渲染——「设置 → 外观」的方案预览卡正是这样实现的。
+- `themes.css` 的选择器**不带 `:root`**：任何元素带上这三个属性就按该方案渲染——「设置 → 外观」的方案预览卡正是这样实现的。`:root` 只有一份无属性时的兜底（同「方块」深色）。
 - 强调色覆盖块写在方案块之后，同等特异性下后者生效。
+- 方案列表在 `index.html`（首帧前落属性）与 `app.js`（外观页方案卡）各有一份，必须与 `themes.css` 一致，默认值都是 `craft`——`internal/themes` 的测试会核对。
 
 ### 2.2 方案一览
 
 | 方案 | 来源 | 浅色 | 深色 | 默认强调色 |
 |---|---|---|---|---|
-| Fluent（默认） | Microsoft Fluent 2 / Windows 11 | Mica 浅灰 `#f3f3f3` + 白卡 | `#202020` + `#2e2e2e` 卡 | 浅 `#005fb8` / 深 `#60cdff`（配黑字，Win11 原生） |
-| GitHub | Primer | 白底 + `#d1d9e0` 发丝边 | `#0d1117` | `#0969da` / `#1f6feb`（GitHub 原主按钮为绿，此处统一用蓝） |
-| 石墨 | shadcn/ui Zinc（Vercel 风格） | 纯中性灰阶 | `#0b0b0d` | 墨黑 / 近白（反色按钮） |
+| **方块**（默认） | v3 的方块游戏配色 | 暖沙纸底：chrome `#eae5d7` / bg `#f0ece1` / 卡片 `#fdfcf7` | 带绿调的炭黑：`#0e1210` / `#171d1a` / `#222926` | 草绿：浅 `#367d24` / 深 `#6fd24b`（配深字 `#0b1a0c`） |
+| Fluent | Microsoft Fluent 2 / Windows 11 | `#ebebeb` + `#f2f2f2` + 白卡 | `#202020` + `#282828` + `#323232` 卡 | 浅 `#005fb8` / 深 `#60cdff`（配黑字，Win11 原生） |
+| GitHub | Primer | `#eaebec` + `#f1f2f3` + 白卡 + `#d1d9e0` 发丝边 | `#010409` + `#0f1319` | `#0969da` / `#1f6feb`（GitHub 原主按钮为绿，此处统一用蓝） |
+| 石墨 | shadcn/ui Zinc（Vercel 风格） | 纯中性灰阶 | `#111113` + `#1b1b1d` + `#28282b` | 墨黑 / 近白（反色按钮） |
 | Nord | Arctic Ice Studio | Snow Storm | Polar Night | Frost `#88c0d0`（深色配深字） |
 | Catppuccin | Latte / Mocha | Latte | Mocha | Mauve |
 | Solarized | Ethan Schoonover | base3 | base03 | blue（按钮加深以过 AA） |
 
-为满足对比度，少数取值在官方色板基础上做了加深 / 提亮（如 Solarized 深色正文用 base2、Nord 浅色状态字加深）。这些调整值直接写在 `themes.css` 对应的方案块里，由下方的对比度测试兜底。
+v5 的层级色由脚本从 v4 推导：保持每套方案的色相与彩度，只调 OKLCH 明度——浅色 `surface : bg ≥ 1.12`、`bg : chrome ≈ 1.065`、`surface : control ≈ 1.075`；深色 `bg : chrome ≥ 1.10`、`surface : bg ≥ 1.16`、`control : surface ≈ 1.13`。为满足对比度，少数文字色在官方色板基础上做了最小调整（如 Fluent 深色 `--muted`、GitHub / Nord 深色 `--danger-text`），取值直接写在 `themes.css` 对应的方案块里，由下方的对比度测试兜底。
 
 ### 2.3 令牌清单（每个方案 × 浅深都必须定义）
 
 | 类别 | 令牌 | 用途 |
 |---|---|---|
-| 层级 | `--chrome` / `--bg` / `--surface` / `--surface-2` / `--overlay` / `--sunken` | 标题栏与侧栏 / 内容层 / 卡片 / 次级填充 / 浮层 / 凹陷井 |
-| 交互 | `--hover` | 透明底元素（导航项、菜单项、行）的悬停叠色 |
-| 线条 | `--border` / `--border-strong` | 发丝边 / 控件描边 |
-| 文字 | `--text` / `--muted` / `--faint` | 正文 / 次要 / 装饰（不承载必须读的信息） |
+| 层级 | `--chrome` / `--bg` / `--surface` / `--surface-2` / `--overlay` / `--sunken` | 标题栏与侧栏 / 内容层 / 卡片 / 次级填充 / 浮层 / 凹陷井（代码、条款框） |
+| 控件 | `--control` / `--control-hov` / `--control-act` | **v5** 凸起控件（次要按钮、下拉、筛选片、分段）的底：浅色比卡片深一阶，深色亮一阶 |
+| 输入 | `--field` | **v5** 输入框（凹陷）的底 |
+| 投影 | `--shadow-rgb` | **v5** 浅色投影的色相（`R G B`，如方块 `60 50 28`）；深色投影一律用黑 |
+| 交互 | `--hover` | 透明底元素（导航项、菜单项、第三级按钮、行）的悬停叠色 |
+| 线条 | `--border` / `--border-strong` | 发丝边 / 输入框描边 |
+| 文字 | `--text` / `--muted` / `--faint` | 正文 / 次要 / 装饰（不承载必须读的信息，如侧栏数字键提示） |
 | 强调 | `--accent` / `--accent-text` / `--accent-solid` / `--accent-solid-hov` / `--on-accent` / `--accent-subtle` | 图形级 / 文字级 / 主按钮底 / 主按钮悬停 / 主按钮上的字 / 选中浅底 |
 | 语义 | `--success*` / `--warning*` / `--danger*`（各含 `-text`、`-subtle`），`--danger-solid(-hov)` / `--on-danger` | 状态字、状态浅底、危险实底按钮 |
 | 终端 | `--term-bg` / `--term-fg` / `--term-cmd` / `--term-warn` / `--term-err` | 控制台、部署日志、MOTD 预览（双主题恒深） |
 
-阴影 `--shadow-sm/md/lg` 与遮罩 `--scrim` 只按明暗区分，定义在 `app.css`。二维码的 `--qr-dark` / `--qr-light`（`#18181b` / `#fff`）不随方案与明暗变化，也定义在 `app.css`：深模块配白底，任何配色下都扫得出。**组件样式一律引用令牌，不写死色值**（窗口关闭键的系统红 `#c42b1c` 除外）。
+只按明暗区分的令牌定义在 `app.css` 的 `[data-theme]` 块里：
+
+| 令牌 | 浅色 | 深色 | 用途 |
+|---|---|---|---|
+| `--elev-1` | `0 1px 2px /.07, 0 1px 1px /.04` | `0 1px 2px #000/.32, 0 0 0 1px #000/.10` | 静止：卡片、键帽、分组列表 |
+| `--elev-2` | `0 10px 24px -8px /.18, 0 3px 8px -2px /.08` | `0 12px 28px -8px #000/.60, …` | 悬停浮起（配 `translateY(-2px)`） |
+| `--elev-3` | `0 14px 32px -10px /.22, …` | `…/.62` | 菜单、提示、吸底条 |
+| `--elev-4` | `0 28px 64px -16px /.32, …` | `…/.72` | 弹窗 |
+| `--edge-top / -side / -bottom` | 8% / 12% / 22%（`--shadow-rgb`） | 白 13% / 白 7% / 黑 38% | 凸起控件的上浅下深描边 |
+| `--edge-hi` | 白 75% | 白 6% | 凸起控件顶部 1px 内高光 |
+| `--card-hi` | 透明 | 白 4.5% | 深色卡片顶部勾边 |
+| `--well` | `inset 0 1px 2px /.07` | `inset 0 1px 2px #000/.28` | 输入框、轨道（凹陷） |
+| `--track` | 正文色 6% 混进 `--bg` | 黑 30% 混进 `--bg` | 标签页 / 分段控件的凹陷轨道 |
+| `--scrim` | `--shadow-rgb` 32% | 黑 56% | 弹窗遮罩（另加 2px 背景模糊） |
+
+二维码的 `--qr-dark` / `--qr-light`（`#18181b` / `#fff`）不随方案与明暗变化，也定义在 `app.css`：深模块配白底，任何配色下都扫得出。**组件样式一律引用令牌，不写死色值**（窗口关闭键的系统红 `#c42b1c`、像素画的固定色除外）。
 
 ### 2.4 对比度基线（WCAG AA）
 
@@ -68,111 +91,158 @@
 |---|---|
 | `--text` 叠在 bg / surface / chrome / overlay / surface-2 上 | 4.5（目标 7） |
 | `--muted`、`--accent-text` 叠在 bg / surface / chrome / overlay 上 | 4.5 |
-| `--text` 叠在 chrome 上的 `--accent-subtle`、`--hover`（当前 / 悬停导航项） | 4.5 |
-| `--muted` 叠在 surface 上的 `--accent-subtle`（选中行里的次要字，如版本类型与发布日期） | 4.5 |
+| `--text` 叠在 chrome 上的 `--accent-subtle`、`--hover`（悬停导航项） | 4.5 |
+| `--muted`、`--text` 叠在 surface 上的 `--accent-subtle`（选中行里的正文与次要字） | 4.5 |
 | 三种状态字叠在 surface / bg 及各自浅底上 | 4.5 |
 | `--on-accent` 叠在 accent-solid(-hov) 上；`--on-danger` 叠在 danger-solid(-hov) 上 | 4.5 |
 | 终端四色叠在 `--term-bg` 上 | 4.5 |
-| `--accent` 叠在 surface / bg 上（焦点环、进度、指示条） | 3 |
+| **v5** `--text` 叠在 `--control` / `-hov` / `-act` / `--field` 上（按钮、下拉、输入框） | 4.5 |
+| **v5** `--muted` 叠在 `--control` / `--field` / `--surface-2` 上（占位符、按钮里的次要字） | 4.5 |
+| **v5** `--danger-text` 叠在 `--control`（列表里的危险按钮）与 `--overlay`（菜单危险项）上；`--accent-text` 叠在 `--control` 上 | 4.5 |
+| **v5** `--text` 叠在 surface / bg 上的 `--hover`（第三级按钮、菜单项悬停） | 4.5 |
+| **v5** `--text`、`--muted` 叠在 `--track` 上（标签页、分段控件的未选中项） | 4.5 |
+| **v5** `--muted` 叠在徽标底（正文色 7% 混进 surface）与计数底（6% 混进 bg）上；`--warning-text` 叠在 `--overlay` 上 | 4.5 |
+| **v5** `--text` / `--muted` 叠在选中卡片底（强调色 6% 混进 surface）上 | 4.5 |
+| `--accent` 叠在 surface / bg 上（焦点环、进度、指示条）；`--accent-text` 叠在行首图标瓦片（强调色 12% 混进 surface）上 | 3 |
 
-**自动校验**：`go test ./internal/themes/`（纯 Go，任何平台可跑）解析 `themes.css`，对 6 方案 × 2 模式 × 8 强调色共 1428 组逐一计算。**改任何配色都必须先跑通它。**
+**自动校验**：`go test ./internal/themes/`（纯 Go，任何平台可跑）解析 `themes.css`，对 7 方案 × 2 模式 × 9 种强调色（含跟随方案）共 2520 组逐一计算，`app.css` 里 `color-mix` 派生的颜色按同样的式子在测试里混色；同时核对每个方案 × 明暗都定义了 v5 令牌、`index.html` / `app.js` 的方案列表与默认值、原生窗口默认底色与「方块」的 `--chrome` 一致。**改任何配色都必须先跑通它。**
 
 ## 3. 字体排印
 
-| 角色 | 字体栈 | 规格 |
-|---|---|---|
-| 正文 `--font` | `"Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", system-ui` | 14px，行高 1.5 |
-| 等宽 `--mono` | `"Cascadia Mono", Consolas, "SF Mono", Menlo` | 控制台、路径、键名、版本号、数据 |
+界面字体随 exe 内嵌（`internal/web/ui/fonts/`，`go:embed` 打包），任何机器看到的都是同一套字形；子集之外的生僻字由字体栈后面的系统字体逐字补上。
 
-字阶：页标题 `h1` 24px/600；分区标题 `h2` 16px/600；`h3` 15px/600；正文 14px；`.sub` 13px muted；`.hint`、徽标、次要信息 12px；按钮 13px/600（`sm` 12px）。中文不用斜体；禁止引入外部字体。
+| 角色 | 字体栈 | 说明 |
+|---|---|---|
+| 正文 `--font` | `"MD Geist", "MD Noto Sans SC", "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", system-ui` | 西文 Geist，中文 Noto Sans SC |
+| 等宽 `--mono` | `"MD Geist Mono", "MD Noto Sans SC", "Cascadia Mono", Consolas, "Microsoft YaHei UI", …` | 控制台、路径、端口、键名、版本号、数据；控制台关闭连字 |
+
+- **字体文件**：`Geist-latin.woff2`、`GeistMono-latin.woff2`、`NotoSansSC-gb2312.woff2` + `fonts.css` + 两份 OFL 原文，由 `tools/fonts/build_fonts.py` 生成（来源、校验和、字符集见 `tools/fonts/README.md`）。中文子集 = GB2312 全部 6763 字 + GB2312 符号区 + 常用标点 + 界面文案用到的全部字符；西文子集 = latin 范围 + 常用符号 + 制表符。中文语境的弯引号、省略号、破折号不进西文子集，交给中文字体渲染成全角样式。**界面文案出现 GB2312 以外的字符后要重跑一次脚本**（`--check` 可只检查）。
+- **字重**：三款都是可变字体，字重轴限制在 400–600。正文 400、按钮 / 导航 / 标签 / 表单标签 500、标题 / 卡片名 / 当前项 600；`<b>`、MOTD 的 `§l` 等请求 700 时取 600，不做伪粗体（`font-synthesis-weight: none`）。
+- **字阶**：页标题 `h1` 26/34·600（字距 -0.015em）· 分区标题 `h2` 18/26·600 · 卡片标题 `h3` 15/22·600 · 正文 14/22·400 · 按钮 / 导航 / 标签页 13–14·500 · `.sub` 13·400 muted · `.hint`、徽标 12·400–500 · 眉标 12·600（`--accent-text`）· 标签 11·600。等宽：控制台 12.5（可调），MOTD 预览 14。
+- **眉标** `.eyebrow`：像素小方块 + 上下文信息（「共 4 台 · 运行中 1 · 在线 3 人」「第 1 步 / 共 4 步」「设置 / 存储位置」「2 条隧道 · 运行中 1」），放在页标题上方；不写纯装饰的英文。
+- 中文不用斜体。
 
 ## 4. 布局与间距
 
-- **骨架**：`#titlebar`（40px，无边框窗口的拖动区 + 窗口三键）→ `#shell` = `#sidebar`（232px）+ `#main`（内容层：`--bg`、左上 8px 圆角 + 发丝边）。标题栏空白处按下即拖动窗口、双击最大化（`has-host-chrome` 分支，**不可破坏**）。
-- **侧栏**：服务器 / 新建服务器 / 内网穿透，底部设置；页脚为外观快捷切换（跟随系统 → 浅色 → 深色）与版本号。当前项 = `--accent-subtle` 底 + 左侧 3px 强调条 + 正文色文字。
-- **页头**：`pageHead(title, sub, actions, crumbs)`——标题左上、说明在下、主操作在右；详情等子页面上方加面包屑。不再使用英文眉标。
+- **骨架**：`#titlebar`（40px，无边框窗口的拖动区 + 窗口三键）→ `#shell` = `#sidebar`（232px）+ `#main`（内容层：`--bg`、左上 `--r-xl` 圆角 + 发丝边 + 向左上的柔和投影，像一张浮在 chrome 上的纸）。标题栏空白处按下即拖动窗口、双击最大化（`has-host-chrome` 分支，**不可破坏**）。
+- **侧栏**：服务器 / 新建服务器 / 内网穿透，底部设置；每项右侧是数字键提示（1–4，`kbd.key`）。当前项是凸起的**键帽**（卡片底 + `--elev-1` + 顶部内高光 + 发丝环，底板在 `::after`）+ 左侧 3px 像素阶梯指示条 + 强调色图标；切页时键帽从旧位置滑到新位置。页脚为外观快捷切换（跟随系统 → 浅色 → 深色）与版本号。
+- **页头**：`pageHead(title, sub, actions, crumbs, eyebrow)`——眉标在标题上方、说明在下、主操作在右；详情等子页面上方加面包屑。
 - **内容宽度两档**：数据面 `--w-wide: 1240px`（卡片网格、控制台、属性、原始表）；阅读面 `--w-read: 760px`（表单、设置正文、向导）。
 - **`#main` 的直接子元素不收缩**（`flex-shrink: 0`）：它是纵向 flex 滚动容器，否则带 overflow 的子元素（如标签栏）会被压成 0 高。
-- **圆角**：`--radius-sm 4px`（徽标、小件）· `--radius-md 6px`（按钮、输入框、导航项）· `--radius-lg 8px`（卡片、菜单）· `--radius-xl 12px`（弹窗）。
+- **圆角（连续曲率）**：全局 `*, ::before, ::after { corner-shape: var(--corner) }`，`--corner: superellipse(1.7)`；数值是曲线起点，约为视觉半径的 1.5 倍——`--r-xs 6px`（标签内小件、代码）· `--r-sm 9px`（小按钮、图标瓦片、菜单项）· `--r-md 12px`（按钮、输入框、导航项、键帽）· `--r-lg 18px`（卡片、分组列表、菜单、提示、吸底条）· `--r-xl 24px`（弹窗、内容层）· `--r-full 999px`（徽标、标签、状态胶囊、筛选片统一「半高」）。不支持 `corner-shape` 时（旧 WebView2、回退浏览器、局域网里的 Firefox / Safari）`@supports` 换成视觉半径相同的普通圆角 4 / 6 / 8 / 12 / 16。正圆元素（开关轨道与滑块、色板、单选圆点）显式写 `corner-shape: round`；像素方块（状态灯、MOTD 色块、眉标）是 0 圆角。嵌套同心：轨道半径 = 键帽 + 3px。
 - **间距**：4px 网格（4 / 8 / 12 / 16 / 20 / 24 / 28 / 32）；字段之间 16px，标签与控件 6px，分区之间 28px。
-- **响应式**：≤960px 侧栏收成 60px 图标栏（标签进 `title`）；≤640px（局域网手机访问）变为底部标签栏，内容层去圆角。1024px 宽起各页无横向滚动。
+- **响应式**：≤960px 侧栏收成 64px 图标栏（标签进 `title`，数字键提示隐藏）；≤640px（局域网手机访问）变为底部标签栏，内容层去圆角与投影，分组列表的行内控件换行。1024 / 900 / 390 宽度均无横向滚动。
 
-## 5. 动效令牌
+## 5. 动效
+
+### 5.1 令牌
 
 | Token | 值 | 用途 |
 |---|---|---|
-| `--dur-1` | 90ms | 按压反馈、输入框 focus 光晕 |
-| `--dur-2` | 160ms | hover、展开 / 收起、选中态、页内局部入场（`sec-in`） |
-| `--dur-3` | 240ms | 入场（toast、modal、跨页 `view-in`）、进度条宽度 |
-| `--ease-out` | `cubic-bezier(.22,1,.36,1)` | 入场 / 展开 |
-| `--ease-in-out` | `cubic-bezier(.4,0,.2,1)` | 离场、呼吸 |
+| `--dur-1` | 100ms | 按下、开关底色、焦点光晕 |
+| `--dur-2` | 160ms | 悬停、菜单进场、离场、骨架淡出、页内块入场之外的小切换 |
+| `--dur-3` | 220ms | 页内切换（`sec-in`）、弹窗 / 提示进场、键帽滑动、状态变色、展开收起 |
+| `--dur-4` | 320ms | 跨页入场（`view-in`）、列表单项入场 |
+| `--ease-out` | `cubic-bezier(.22, 1, .36, 1)` | 进场、展开、滑动：快起慢停 |
+| `--ease-in` | `cubic-bezier(.55, 0, .75, .2)` | 离场：慢起快走 |
+| `--ease-in-out` | `cubic-bezier(.4, 0, .2, 1)` | 往返、闪烁 |
+| `--ease-spring` | `cubic-bezier(.34, 1.36, .64, 1)` | 小件回弹：开关滑块、对勾、进度格（过冲约 6%） |
+| `--stagger` | 28ms | 列表逐项错峰，最多算到第 6 项 |
 
-- hover 过渡 ≥ `--dur-2`；所有过渡引用令牌，不裸写毫秒数与贝塞尔值。
-- 具名动画：`view-in`（淡入 + 6px 抬升）、`sec-in`、`menu-in`、`modal-in` / `mask-in`、`toast-in/out`、`pulse`（启动中 / 停止中状态点的平滑呼吸）、`spin`（部署中步骤）、`sk-shim`（骨架）。
-- **[v3.2] 入场两级制**：页级 `view-in` 只在真正跨页时重播；设置分区、详情标签页只动被替换的内容块。
-- `prefers-reduced-motion` 全局关停所有动画与过渡。
+**原则**：只动 `transform` 与 `opacity`（合成层，WebView2 里不触发重排；唯一例外是状态行的 `grid-template-rows` 展开收起）；卡片悬停的第二档投影放在 `::after` 里只改透明度；离场一律比进场短；所有时长与缓动引用令牌，JS 里的 WAAPI 用同样的数值（`app.js` 的 `MOTION`）。轮询重绘在 `lastSig` 相同时跳过，不重播动画；换外观的那一帧暂停所有过渡（`.no-transition`），整页一次换色。`prefers-reduced-motion: reduce` 时 CSS 全局关停 animation / transition，JS 动画（键帽 FLIP、提示补位）先判断再播，浮层直接显隐。
+
+### 5.2 场景
+
+| 场景 | 做法 | 「减少动态」时 |
+|---|---|---|
+| 启动画面 | 只在原生窗口冷启动时（宿主注入的 `window.__MD_BOOT` 与 sessionStorage 不同）：应用图标 16×16 网格拆成 64 个 2×2 方块自下而上逐行落下（单块 200ms，逐行错峰 34ms）→ 字标 220ms → 8 格进度；界面就绪且方块拼完（0.76s）后淡出 200ms，整体封顶约 1s；点击或任意键立即跳过（按键不触发快捷键）。刷新、托盘恢复、局域网浏览器都不播 | 不播 |
+| 跨页（侧栏、面包屑、卡片进详情） | 内容层 `view-in` 320ms（淡入 + 上移 8px）；侧栏键帽 FLIP 滑动 220ms | 直接切换 |
+| 页内（详情标签、设置分区、向导步骤） | 只给被替换的块 `sec-in` 220ms（上移 4px）；标签 / 设置导航 / 分段控件的键帽滑动 220ms | 直接切换 |
+| 列表 / 骨架 → 内容 | 骨架淡出 160ms；卡片逐项 `item-in` 320ms（上移 6px、0.985→1），错峰 28ms；之后的轮询重绘不再播 | 直接出现 |
+| 菜单 | 进 160ms（-4px、0.98→1，自锚点方向展开）/ 出 120ms | 直接显隐 |
+| 弹窗 | 遮罩淡入 160ms；对话框进 220ms（+10px、0.97→1）/ 出 140ms | 直接显隐 |
+| 提示 | 进 220ms（-8px）/ 出 160ms（右移 16px）；其余提示 220ms 平移补位（FLIP） | 直接显隐 |
+| 微交互 | 按钮底色 160ms；按下 100ms（下沉 0.5px、缩到 0.985）；主按钮悬停上浮 1px；开关滑块 220ms 回弹、按住拉长；选中的核心卡对勾弹出；复制按钮换成对勾「已复制」1.3s；「放弃修改」出现时换场 | 仅瞬时变色 |
+| 卡片悬停 | 上浮 2px + 第二档投影淡入 160ms | 仅描边变化 |
+| 部署进度 | 经验条 30 格，新增的格子逐个点亮（自下弹起 220ms，错峰 24ms）；步骤对勾弹出；完成时整条闪一下 420ms | 格子直接点亮 |
+| 服务器状态 | 胶囊变色 220ms、文字上下换场 160ms；进入「运行中」状态灯放一圈像素波纹 640ms、在线人数格逐个点亮；操作按钮换场 160ms；状态行展开 / 收起 220ms（grid 0fr↔1fr） | 颜色与文字直接切换 |
+
+具名动画：`view-in`、`sec-in`、`item-in`、`fade-in/out`、`menu-in/out`、`modal-in/out`、`toast-in/out`、`md-pop`、`label-in/out`、`ping`、`cell-on`、`flash`、`swap-in`、`block-in`（启动画面）、`px-blink`（启动中 / 停止中状态灯两帧跳变）、`px-wave`（忙碌条）、`spin`（部署中步骤）、`sk-shim`（骨架）。
 
 ## 6. 组件目录
 
 | 组件 | 规格 | 使用规则 |
 |---|---|---|
-| `.btn` | 32px 高，surface 底 + `--border-strong` 描边；`primary` = accent-solid + on-accent；`danger` = 红字描边；`sm` 28px；`icon-only` | 一屏最多一个 primary；危险入口在列表里是描边红字，确认弹窗里的最终键才是实底红 |
-| `.card` 实例卡 | surface + 发丝边，无阴影；悬停只加深边框；纵向 flex，操作行贴底 | 整卡可点进详情；操作：启动 / 停止、管理、「···」（打开文件夹、删除） |
-| `.avatar` | 36px（`lg` 44px）圆角方块，核心首字母；底色 = 核心色 16% 混入卡片底，字色 = 核心色 58% 混入正文色 | 取代体素方块；颜色只作辨识，不铺大色块 |
-| `.badge` | 22px，正文色 7% 叠底 + muted 字；`.core` 用正文色加粗 | 元数据标签，不做按钮 |
-| `.st-pill` | 胶囊：状态点 + 文字；运行中 = success 浅底，启动中 / 停止中 = warning 浅底，已停止 = 中性 | 状态永远「点 + 文字」；详情页头带运行时长与在线人数 |
-| `.ver-tag` / `.rec-badge` / `.gr-tag` | accent-subtle 底 + accent-text | 「最新」「推荐」「新手推荐」「游戏规则」等提示性标签 |
-| `.tabs` / `.tab` | 下划线式，当前项 2px 强调色下划线；标签是 `<a>` | 详情页内导航（切换走 hash，受未保存守卫保护） |
-| `.steps` | 圆圈序号 + 连线；当前步实底，已完成打勾可点回，未到达描边 | 新建向导 |
-| `.ver-item` | 行式列表，选中 = accent-subtle 底 + 左侧 3px 强调条，文字保持正文色；有 `releaseTime` 时版本号下加 `.ver-date` 日期副行（等宽 11px muted） | 版本 / 构建选择 |
-| `.core-card` / `.radio-card` / `.scheme-card` | 选中 = 强调色描边 + 1px 外环 + 6% 强调色叠底 | 单选卡片 |
-| `.row-item` | Windows 11 设置式卡片行：标题 + 说明 + 右侧控件，≥60px | 设置页与常用设置 |
+| `.btn` 次要（默认） | 32px 高，`--r-md`；底 `--control`（悬停 `-hov`、按下 `-act`）+ 上浅下深描边 `--edge-*` + 顶部 1px 内高光 + 极轻投影；500 字重 | 大多数操作 |
+| `.btn.primary` 主 | `--accent-solid` 底 + `--on-accent` 字、600；顶部高光、底部压暗、同色系外投影，悬停上浮 1px | 一屏最多一个 |
+| `.btn.ghost` 第三级 | 无底无框，悬停才出现 `--hover` 浅底 | 「管理」「放弃修改」「···」、工具栏图标、恢复默认 |
+| `.btn.danger` / `.btn.danger.solid` 危险 | 列表里：次要外形 + 红字，悬停转危险浅底；确认弹窗的最终键：实底红 | 危险入口在列表里是红字，只有确认弹窗里的最终键是实底红 |
+| `.btn.sm` / `.icon-only` | 28px、`--r-sm`；纯图标按钮宽 = 高 | 纯图标按钮必须有 `aria-label` 或 `title` |
+| 输入框 / `textarea` | 34px，`--field` 底 + `--border-strong` 描边 + `--well` 内阴影（凹陷）；聚焦强调色描边 + 3px 光晕 | 错误：`.invalid` 红框 + 字段下方 `.field-err` |
+| `select` | 外形同次要按钮（凸起）+ 右侧箭头（`--chev`） | 原生下拉，选项跟随明暗 |
+| `.card` 实例卡 | `--surface` + 发丝边 + `--r-lg` + `--elev-1`（深色加顶部勾边）；可点的卡片悬停上浮 2px、`::after` 里的 `--elev-2` 淡入；纵向 flex，操作行贴底 | 内容：像素头像 + 名称 / 类型 + 状态胶囊；核心徽标与版本；端口 · 内存 · Java（等宽数值）；状态行（经验条）；MOTD；启动 / 停止（主 / 次）、管理与「···」（第三级）。整卡可点进详情 |
+| `.px-avatar` | 40px（`lg` 52px、`sm` 32px）squircle 瓦片：核心色 15%（深色 24%）混入卡片底 + 上浅下深倒角，里面是 12×12 像素图案（`pixel.js`，12 种核心各一枚，未知核心为圆石） | 只作辨识，不铺大色块 |
+| `.badge` | 22px 半高胶囊，正文色 6% 叠底 + muted 字；`.core` 用正文色并在前面放一个核心色 6px 方块 | 元数据，不做按钮 |
+| `.tag`（`.ver-tag` / `.rec-badge` / `.gr-tag` / `.ri-restart`） | 20px 半高、11px 600；强调浅底 + `--accent-text`；`.warn`（重启生效）为警告浅底 | 「最新」「推荐」「新手推荐」「游戏规则」「重启生效」 |
+| `.st-pill` + `.dot` | 半高胶囊：8×8 像素状态灯（左上亮、右下暗）+ 文字；运行中 = success 浅底，启动中 / 停止中 = warning 浅底且状态灯两帧闪烁，已停止 = 中性 | 状态永远「灯 + 文字」；详情页头带运行时长与在线人数 |
+| `.xp` 经验条 | 分段格（8px 高，`lg` 12px），亮格上亮下暗；`.success` / `.warn` 换色；`.run` 最前一格闪烁；`.busy` 亮格扫过 | 格数有含义：在线人数（每格 1 人，上限超过 20 时每格多人）、部署进度（30 格）、内存（`.mem-xp`，1 格 = 512 MB 起） |
+| `.tabs` / `.tab`，`.seg` | 凹陷轨道（`--track` + `--well`，半径 = 键帽 + 3px）+ 当前项凸起键帽（卡片底 + `--elev-1`，底板在 `::after`）；切换时键帽滑动 | 详情页标签（`<a>`，切换走 hash，受未保存守卫保护）；主题模式等 2–4 选 1 |
+| `.steps` / `.step-pill` | 26px 方块序号（等宽）+ 像素虚线；当前步实底带倒角，已完成打勾可点回（浅强调底），未到达描边 | 新建向导；眉标写「第 n 步 / 共 4 步」 |
+| `.ver-item` | 行式列表（在卡片里），选中 = accent-subtle 底 + 左侧 3px 强调条，文字保持正文色；有 `releaseTime` 时版本号下加 `.ver-date` 日期副行（等宽 11px muted） | 版本 / 构建选择 |
+| `.core-card` / `.scheme-card` | 卡片外形，悬停浮起；选中 = 强调色描边 + 1px 外环 + 6% 强调色叠底，核心卡右上角对勾方块弹出 | 单选卡片 |
+| `.group` + `.row-item`（分组列表） | iOS 式：一组一张卡（`--r-lg` + `--elev-1`），行与行之间是缩进的发丝线（从文字起点开始，`.has-ico` 时缩进到图标之后）；行 = 可选 32px 图标瓦片（强调色 12% 底 + `--accent-text` 图标）+ 标题（14·600）/ 说明（12 muted）/ 键名或路径（等宽 12）+ 右侧控件（开关 / 按钮 / 徽标），最小高 62px；整行是一个输入时，输入框 + 保存键放在标题下方（`.ri-field`）；单选行（`.choice`）整行可点、键盘可选，选中行右侧打勾 | 设置页全部分区、备份列表；危险操作单独成组（`.danger-zone` 红色发丝边） |
 | `.qr-card` | 左码右文：`.qr-box` 168px，恒用 `--qr-light` 底，SVG 自带 4 模块静区（`qrcode.js` 纯前端生成）；多个本机地址时 `.qr-ip` 按钮切换，当前项 = accent-subtle 底 + 强调色边框 | 「设置 → 远程访问」；二维码不随主题反色 |
-| `.switch` | 40×20 胶囊，关闭 = muted 描边，开启 = accent-solid 底 + on-accent 圆点 | 开关即时生效（见 §11） |
-| `.seg` | 分段控件，选中段 = overlay 底 + 描边 + 小阴影 | 主题模式等 2–4 选 1 |
-| `.dropmenu` | overlay 底 + `--shadow-md`；分组标题 / 分隔线 / 危险项 / 禁用项 + 原因 | `dropMenu(anchor, items)` 生成；点外部 / Esc 关闭 |
-| `.modal` / `.toast` | modal：overlay 底、12px 圆角、`--shadow-lg`；toast：标题栏下方右侧，带成功 / 错误图标，可点击关闭 | 危险确认框：标题点名对象、按钮写出后果、默认聚焦取消 |
-| `.empty` | 居中：强调色浅底图标 + 标题 + 一句说明 + 一个主行动 | 次要入口用 `.quiet-link` |
-| `.err-box` / `.warn-card` | danger / warning 浅底 + 同色描边 | 错误要说清发生了什么 + 下一步 |
-| `.save-bar.sticky` / `.wizard-foot` | overlay 底吸底条，有未保存修改时强调色描边 | 见 §11 |
-| `.console` / `.task-log` / `.motd-preview` | 终端令牌，双主题恒深 | WARN = `--term-warn`，ERROR = `--term-err`，命令回显 = `--term-cmd` |
-| `.progress-bar` | 6px，强调色填充 | 部署进度 |
+| `.switch` | 40×22 凹陷胶囊轨道（关闭 = 正文色混入卡片底，开启 = `--accent-solid`）+ 16px 凸起圆滑块（关 = 白，开 = `--on-accent`），滑块回弹、按住拉长 | 开关即时生效（见 §11） |
+| `.prop-item` | 卡片（`--r-lg` + `--elev-1`）：标题 + 标签、说明、键名（`.pk` 等宽）+ 右侧控件 | 常用设置的单项；分组标题旁带等宽计数 `.cp-gn` |
+| `.cp-chip` | 28px 半高筛选片，凸起控件外形 | 常用设置里跳到分组 |
+| `.dropmenu` | `--overlay` 底 + `--r-lg` + `--elev-3`；菜单项 32px `--r-sm`；分组标题 / 分隔线 / 危险项（红字）/ 禁用项 + 原因 | `dropMenu(anchor, items)` 生成；点外部 / Esc 关闭；进出场见 §5 |
+| `.modal` / `.toast` | modal：`--overlay` 底、`--r-xl`、`--elev-4`，遮罩带 2px 模糊；危险确认框标题前有危险色图标瓦片。toast：360px、`--r-lg`、`--elev-3`，左侧 24px 成功 / 错误图标瓦片，标题栏下方右侧，可点击关闭 | 危险确认框：标题点名对象、按钮写出后果、默认聚焦取消 |
+| `.empty` | 居中：像素插画（`MDPixel.emptySVG`：漂浮的草方块小岛 + 像素服务器 + 加号牌子，牌子取强调色）+ 标题 + 一句说明 + 一个主行动 | 次要入口用 `.quiet-link` |
+| `.eyebrow` | 12·600 `--accent-text`，前面一个 6px 强调色方块（带 2px 错位影） | 页标题上方的上下文 |
+| `.err-box` / `.warn-card` | danger / warning 浅底 + 同色描边，`--r-lg` | 错误要说清发生了什么 + 下一步 |
+| `.save-bar.sticky` / `.wizard-foot` | `--overlay` 底 + `--elev-3` 吸底；保存条左侧像素状态灯，有未保存修改时强调色描边 + 灯变强调色，「放弃修改」为第三级按钮 | 见 §11 |
+| `.console` / `.task-log` / `.motd-preview` | 终端令牌，双主题恒深，凹陷（内阴影），`--r-md` | WARN = `--term-warn`，ERROR = `--term-err`，命令回显 = `--term-cmd` |
+| `.pal-btn` | MOTD § 色码：22px 像素方块（上亮下暗倒角），悬停上抬 2px；样式码为小号凸起按钮 | 游戏颜色本身就是内容 |
+| 启动画面 `#splash` | 见 §5.2；底色 `--chrome`，与原生窗口的默认底色一致 | 只在冷启动 |
 
 ## 7. 图标规范
 
-- **一律内联 SVG**：`viewBox="0 0 16 16"`，`stroke="currentColor"`、`stroke-width="1.3"`、圆角端点；极简实心形状可用 `fill="currentColor"`。实现见 `app.js` 的 `ICON` 映射与 `icon(name, cls)`；侧栏与标题栏图标直接内联在 `index.html`。
-- 颜色继承文字色；导航当前项、空态图标等用 `--accent`。
+- **界面图标一律内联 SVG**：`viewBox="0 0 16 16"`，`stroke="currentColor"`、`stroke-width="1.3"`、圆角端点；极简实心形状可用 `fill="currentColor"`。实现见 `app.js` 的 `ICON` 映射与 `icon(name, cls)`；侧栏与标题栏图标直接内联在 `index.html`。
+- 颜色继承文字色；导航当前项、行首图标瓦片等用 `--accent` / `--accent-text`。
 - 形状要能区分：例如「设置」用带齿的齿轮，不能和「浅色」的太阳图标混淆。
 - 不用 emoji 作界面图标或标题装饰（用户内容如 MOTD、控制台输出除外）。
 - 纯图标按钮必须有 `aria-label` 或 `title`；图标栏模式下侧栏标签进 `title`。
-- Logo：强调色圆角方块上两台服务器的简笔（`.logo-mark`），随强调色变化；浏览器标签页图标为固定的 Fluent 蓝版本。
-- 应用图标（`assets/icon.ico`，16–256px 共 7 档）与 Logo 同形、固定 Fluent 蓝，用于窗口、任务栏与托盘；exe 文件图标由 `rsrc_windows_amd64.syso` 提供，换图标后须重新生成它（`go run github.com/akavel/rsrc@v0.10.2 -ico assets/icon.ico -arch amd64 -o rsrc_windows_amd64.syso`，或用 mingw 的 windres 编译只含 `1 ICON "assets/icon.ico"` 的 .rc）。
+- **应用图标：方案 B「体素机柜」**——等距视角的方块：草皮盖 + 深色机柜身，左面指示灯与插槽、右面散热条。逐尺寸绘制的像素画：16 / 24 / 32 各画一张原生网格，48 = 24 网格 ×2，64 / 128 / 256 = 32 网格 ×2 / ×4 / ×8，全部最近邻放大，没有半像素。`assets/icon.ico` 含这 7 档，用于窗口、任务栏与托盘（`icon_windows.go` 经 `go:embed` 内嵌）；exe 文件图标由 `rsrc_windows_amd64.syso` 提供，**换图标后须重新生成它**：`go run github.com/akavel/rsrc@v0.10.2 -ico assets/icon.ico -arch amd64 -o rsrc_windows_amd64.syso`（或用 mingw 的 windres 编译只含 `1 ICON "assets/icon.ico"` 的 .rc）。
+- **Logo**：界面里用同一套像素画，固定配色、不随强调色变化：标题栏 16px（`img/logo-16/20/24/32/48.png`，按屏幕缩放取原生网格；125% 用 16 网格加 2px 透明边的 20px 版 1:1 显示）；引导卡、关于页、局域网登录框 48px（`logo-48/72/96/144.png`）；网页标签图标 `logo-16/32.png`。一律 `image-rendering: pixelated`。启动画面的方块拼图取自 16px 那一张。
 
 ## 8. 异步视图三态
 
-- **加载 / 空 / 错误三态缺一不可**：列表首屏用骨架；空态给一个主行动；错误用 `.err-box` 并给出下一步。
-- 轮询刷新做**签名比对**，数据无变化不重绘（`renderInstances` 的 `lastSig`），避免闪烁与丢焦点。
-- **[v3.3] 视图代号**：每次切页 `viewGen++`；异步渲染在每个 `await` 之后用 `stale(gen)` 判断，过期即放弃；轮询一律经 `startPoll(fn, ms, gen)` 挂载。
+- **加载 / 空 / 错误三态缺一不可**：列表首屏用骨架（骨架淡出后卡片错峰入场）；空态给一个主行动；错误用 `.err-box` 并给出下一步。
+- 轮询刷新做**签名比对**，数据无变化不重绘（`renderInstances` 的 `lastSig`），避免闪烁、丢焦点与重播动画；状态真的变了，只给变化的卡片播状态切换动效。
+- **[v3.3] 视图代号**：每次切页 `viewGen++`；异步渲染在每个 `await` 之后用 `stale(gen)` 判断，过期即放弃；轮询一律经 `startPoll(fn, ms, gen)` 挂载。延迟执行的入场（骨架淡出后再画卡片）同样先核对代号。
 
 ## 9. 硬约束（工程红线）
 
-1. 无框架、无构建步骤；vanilla HTML / CSS / JS，经 `go:embed` 打包进单文件 exe。后端语言保持 Go。
-2. 零外部网络请求：图标内联，字体用系统字体（Modrinth 资源图标等内容图片除外）。
-3. 无边框拖动（标题栏 mousedown）与窗口三键必须始终可用。
+1. 无框架、无构建步骤；vanilla HTML / CSS / JS，经 `go:embed` 打包进单文件 exe。后端语言保持 Go。字体子集由 `tools/fonts` 手动生成后入库，不算构建步骤。
+2. 运行时零外部网络请求：图标内联，**字体随 exe 内嵌**（`/fonts/` 带 ETag，局域网手机再次打开只回 304）（Modrinth 资源图标等内容图片除外）。
+3. 无边框拖动（标题栏 mousedown）与窗口三键必须始终可用；`has-host-chrome` 分支不可破坏。
 4. 所有配色组合必须通过 `go test ./internal/themes/`；终端容器双主题恒深。
-5. 快捷键：1–4 切换侧栏导航；T 或 / 聚焦控制台；控制台 ↑↓ 翻历史、Tab 补全；Esc 关闭弹层。弹层打开时 1–4 不响应。
+5. 快捷键：1–4 切换侧栏导航；T 或 / 聚焦控制台；控制台 ↑↓ 翻历史、Tab 补全；Esc 关闭弹层。弹层打开时 1–4 不响应；启动画面期间按键只用于跳过。
 6. 壁纸机制（程序旁 `bg/` 目录）不可破坏：标题栏、侧栏与内容层改为半透明蒙版，卡片保持实底。
+7. 动效只动 transform / opacity，尊重「减少动态」；启动画面只在原生窗口冷启动时播放。
+8. 原生窗口在创建 WebView2 之前设置 `WEBVIEW2_DEFAULT_BACKGROUND_COLOR`（取前端上报的 `chromeColor`，没有则取默认方案的标题栏色），冷启动不白闪。
 
 ## 10. 交付检查清单（每屏改完必过）
 
-- [ ] 6 套方案 × 浅 / 深各截图过目（`tools/ui-dev` 下 `npm run shots`），无踩色、无边框消失；`go test ./internal/themes/` 通过
+- [ ] 7 套方案 × 浅 / 深各截图过目（`tools/ui-dev` 下 `npm run shots`），无踩色、无边框消失；`go test ./internal/themes/` 通过
 - [ ] `tools/ui-dev` 下 `npm test` 全部通过；新加或改动的交互补上对应测试
-- [ ] 新增颜色全部走令牌，没有写死色值
+- [ ] 新增颜色全部走令牌，没有写死色值；圆角用 `--r-*`，投影用 `--elev-*`
 - [ ] Tab 可达，`:focus-visible` 可见；纯图标按钮有可读名称
-- [ ] `prefers-reduced-motion` 生效；hover 过渡 150–300ms
+- [ ] `prefers-reduced-motion` 生效；动效只动 transform / opacity，时长走 `--dur-*`，离场比进场短
 - [ ] 1024 / 900 / 390 宽度无横向滚动
 - [ ] 加载 / 空 / 错误三态齐备
 - [ ] 无边框拖动、窗口三键、快捷键回归通过
+- [ ] 改了界面文案：`python tools/fonts/build_fonts.py --check` 通过（出现 GB2312 以外的字符就重新生成字体）
 - [ ] **[v3.3]** 多字段表单有吸底保存条并登记切页守卫；单字段保存键「未改置灰 + 回车保存」
 - [ ] **[v3.3]** 表单错误就近显示在字段下方，没有用 toast
 - [ ] **[v3.3]** 异步渲染的 await 之后有 `stale(gen)` 判断，轮询经 `startPoll` 挂载

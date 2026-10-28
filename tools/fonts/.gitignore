@@ -1,0 +1,2 @@
+# 下载的字体源文件缓存（npm 包与 google/fonts 原文件，约 23 MB），不入库
+.cache/

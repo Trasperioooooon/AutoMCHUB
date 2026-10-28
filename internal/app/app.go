@@ -39,6 +39,23 @@ type Config struct {
 	BackupRoots []string `json:"backupRoots,omitempty"` // 曾设为备份根的目录（旧备份照常列出、还原，内置根除外）
 	Onboarded   bool     `json:"onboarded,omitempty"`   // 首次运行引导卡是否已完成
 	TosAccepted bool     `json:"tosAccepted,omitempty"` // 用户协议与免责声明是否已同意（未同意则每次启动重新弹引导卡）
+
+	// ChromeColor 界面标题栏的底色（#rrggbb，小写），由原生窗口里的前端在外观变化时上报；
+	// 下次启动时作为 WebView2 画出页面之前的默认底色，避免冷启动白闪。空 = 按系统浅 / 深色取默认值。
+	ChromeColor string `json:"chromeColor,omitempty"`
+}
+
+// ParseHexColor 校验并规范化 #rrggbb 形式的颜色，返回小写形式；其它写法（#rgb、颜色名、rgb() 等）一律不认。
+func ParseHexColor(s string) (string, bool) {
+	if len(s) != 7 || s[0] != '#' {
+		return "", false
+	}
+	for _, c := range s[1:] {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+			return "", false
+		}
+	}
+	return strings.ToLower(s), true
 }
 
 // DefaultBackupKeep 未配置时每实例保留的备份份数。

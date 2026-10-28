@@ -3,21 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>MineDeck · MC 一键开服</title>
 <script>
 /* 外观需在样式表生效前落到 <html>，避免首帧闪烁。三项偏好均存 localStorage（每台设备各自记忆）：
    amh_theme = auto | light | dark（auto 解析为系统色）；amh_scheme = 配色方案；amh_accent = 强调色（auto=跟随方案）。
    优先级：URL 参数 > 记忆 > 默认。 */
 (function () {
-  var SCHEMES = ["fluent", "github", "graphite", "nord", "catppuccin", "solarized"];
+  var SCHEMES = ["craft", "fluent", "github", "graphite", "nord", "catppuccin", "solarized"];
   var ACCENTS = ["auto", "blue", "indigo", "violet", "teal", "green", "orange", "rose", "graphite"];
   var q = new URLSearchParams(location.search);
   var get = function (k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } };
   var pref = q.get("theme") || get("amh_theme", "auto");
-  var scheme = q.get("scheme") || get("amh_scheme", "fluent");
+  var scheme = q.get("scheme") || get("amh_scheme", "craft");
   var accent = q.get("accent") || get("amh_accent", "auto");
   if (["auto", "light", "dark"].indexOf(pref) < 0) pref = "auto";
-  if (SCHEMES.indexOf(scheme) < 0) scheme = "fluent";
+  if (SCHEMES.indexOf(scheme) < 0) scheme = "craft";
   if (ACCENTS.indexOf(accent) < 0) accent = "auto";
   var sys = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
   var root = document.documentElement;
@@ -25,17 +26,71 @@
   root.dataset.theme = pref === "auto" ? sys : pref;
   root.dataset.scheme = scheme;
   root.dataset.accent = accent;
+  /* 启动画面：只在原生 WebView2 窗口里（宿主注入了 hostWin* 桥接函数）、本次进程启动后第一次加载页面时播放。
+     宿主每次启动生成一个 ID（window.__MD_BOOT，由 WebView2 的文档创建脚本注入，刷新后不变），
+     sessionStorage 记下播过的 ID：刷新页面不再播；从托盘恢复窗口不会重新加载页面，也不播；
+     局域网浏览器访问没有宿主函数，不播。系统开启「减少动态」时直接跳过。 */
+  try {
+    var boot = window.__MD_BOOT;
+    if (typeof window.hostWinClose === "function" && boot && sessionStorage.getItem("md_boot") !== boot &&
+        !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      sessionStorage.setItem("md_boot", boot);
+      root.dataset.splash = "play";
+    }
+  } catch (e) {}
 })();
 </script>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Crect x='1' y='1' width='18' height='18' rx='5' fill='%23005fb8'/%3E%3Crect x='5' y='5.5' width='10' height='3.5' rx='1' fill='%23fff'/%3E%3Crect x='5' y='11' width='10' height='3.5' rx='1' fill='%23fff' opacity='.7'/%3E%3C/svg%3E">
+<link rel="icon" type="image/png" sizes="16x16" href="img/logo-16.png">
+<link rel="icon" type="image/png" sizes="32x32" href="img/logo-32.png">
+<link rel="preload" href="fonts/Geist-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/GeistMono-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/NotoSansSC-gb2312.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="fonts/fonts.css">
 <link rel="stylesheet" href="themes.css">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
+<div id="splash" role="status" aria-label="MineDeck 正在启动"><div class="splash-inner"><div class="splash-logo" id="splash-logo"></div><div class="splash-word">MineDeck</div><div class="splash-bar"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div><div class="splash-skip">点击任意处或按任意键跳过</div></div>
+<script>
+/* 启动画面：应用图标（16×16 像素网格）拆成 64 个 2×2 的方块，自下而上逐行落下（单块 200ms，逐行错峰 34ms），
+   字标随后进场，下方 8 格进度按节奏点亮。界面就绪（app.js 派发 md-ready）且方块拼完（0.76 秒）后淡出，
+   整体封顶约 1 秒；点击或按任意键立即跳过（按键不会再触发 1–4 等快捷键）。 */
+(function () {
+  var root = document.documentElement, sp = document.getElementById("splash");
+  if (!root.dataset.splash) { sp.remove(); return; }
+  var PAL = "5b7b31 6cbf3a 282d34 1d2127 4c9a2c 3a7a22 4a5260 363c47 1a1e24 272c34 8dff6a 434b58".split(" ");
+  var PX = ".......aa............aabbaa........aabbbbbbaa....aabbbbbbbbbbaa.cbbbbbbbbbbbbbbdceebbbbbbbbbbffdcggeebbbbbbffhhdcggggeebbffhhhhdciiggggefhhhhhhdcgiiiggghhhhhjjdcgggiikglhhjjhhdcgggggkilhjhhhhd.ccggggglhhhhdd....ccggglhhdd........ccgldd............cd.......";
+  var html = "";
+  for (var i = 0; i < 256; i++) {
+    var c = PX.charAt(i), x = i % 16, y = i >> 4;
+    html += c === "." ? "<i></i>" : '<i style="background:#' + PAL[c.charCodeAt(0) - 97] + ";--d:" + ((7 - (y >> 1)) * 34 + (x >> 1) * 6) + 'ms"></i>';
+  }
+  document.getElementById("splash-logo").innerHTML = html;
+  var t0 = Date.now(), ready = false, done = false, timers = [];
+  var segs = sp.querySelectorAll(".splash-bar i");
+  for (var n = 0; n < segs.length; n++) timers.push(setTimeout((function (s) { return function () { s.className = "on"; }; })(segs[n]), 90 + n * 80));
+  function finish(fast) {
+    if (done) return;
+    done = true;
+    timers.forEach(clearTimeout);
+    document.removeEventListener("keydown", onKey, true);
+    sp.className = "leave" + (fast ? " fast" : "");
+    var main = document.getElementById("main");
+    if (main) { main.classList.remove("view-enter"); void main.offsetWidth; main.classList.add("view-enter"); }
+    setTimeout(function () { sp.remove(); delete root.dataset.splash; }, fast ? 120 : 200);
+  }
+  function onKey(e) { e.preventDefault(); e.stopPropagation(); finish(true); }
+  sp.addEventListener("click", function () { finish(true); });
+  document.addEventListener("keydown", onKey, true);
+  document.addEventListener("md-ready", function () { ready = true; if (Date.now() - t0 >= 760) finish(false); });
+  timers.push(setTimeout(function () { if (ready) finish(false); }, 760));
+  setTimeout(function () { finish(false); }, 1000);
+})();
+</script>
 <div id="app">
   <header id="titlebar">
     <div class="tb-brand">
-      <svg class="logo-mark" viewBox="0 0 20 20" aria-hidden="true"><rect x="1" y="1" width="18" height="18" rx="5" style="fill:var(--accent-solid)"/><rect x="5" y="5.5" width="10" height="3.5" rx="1" style="fill:var(--on-accent)"/><rect x="5" y="11" width="10" height="3.5" rx="1" style="fill:var(--on-accent)" opacity=".7"/></svg>
+      <img class="logo-mark" src="img/logo-16.png" srcset="img/logo-16.png 1x, img/logo-20.png 1.25x, img/logo-24.png 1.5x, img/logo-32.png 2x, img/logo-48.png 3x" width="16" height="16" alt="">
       <span>MineDeck</span>
     </div>
     <span class="grow"></span>
@@ -47,11 +102,11 @@
   </header>
   <div id="shell">
     <nav id="sidebar" aria-label="主导航">
-      <a href="#/instances" data-nav="instances" class="nav-item" title="服务器（快捷键 1）"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="4.5" rx="1.2"/><rect x="2.5" y="9" width="11" height="4.5" rx="1.2"/><path d="M5 4.75h.01M5 11.25h.01"/></svg><span>服务器</span></a>
-      <a href="#/create" data-nav="create" class="nav-item" title="新建服务器（快捷键 2）"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="2.5"/><path d="M8 5.5v5M5.5 8h5"/></svg><span>新建服务器</span></a>
-      <a href="#/tunnels" data-nav="tunnels" class="nav-item" title="内网穿透（快捷键 3）"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="5.9"/><path d="M2.1 8h11.8M8 2.1c1.7 1.7 2.5 3.8 2.5 5.9S9.7 12.2 8 13.9C6.3 12.2 5.5 10.1 5.5 8S6.3 3.8 8 2.1z"/></svg><span>内网穿透</span></a>
+      <a href="#/instances" data-nav="instances" class="nav-item" title="服务器（快捷键 1）"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="4.5" rx="1.2"/><rect x="2.5" y="9" width="11" height="4.5" rx="1.2"/><path d="M5 4.75h.01M5 11.25h.01"/></svg><span>服务器</span><kbd class="key" aria-hidden="true">1</kbd></a>
+      <a href="#/create" data-nav="create" class="nav-item" title="新建服务器（快捷键 2）"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="2.5"/><path d="M8 5.5v5M5.5 8h5"/></svg><span>新建服务器</span><kbd class="key" aria-hidden="true">2</kbd></a>
+      <a href="#/tunnels" data-nav="tunnels" class="nav-item" title="内网穿透（快捷键 3）"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="5.9"/><path d="M2.1 8h11.8M8 2.1c1.7 1.7 2.5 3.8 2.5 5.9S9.7 12.2 8 13.9C6.3 12.2 5.5 10.1 5.5 8S6.3 3.8 8 2.1z"/></svg><span>内网穿透</span><kbd class="key" aria-hidden="true">3</kbd></a>
       <span class="grow"></span>
-      <a href="#/settings" data-nav="settings" class="nav-item" title="设置（快捷键 4）"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.72 3.37L6.87 1.60A6.5 6.5 0 0 1 9.13 1.60L9.28 3.37A4.8 4.8 0 0 1 10.36 3.82L11.73 2.68A6.5 6.5 0 0 1 13.32 4.27L12.18 5.64A4.8 4.8 0 0 1 12.63 6.72L14.4 6.87A6.5 6.5 0 0 1 14.4 9.13L12.63 9.28A4.8 4.8 0 0 1 12.18 10.36L13.32 11.73A6.5 6.5 0 0 1 11.73 13.32L10.36 12.18A4.8 4.8 0 0 1 9.28 12.63L9.13 14.40A6.5 6.5 0 0 1 6.87 14.40L6.72 12.63A4.8 4.8 0 0 1 5.64 12.18L4.27 13.32A6.5 6.5 0 0 1 2.68 11.73L3.82 10.36A4.8 4.8 0 0 1 3.37 9.28L1.6 9.13A6.5 6.5 0 0 1 1.6 6.87L3.37 6.72A4.8 4.8 0 0 1 3.82 5.64L2.68 4.27A6.5 6.5 0 0 1 4.27 2.68L5.64 3.82A4.8 4.8 0 0 1 6.72 3.37Z"/><circle cx="8" cy="8" r="2.1"/></svg><span>设置</span></a>
+      <a href="#/settings" data-nav="settings" class="nav-item" title="设置（快捷键 4）"><svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.72 3.37L6.87 1.60A6.5 6.5 0 0 1 9.13 1.60L9.28 3.37A4.8 4.8 0 0 1 10.36 3.82L11.73 2.68A6.5 6.5 0 0 1 13.32 4.27L12.18 5.64A4.8 4.8 0 0 1 12.63 6.72L14.4 6.87A6.5 6.5 0 0 1 14.4 9.13L12.63 9.28A4.8 4.8 0 0 1 12.18 10.36L13.32 11.73A6.5 6.5 0 0 1 11.73 13.32L10.36 12.18A4.8 4.8 0 0 1 9.28 12.63L9.13 14.40A6.5 6.5 0 0 1 6.87 14.40L6.72 12.63A4.8 4.8 0 0 1 5.64 12.18L4.27 13.32A6.5 6.5 0 0 1 2.68 11.73L3.82 10.36A4.8 4.8 0 0 1 3.37 9.28L1.6 9.13A6.5 6.5 0 0 1 1.6 6.87L3.37 6.72A4.8 4.8 0 0 1 3.82 5.64L2.68 4.27A6.5 6.5 0 0 1 4.27 2.68L5.64 3.82A4.8 4.8 0 0 1 6.72 3.37Z"/><circle cx="8" cy="8" r="2.1"/></svg><span>设置</span><kbd class="key" aria-hidden="true">4</kbd></a>
       <div class="sb-foot">
         <button class="sb-theme" id="theme-btn" aria-label="切换浅色 / 深色"></button>
         <span class="sb-ver">v<span id="app-ver">…</span></span>
@@ -64,6 +119,7 @@
 <div id="modal-root"></div>
 <script src="props-catalog.js"></script>
 <script src="qrcode.js"></script>
+<script src="pixel.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

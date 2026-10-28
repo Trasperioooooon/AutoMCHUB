@@ -57,3 +57,75 @@ func TestConfigResponsesHidePasswordHash(t *testing.T) {
 		t.Errorf("GET /api/app 未如实告知密码状态: %s", got)
 	}
 }
+
+// 内嵌字体：按 font/woff2 下发，带 ETag 且允许缓存（每次先问一下）；同一 ETag 再请求回 304，不重下 1.9 MB。
+// 页面与脚本仍然 no-store，改了前端立即生效。
+func TestFontsServedWithETag(t *testing.T) {
+	app.Base = t.TempDir()
+	h := New(nil, nil, 0)
+	get := func(path, inm string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest("GET", path, nil)
+		req.Host = "127.0.0.1"
+		if inm != "" {
+			req.Header.Set("If-None-Match", inm)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	for _, f := range []string{"Geist-latin.woff2", "GeistMono-latin.woff2", "NotoSansSC-gb2312.woff2"} {
+		rec := get("/fonts/"+f, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: HTTP %d", f, rec.Code)
+		}
+		if ct := rec.Header().Get("Content-Type"); ct != "font/woff2" {
+			t.Errorf("%s: Content-Type = %q", f, ct)
+		}
+		tag := rec.Header().Get("ETag")
+		if !strings.HasPrefix(tag, `"`) || rec.Header().Get("Cache-Control") != "no-cache" {
+			t.Errorf("%s: ETag = %q, Cache-Control = %q", f, tag, rec.Header().Get("Cache-Control"))
+		}
+		if body := rec.Body.Bytes(); len(body) < 4 || string(body[:4]) != "wOF2" {
+			t.Errorf("%s: 不是 WOFF2 文件", f)
+		}
+		if again := get("/fonts/"+f, tag); again.Code != http.StatusNotModified {
+			t.Errorf("%s: 带 If-None-Match 再请求应回 304，实际 %d", f, again.Code)
+		}
+	}
+	if rec := get("/fonts/fonts.css", ""); rec.Code != http.StatusOK || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/css") {
+		t.Errorf("fonts.css: HTTP %d, Content-Type %q", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	if cc := get("/app.css", "").Header().Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("页面应保持 no-store，实际 %q", cc)
+	}
+}
+
+// chromeColor 只收 #rrggbb（存为小写），格式不对整次拒绝、原值不变；空串清除。
+func TestConfigChromeColor(t *testing.T) {
+	app.Base = t.TempDir()
+	h := New(nil, nil, 0)
+	put := func(body string) int {
+		t.Helper()
+		req := httptest.NewRequest("PUT", "/api/config", strings.NewReader(body))
+		req.Host = "127.0.0.1"
+		req.Header.Set("X-Token", Token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if code := put(`{"chromeColor":"#EAE5D7"}`); code != http.StatusOK || app.GetConfig().ChromeColor != "#eae5d7" {
+		t.Fatalf("合法颜色未保存：HTTP %d，存为 %q", code, app.GetConfig().ChromeColor)
+	}
+	for _, bad := range []string{`"red"`, `"#fff"`, `"#12345g"`, `"url(x)"`, `" #202020"`} {
+		if code := put(`{"chromeColor":` + bad + `,"backupKeep":5}`); code != http.StatusBadRequest {
+			t.Errorf("chromeColor=%s 应返回 400，实际 %d", bad, code)
+		}
+	}
+	if c := app.GetConfig(); c.ChromeColor != "#eae5d7" || c.BackupKeep == 5 {
+		t.Errorf("被拒绝的请求不应改动配置：chromeColor=%q backupKeep=%d", c.ChromeColor, c.BackupKeep)
+	}
+	if code := put(`{"chromeColor":""}`); code != http.StatusOK || app.GetConfig().ChromeColor != "" {
+		t.Errorf("空串应清除：HTTP %d，仍为 %q", code, app.GetConfig().ChromeColor)
+	}
+}

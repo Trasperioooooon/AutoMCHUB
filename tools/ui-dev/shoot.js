@@ -1,7 +1,7 @@
 // 截图：node shoot.js [pages|schemes|all]（默认 all）[--only=正则]
 //   pages  ：逐页截图，深色 / 浅色各一套（列表、菜单与弹窗、空状态、向导各步、部署任务、详情各页、
 //            未保存守卫、隧道、设置各分区（远程访问含二维码）、首启引导）
-//   schemes：6 套配色 × 浅色 / 深色，各拍「服务器」与「设置 → 外观」两页
+//   schemes：7 套配色 × 浅色 / 深色，各拍「服务器」与「设置 → 外观」两页
 //   --only ：只拍名字匹配的，如 --only=wiz 或 --only="nord-dark"
 // 图片存到本目录的 shots/<组名>/（已被 .gitignore 忽略），每次运行自带一个全新的仿真后端。
 "use strict";
@@ -16,7 +16,7 @@ const onlyArg = args.find(a => a.startsWith("--only="));
 const ONLY = onlyArg ? new RegExp(onlyArg.slice("--only=".length)) : null;
 const OUT = path.join(__dirname, "shots");
 const W = 1280, H = 850;
-const SCHEMES = ["fluent", "github", "graphite", "nord", "catppuccin", "solarized"];
+const SCHEMES = ["craft", "fluent", "github", "graphite", "nord", "catppuccin", "solarized"];
 const INST = encodeURIComponent("生存服 · 朋友");
 
 if (!["pages", "schemes", "all"].includes(GROUP)) {

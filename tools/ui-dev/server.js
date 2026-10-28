@@ -41,7 +41,7 @@ const CORES = [
 // 每次 start() 都从这份初始数据开始：4 台服务器（运行中 / 已停止 / 启动中 / 代理端）、2 条隧道、已完成首启
 function newState(ui) {
   const state = {
-    config: { source: "auto", onboarded: true, tosAccepted: true, backupKeep: 10, listenLan: false, webhookUrl: "", updateRepo: "Trasperioooooon/MineDeck", checkUpdateOnStart: true, minimizeToTray: true, cfApiKey: "" },
+    config: { source: "auto", onboarded: true, tosAccepted: true, backupKeep: 10, listenLan: false, webhookUrl: "", updateRepo: "Trasperioooooon/MineDeck", checkUpdateOnStart: true, minimizeToTray: true, cfApiKey: "", chromeColor: "" },
     autoStart: false,
     instances: [
       { name: "生存服 · 朋友", core: "paper", kind: "game", mc: "1.21.4", build: "232", javaMajor: 21, xmxMb: 4096, xmsMb: 0, port: 25565, status: "running", motd: "§a生存服 §7· §e一起来玩！", dir: "D:\\MineDeck\\servers\\server-20261020-2130", createdAt: "2026-10-20T21:30:00+08:00", consoleEncoding: "auto", onlineCount: 3, uptimeSec: 7980, maxPlayers: 20, extraJvm: [] },
@@ -97,6 +97,7 @@ function handler(state, ui, portOf) {
     //   empty: true 时服务器列表为空；onboarded: false 时弹首启引导；listenLan: 远程访问开关（开启后设置页显示二维码）
     //   taskStage: 部署任务进行到第几步（0–4，4 = 完成），"error" = 第 2 步失败
     //   legacy: { name, extraJvm, forceFlags } 把某台服务器设成「老版本」，保存 JVM 参数时补回 forceFlags
+    //   status: { 名称: running | starting | stopping | stopped } 直接改某台服务器的运行状态（看状态切换的动效用）
     if (p === "/__mock/state" && m === "POST") {
       const b = await readBody(req);
       if ("empty" in b) state.empty = !!b.empty;
@@ -105,6 +106,7 @@ function handler(state, ui, portOf) {
       if ("listenLan" in b) state.config.listenLan = !!b.listenLan;
       // 模拟老版本实例：保存 JVM 参数时后端强制补回 log4shell 缓解参数（同 inst.UpdateSettings）
       if (b.legacy) { const i = state.instances.find(x => x.name === b.legacy.name); if (i) { i.extraJvm = b.legacy.extraJvm; i.forceFlags = b.legacy.forceFlags; } }
+      if (b.status) for (const [n, st] of Object.entries(b.status)) { const i = state.instances.find(x => x.name === n); if (i) { i.status = st; i.uptimeSec = st === "stopped" ? 0 : st === "starting" ? 9 : i.uptimeSec; i.onlineCount = st === "running" ? i.onlineCount : 0; } }
       return ok(res, state);
     }
     // ---- 静态 ----
@@ -112,8 +114,8 @@ function handler(state, ui, portOf) {
       const f = p === "/" ? "index.html" : p.slice(1);
       const fp = path.resolve(ui, path.normalize(f));
       if (!fp.startsWith(ui + path.sep) || !fs.existsSync(fp) || !fs.statSync(fp).isFile()) { res.writeHead(404); return res.end("not found"); }
-      const type = { ".html": "text/html", ".js": "application/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png" }[path.extname(fp)] || "application/octet-stream";
-      res.writeHead(200, { "Content-Type": type + "; charset=utf-8", "Cache-Control": "no-store" });
+      const type = { ".html": "text/html", ".js": "application/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".txt": "text/plain", ".woff2": "font/woff2" }[path.extname(fp)] || "application/octet-stream";
+      res.writeHead(200, { "Content-Type": type + (/^(text|application)\//.test(type) ? "; charset=utf-8" : ""), "Cache-Control": "no-store" });
       return res.end(fs.readFileSync(fp));
     }
     const insts = () => state.empty ? [] : state.instances;
@@ -122,7 +124,16 @@ function handler(state, ui, portOf) {
       if (p === "/api/app") return ok(res, { version: "2.6.1", base: "D:\\MineDeck", ramMb: 16384, availRamMb: 9216, port: portOf(), serversRoot: "D:\\MineDeck\\servers", backupsRoot: "D:\\MineDeck\\backups", config: state.config, lanSet: false, autoStart: state.autoStart, ips: ["172.22.48.1", "192.168.1.23", "10.0.0.5"] });
       if (p === "/api/bg") return ok(res, { images: [] });
       if (p === "/api/cores") return ok(res, CORES);
-      if (p === "/api/config" && m === "PUT") { const b = await readBody(req); if ("autoStart" in b) state.autoStart = !!b.autoStart; Object.assign(state.config, b); delete state.config.autoStart; return ok(res, state.config); }
+      if (p === "/api/config" && m === "PUT") {
+        const b = await readBody(req);
+        // 同 web.go：chromeColor 只收 #rrggbb（存为小写），格式不对整次拒绝；空串清除
+        if ("chromeColor" in b) {
+          if (b.chromeColor !== "" && !/^#[0-9a-f]{6}$/i.test(b.chromeColor)) return err(res, 400, "chromeColor 须为 #rrggbb 形式的颜色");
+          b.chromeColor = b.chromeColor.toLowerCase();
+        }
+        if ("autoStart" in b) state.autoStart = !!b.autoStart;
+        Object.assign(state.config, b); delete state.config.autoStart; return ok(res, state.config);
+      }
       if (p === "/api/mcversions") {
         const snaps = u.searchParams.get("snapshots") === "1";
         const list = [...(snaps ? SNAPS.map(id => ({ id, type: "snapshot", latest: false })) : []), ...VERSIONS.map((id, i) => ({ id, type: "release", latest: i === 0, ...(u.searchParams.get("core") === "vanilla" ? { releaseTime: new Date(Date.UTC(2026, 9, 1) - i * 47 * 864e5).toISOString().replace(".000Z", "+00:00") } : {}) }))];
