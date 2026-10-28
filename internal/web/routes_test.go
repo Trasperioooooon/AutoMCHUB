@@ -15,9 +15,11 @@ import (
 
 	"minedeck/internal/ai"
 	"minedeck/internal/app"
+	"minedeck/internal/assistant"
 	"minedeck/internal/dl"
 	"minedeck/internal/inst"
 	"minedeck/internal/ops"
+	"minedeck/internal/ops/catalog"
 	"minedeck/internal/tunnel"
 )
 
@@ -30,17 +32,23 @@ type fullEnv struct {
 	secrets []string // 任何响应里都不能出现的东西
 	tunID   string
 	dials   *noDial
+	asst    *assistant.Service
 }
 
 // noDial 一拨号就报错，记下想连的地址：用来证明没配置 AI 时没有任何对外连接。
 type noDial struct {
 	mu    sync.Mutex
 	addrs []string
+	allow string // 这个地址照常连：本机的假 AI 服务（第三阶段的测试用）
 }
 
 func (d *noDial) client() *http.Client {
-	return &http.Client{Transport: &http.Transport{DialContext: func(_ context.Context, _, addr string) (net.Conn, error) {
+	return &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 		d.mu.Lock()
+		if d.allow != "" && addr == d.allow {
+			d.mu.Unlock()
+			return (&net.Dialer{}).DialContext(ctx, network, addr)
+		}
 		d.addrs = append(d.addrs, addr)
 		d.mu.Unlock()
 		return nil, errors.New("测试里不许联网")
@@ -108,7 +116,9 @@ func newFullEnv(t *testing.T) *fullEnv {
 	}
 	nd := &noDial{}
 	aiSvc := ai.NewService(ai.Options{Dir: filepath.Join(app.Base, "data", "ai"), Keys: app.Secrets(), HTTP: nd.client(), Mirrors: dl.GHMirrors})
-	e := &fullEnv{h: New(mgr, tun, aiSvc, 27333), tunID: tt.ID, dials: nd}
+	reg := catalog.New(catalog.Env{Mgr: mgr, Tun: tun, AI: aiSvc, Port: 27333})
+	asst := catalog.NewAssistant(reg, aiSvc, Token)
+	e := &fullEnv{h: New(mgr, tun, reg, asst), tunID: tt.ID, dials: nd, asst: asst}
 	e.call(t, "PUT", "/api/config", `{"lanPassword":"`+lanPass+`","listenLan":true,"webhookUrl":"https://hook.example/x?access_token=`+hookToken+`"}`, 200)
 	e.secrets = []string{cfKey, lanPass, sakuraKey, frpsToken, app.GetConfig().AccessPasswordHash}
 	return e

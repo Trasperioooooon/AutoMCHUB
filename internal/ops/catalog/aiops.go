@@ -106,6 +106,24 @@ func (c *cat) aiOps() {
 	})
 
 	c.reg.Register(&ops.Op{
+		Name: "ai.assistant.set", Title: "修改局域网能否使用 AI 助手", Level: ops.HumanOnly, LocalOnly: true, LocalMsg: localMsg,
+		Desc:   "局域网登录的设备能不能用应用内助手（§10.3，默认开）。关掉后局域网打开的界面里没有助手入口，也不能确认助手的提案。",
+		Params: ops.Object(map[string]*ops.Schema{"lan": ops.Boolean("局域网登录的设备可以用 AI 助手")}, "lan"),
+		Run: func(_ context.Context, caller ops.Caller, a ops.Args) (any, error) {
+			body, err := bind[struct {
+				LAN bool `json:"lan"`
+			}](a)
+			if err != nil {
+				return nil, err
+			}
+			if err := c.AI.SetLANAssistant(body.LAN); err != nil {
+				return nil, ops.Wrap(500, err)
+			}
+			return view(caller), nil
+		},
+	})
+
+	c.reg.Register(&ops.Op{
 		Name: "ai.prices.set", Title: "修改 AI 自填单价", Level: ops.HumanOnly, LocalOnly: true, LocalMsg: localMsg,
 		Desc: "整体替换自填的单价（每百万 token，元或美元）。自填的优先于公开价格，也能补上查不到的模型。",
 		Params: ops.Object(map[string]*ops.Schema{

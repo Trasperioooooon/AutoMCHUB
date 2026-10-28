@@ -146,8 +146,10 @@ func TestMusicBridgeInstallProposal(t *testing.T) {
 	if err != nil || !c.Enabled || c.Problem() != "" {
 		t.Fatalf("配置：%+v %v", c, err)
 	}
+	// 提案提出时也记一条（Event = propose），查询结果新的在前：先是确认后的执行，再是提出
 	recs, _ := reg.Log.Query(ops.Query{})
-	if len(recs) != 1 || recs[0].Op != "music.bridge.install" || recs[0].Proposal != p.ID || recs[0].Inst != "模组服" {
+	if len(recs) != 2 || recs[0].Op != "music.bridge.install" || recs[0].Event != "" || recs[0].Proposal != p.ID || recs[0].Inst != "模组服" ||
+		recs[0].ApprovedBy != "本机" || recs[1].Event != ops.EvPropose || recs[1].Proposal != p.ID {
 		t.Fatalf("操作记录：%+v", recs)
 	}
 

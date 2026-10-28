@@ -1540,6 +1540,7 @@ async function renderDetail(name, tab = "console") {
         <button class="btn sm ghost icon-only" id="con-copy" title="复制全部" aria-label="复制全部">${icon("copy")}</button>
         <button class="btn sm ghost icon-only" id="con-export" title="导出为 txt" aria-label="导出为 txt">${icon("download")}</button>
       </div>
+      <div class="diag-slot" id="diag-slot"></div>
       <div class="console" id="console"></div>
       <div class="console-input">
         <div class="cmd-suggest" id="cmd-suggest"></div>
@@ -1586,6 +1587,7 @@ async function renderDetail(name, tab = "console") {
       while (con.childNodes.length > 3000) con.removeChild(con.firstChild);
       if ($("#con-scroll").checked) con.scrollTop = con.scrollHeight;
       if (/ (joined|left) the game/.test(line)) schedulePlayerRefresh();
+      window.MDAssist?.consoleLine(name, line); // 报错横幅（assistant.js）：出现报错、退出时重新跑本地规则
     };
     filterEl.oninput = () => {
       const q = filterEl.value.trim().toLowerCase();
@@ -1600,6 +1602,7 @@ async function renderDetail(name, tab = "console") {
     consoleES = new EventSource(`/api/instances/${encodeURIComponent(name)}/console?token=${TOKEN()}`);
     consoleES.onmessage = e => push(JSON.parse(e.data));
     consoleES.onerror = () => push("[MineDeck] 控制台连接中断，切换页面可重连");
+    window.MDAssist?.banner($("#diag-slot"), name, gen);
     const histKey = "amh_hist_" + name;
     let hist = [];
     try { hist = JSON.parse(localStorage.getItem(histKey)) || []; } catch {}
@@ -2602,6 +2605,7 @@ function drawAI(body, v, gen) {
       riRow({ ico: "coin", title: "当前模型的单价", sub: `<span id="ai-model-price"></span>`, cls: "ai-mp-row" }),
       { ico: true }) +
     `<div class="group has-ico" id="ai-prices"></div>` +
+    `<div id="ai-assist-slot"></div>` +
     (ro ? "" : group(riRow({ ico: "power", title: "停用 AI", sub: "清掉服务商设置和 Key；用量记录、额度和自填单价保留",
       right: `<button class="btn danger" id="ai-off">停用</button>` }), { ico: true, cls: "danger-zone", attrs: `id="ai-off-zone" style="margin-top:28px"` })) +
     `<div class="hint" style="margin-top:20px;line-height:1.8">隐私：用 AI 时，提问内容和工具结果（实例信息、配置、日志片段等）会发给所选的服务商，各家的数据保留政策不一样；在意隐私可以用本机的 Ollama。
@@ -2740,6 +2744,7 @@ function drawAI(body, v, gen) {
       formBase = JSON.stringify(readForm());
       delete $("#ai-test-sub").dataset.result;
       repaint();
+      window.MDAssist?.refresh(); // 标题栏的助手入口随之更新
       toast(v.enabled ? "AI 设置已保存" : `已保存；还差：${v.missing}`);
     });
 
@@ -2816,6 +2821,7 @@ function drawAI(body, v, gen) {
     try { await api("/api/ai/provider", { method: "PUT", body: { preset: "" } }); toast("已停用 AI"); dirtyCheck = null; navigate(); }
     catch (e) { toast(e.message, true); }
   };
+  window.MDAssist?.settings($("#ai-assist-slot"), v, gen); // 应用内助手（assistant.js）
 }
 
 /* — 更新与关于 — */
@@ -2947,6 +2953,7 @@ async function applyBackground() {
     return;
   }
   navigate();
+  window.MDAssist?.init(); // 应用内 AI 助手的入口（assistant.js）
   document.dispatchEvent(new Event("md-ready")); // 启动画面（若在播）据此在方块拼完后淡出
   chromeReport.last = (info.config && info.config.chromeColor) || "";
   reportChrome();

@@ -3,6 +3,7 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -368,4 +369,16 @@ func AvailRAMMB() int {
 		return 0
 	}
 	return int(m.AvailPhys / (1024 * 1024))
+}
+
+// OSVersion Windows 的版本号，如「Windows 10.0.26300」（Win11 的主版本号也是 10，按内部版本号区分：22000 起是 Win11）。
+func OSVersion() string {
+	v := windows.RtlGetVersion()
+	name := "Windows"
+	if v.MajorVersion == 10 && v.BuildNumber >= 22000 {
+		name = "Windows 11"
+	} else if v.MajorVersion == 10 {
+		name = "Windows 10"
+	}
+	return fmt.Sprintf("%s（%d.%d.%d）", name, v.MajorVersion, v.MinorVersion, v.BuildNumber)
 }

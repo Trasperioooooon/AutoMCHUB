@@ -806,3 +806,50 @@ func TestSSEReader(t *testing.T) {
 		t.Errorf("超长的行应报错：%v", err)
 	}
 }
+
+// 工具结果交回之后、AI 还没回复（比如用户停止了那次回复）时，用户可以接着说话：只追加一条 user 消息，
+// 前面的消息一个字节都不动；Claude 是紧跟着工具结果那条 user 消息再来一条（服务端合成一轮）。
+func TestAddUserAfterToolResults(t *testing.T) {
+	for _, p := range []Protocol{OpenAI, Anthropic} {
+		conv, err := newConversation(p, "sys", testTools, false, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = conv.AddUser("看看配置")
+		msg := `{"role":"assistant","content":null,"tool_calls":[{"id":"t1","type":"function","function":{"name":"instance_list","arguments":"{}"}}]}`
+		if p == Anthropic {
+			msg = `{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"instance_list","input":{}}]}`
+		}
+		if err := conv.AddResult(&Result{proto: p, msg: json.RawMessage(msg), ToolCalls: []ToolCall{{ID: "t1", Name: "instance_list"}}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := conv.AddToolResults([]ToolResult{{ID: "t1", Content: "[]"}}); err != nil {
+			t.Fatal(err)
+		}
+		if !conv.NeedsReply() {
+			t.Errorf("%s：交回结果后应等着回复", p)
+		}
+		before := append([]json.RawMessage(nil), conv.msgs...)
+		if err := conv.AddUser("算了，换个问题"); err != nil {
+			t.Fatalf("%s：工具结果之后应能接着说话：%v", p, err)
+		}
+		if conv.AddUser("再来一句") == nil {
+			t.Errorf("%s：连着两条用户的话应拒绝", p)
+		}
+		if len(conv.msgs) != len(before)+1 {
+			t.Fatalf("%s：只追加一条：%d", p, len(conv.msgs))
+		}
+		for i := range before {
+			if !bytes.Equal(before[i], conv.msgs[i]) {
+				t.Errorf("%s：第 %d 条被改动了", p, i)
+			}
+		}
+		last := string(conv.msgs[len(conv.msgs)-1])
+		if !strings.Contains(last, `"role":"user"`) || !strings.Contains(last, "算了，换个问题") {
+			t.Errorf("%s：追加的消息：%s", p, last)
+		}
+		if !conv.UndoUser() || conv.Len() != len(before) || !conv.NeedsReply() {
+			t.Errorf("%s：撤回之后回到等着回复的工具结果", p)
+		}
+	}
+}

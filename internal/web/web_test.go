@@ -10,13 +10,21 @@ import (
 	"testing"
 
 	"minedeck/internal/app"
+	"minedeck/internal/ops/catalog"
 )
+
+// bareServer 不带实例和隧道的路由（和 main 一样：注册表和助手共用一个 AI 接入层），程序目录取当时的 app.Base。
+func bareServer() http.Handler {
+	aiSvc := catalog.NewAI()
+	reg := catalog.New(catalog.Env{AI: aiSvc, Port: 27333})
+	return New(nil, nil, reg, catalog.NewAssistant(reg, aiSvc, Token))
+}
 
 // 下发配置的响应一律不得含访问密码哈希（回归：PUT /api/config 曾原样回传整个 app.Config，
 // 每次保存设置都把 accessPasswordHash 发给前端，局域网登录的手机也不例外）。
 func TestConfigResponsesHidePasswordHash(t *testing.T) {
 	app.Base = t.TempDir() // config.json 落到临时目录，不污染工作区
-	h := New(nil, nil, nil, 0)
+	h := bareServer()
 	call := func(method, path, body string) string {
 		t.Helper()
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -64,7 +72,7 @@ func TestConfigResponsesHidePasswordHash(t *testing.T) {
 // 页面与脚本仍然 no-store，改了前端立即生效。
 func TestFontsServedWithETag(t *testing.T) {
 	app.Base = t.TempDir()
-	h := New(nil, nil, nil, 0)
+	h := bareServer()
 	get := func(path, inm string) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest("GET", path, nil)
@@ -106,7 +114,7 @@ func TestFontsServedWithETag(t *testing.T) {
 // chromeColor 只收 #rrggbb（存为小写），格式不对整次拒绝、原值不变；空串清除。
 func TestConfigChromeColor(t *testing.T) {
 	app.Base = t.TempDir()
-	h := New(nil, nil, nil, 0)
+	h := bareServer()
 	put := func(body string) int {
 		t.Helper()
 		req := httptest.NewRequest("PUT", "/api/config", strings.NewReader(body))
@@ -136,7 +144,7 @@ func TestConfigChromeColor(t *testing.T) {
 // config.json 里也没有明文（加密存在 secrets.json）。传空串仍是清除。
 func TestConfigResponsesHideCFKey(t *testing.T) {
 	app.Base = t.TempDir()
-	h := New(nil, nil, nil, 0)
+	h := bareServer()
 	call := func(method, path, body string) string {
 		t.Helper()
 		req := httptest.NewRequest(method, path, strings.NewReader(body))

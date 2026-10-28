@@ -24,6 +24,7 @@ type instSummary struct {
 	MC              string   `json:"mc"`
 	Build           string   `json:"build"`
 	JavaMajor       int      `json:"javaMajor"`
+	JavaSource      string   `json:"javaSource"` // portable：MineDeck 的便携版；local：本机装的 Java
 	XmxMB           int      `json:"xmxMb"`
 	XmsMB           int      `json:"xmsMb"`
 	Port            int      `json:"port"`
@@ -50,13 +51,18 @@ func summarize(i *inst.Instance) instSummary {
 		}
 	}
 	xmx, xms, enc := i.MemSnapshot() // 加锁快照，避免与并发的 UpdateSettings 写入构成数据竞争
+	javaMajor, javaPath := i.JavaSnapshot()
+	javaSource := "local"
+	if rel, err := filepath.Rel(app.RuntimesDir, javaPath); err == nil && !strings.HasPrefix(rel, "..") {
+		javaSource = "portable"
+	}
 	if enc == "" {
 		enc = "auto"
 	}
 	return instSummary{
 		Name: i.Name, Core: string(i.Core), Kind: string(mcsrc.KindOf(i.Core)),
 		MC: i.MC, Build: i.Build,
-		JavaMajor: i.JavaMajor, XmxMB: xmx, XmsMB: xms,
+		JavaMajor: javaMajor, JavaSource: javaSource, XmxMB: xmx, XmsMB: xms,
 		Port: i.Port(), Status: i.Status(), MOTD: motd, Dir: i.Dir,
 		CreatedAt:       i.CreatedAt.Format("2006-01-02 15:04"),
 		ConsoleEncoding: enc,
@@ -97,8 +103,16 @@ func (c *cat) instanceOps() {
 
 	c.reg.Register(&ops.Op{
 		Name: "instance.create", Title: "新建实例", Level: ops.Write,
-		Desc:   "在后台下载核心与 Java 并生成配置，返回任务编号（进度见 task.get）。",
+		Desc: "在后台下载核心与 Java 并生成配置，返回任务编号（进度见 task.get）。Minecraft EULA 由用户在确认卡片上自己勾选同意，" +
+			"不用也不能替用户传；存放目录用默认的。",
 		Params: ops.Object(createParams),
+		// EULA 只能由人同意（§5.1）、存放目录只能由人指定：AI 提出时这两项去掉，确认卡片上由用户自己勾选同意
+		HumanParams: []string{"eula", "root"},
+		Consent: &ops.Consent{Param: "eula", Text: "我已阅读并同意 Minecraft EULA", URL: "https://aka.ms/MinecraftEULA",
+			Need: func(a ops.Args) bool {
+				req, _ := bind[inst.CreateReq](a)
+				return mcsrc.KindOf(req.Core) != mcsrc.KindProxy // 代理端不运行 Minecraft 本体，不用同意 EULA
+			}},
 		Preview: func(_ context.Context, _ ops.Caller, a ops.Args) (*ops.Plan, error) {
 			req, err := bind[inst.CreateReq](a)
 			if err != nil {
@@ -116,8 +130,8 @@ func (c *cat) instanceOps() {
 			if err != nil {
 				return nil, err
 			}
-			if !caller.Local {
-				req.Root = "" // 远程 / 局域网请求不得指定主机任意路径，强制落到默认根，防越界写入
+			if !caller.Local || caller.Source.AI() {
+				req.Root = "" // 远程 / 局域网请求和 AI 都不得指定主机任意路径，强制落到默认根，防越界写入
 			}
 			id, err := c.Mgr.CreateAsync(req)
 			if err != nil {
@@ -245,6 +259,36 @@ func (c *cat) instanceOps() {
 			},
 		})
 	}
+
+	c.reg.Register(&ops.Op{
+		Name: "instance.restart", Title: "重启服务器", Level: ops.Danger, Params: withInst(nil),
+		Desc: "先保存世界并停止（最多等 40 秒），停下来之后再启动。改了配置、换了 Java、禁用了模组之后，用它让改动生效。服务器要在运行。",
+		Preview: func(_ context.Context, _ ops.Caller, a ops.Args) (*ops.Plan, error) {
+			p, err := bind[instArgs](a)
+			if err != nil {
+				return nil, err
+			}
+			i, pre, err := c.statusPre(p.Inst)
+			if err != nil {
+				return nil, err
+			}
+			if st := i.Status(); st != "running" && st != "starting" {
+				return nil, ops.Errorf(400, "「%s」没在运行，不用重启；要启动请用 instance.start", i.Name)
+			}
+			return &ops.Plan{Summary: fmt.Sprintf("重启「%s」（先保存世界）", i.Name), Warning: onlineWarning(i, "重启"), Pre: pre}, nil
+		},
+		Run: func(_ context.Context, _ ops.Caller, a ops.Args) (any, error) {
+			p, err := bind[instArgs](a)
+			if err != nil {
+				return nil, err
+			}
+			if err := c.Mgr.Restart(p.Inst); err != nil {
+				return nil, err
+			}
+			c.Tun.StartBound(p.Inst)
+			return "ok", nil
+		},
+	})
 
 	type cmdArgs struct {
 		Inst string `json:"inst"`

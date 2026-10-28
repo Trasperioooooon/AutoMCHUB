@@ -75,6 +75,9 @@ func New(env Env) *ops.Registry {
 	c.tunnelOps()
 	c.logOps()
 	c.aiOps()
+	c.troubleshootOps()
+	c.fileOps()
+	c.portOps()
 	c.musicOps()
 	if env.Mgr != nil {
 		env.Mgr.SetAutoHook(func(a inst.AutoAction) {

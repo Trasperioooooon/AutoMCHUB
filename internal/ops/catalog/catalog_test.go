@@ -54,15 +54,20 @@ func TestLevelsFollowDesign(t *testing.T) {
 	want := map[ops.Level][]string{
 		ops.Read: {"app.info", "app.update.check", "instance.list", "task.get", "instance.props.get", "instance.policies.get",
 			"instance.backups.list", "instance.players.get", "instance.resources.search", "mc.cores", "mc.versions", "mc.builds",
-			"java.list", "java.scan", "tunnel.list", "ops.log"},
+			"java.list", "java.scan", "tunnel.list", "ops.log",
+			// 第三阶段：排错用的读能力
+			"instance.console.tail", "instance.logs.read", "instance.crashes", "instance.diag", "instance.mods.list", "instance.config.read", "port.check"},
 		ops.Write: {"instance.create", "instance.start", "instance.settings.set", "instance.props.set", "instance.policies.set",
-			"instance.backup.create", "instance.whitelist.add", "instance.whitelist.remove", "instance.resources.install", "tunnel.start"},
+			"instance.backup.create", "instance.whitelist.add", "instance.whitelist.remove", "instance.resources.install", "tunnel.start",
+			"instance.java.set", "instance.config.write", "instance.mods.toggle"},
 		ops.Danger: {"instance.stop", "instance.kill", "instance.command", "instance.backup.restore", "instance.players.op",
-			"instance.players.deop", "instance.players.kick", "instance.players.ban", "instance.players.pardon", "tunnel.stop"},
+			"instance.players.deop", "instance.players.kick", "instance.players.ban", "instance.players.pardon", "tunnel.stop",
+			"instance.restart"},
 		ops.HumanOnly: {"app.config.set", "app.shutdown", "app.update.apply", "host.pickdir", "host.openpath", "instance.import",
 			"instance.delete", "instance.opendir", "instance.backup.delete", "java.add", "tunnel.add", "tunnel.update", "tunnel.delete",
 			// AI 设置（第二阶段）：AI 永远看不到、也改不了自己的设置和 Key（§3.3）
-			"ai.settings.get", "ai.provider.set", "ai.models.list", "ai.test", "ai.quota.set", "ai.prices.set", "ai.prices.refresh"},
+			"ai.settings.get", "ai.provider.set", "ai.models.list", "ai.test", "ai.quota.set", "ai.prices.set", "ai.prices.refresh",
+			"ai.assistant.set"},
 	}
 
 	// 音乐共享（第五阶段）：开始、停止广播这类操作只能由人来（§8.6）
@@ -105,7 +110,7 @@ func TestLevelsFollowDesign(t *testing.T) {
 		}
 	}
 	slices.Sort(local)
-	if strings.Join(local, ",") != "ai.models.list,ai.prices.refresh,ai.prices.set,ai.provider.set,ai.quota.set,ai.test,"+
+	if strings.Join(local, ",") != "ai.assistant.set,ai.models.list,ai.prices.refresh,ai.prices.set,ai.provider.set,ai.quota.set,ai.test,"+
 		"host.openpath,host.pickdir,instance.opendir,java.add"+
 		",music.sources,music.start,music.system.confirm" { // 第五阶段
 		t.Errorf("仅本机的操作：%v", local)
@@ -120,8 +125,8 @@ func TestAIToolLists(t *testing.T) {
 			t.Errorf("助手的工具清单里有仅人工的操作 %s", op.Name)
 		}
 	}
-	if n := len(reg.Available(ops.Caller{Source: ops.SrcAssistant, Local: true})); n != 16+10+10+3 { // +3：音乐共享（第五阶段）的读 1 + 写 2
-		t.Errorf("助手能用 %d 个操作，应为读 16 + 写 10 + 危险 10 + 音乐共享 3", n)
+	if n := len(reg.Available(ops.Caller{Source: ops.SrcAssistant, Local: true})); n != 23+13+11+3 { // +3：音乐共享（第五阶段）的读 1 + 写 2
+		t.Errorf("助手能用 %d 个操作，应为读 23 + 写 13 + 危险 11 + 音乐共享 3", n)
 	}
 	if l := reg.Available(ops.Caller{Source: ops.SrcGameChat, Actor: "Steve"}); len(l) != 0 {
 		t.Errorf("游戏内 AI 不该有工具：%v", l)
@@ -169,9 +174,20 @@ func TestPropsProposalFlow(t *testing.T) {
 	if got := read(); !strings.Contains(got, "max-players=10") || !strings.Contains(got, "motd=hello") {
 		t.Fatalf("没有按提案的参数写：%s", got)
 	}
+	// 记录（新的在前）：执行、第二次提出、作废（文件变了）、第一次提出
 	recs, _ := reg.Log.Query(ops.Query{})
-	if len(recs) != 1 || recs[0].Proposal != p.ID || recs[0].ApprovedBy != "本机" || recs[0].Src != ops.SrcAssistant || recs[0].Inst != "生存服" {
-		t.Fatalf("操作记录：%+v", recs)
+	var events []string
+	for _, r := range recs {
+		events = append(events, r.Event)
+	}
+	if strings.Join(events, ",") != ",propose,void,propose" {
+		t.Fatalf("操作记录的节点：%q", events)
+	}
+	if recs[0].Proposal != p.ID || recs[0].ApprovedBy != "本机" || recs[0].Src != ops.SrcAssistant || recs[0].Inst != "生存服" || !recs[0].OK {
+		t.Fatalf("操作记录：%+v", recs[0])
+	}
+	if v := recs[2]; v.OK || !strings.Contains(v.Err, "server.properties") || v.ApprovedBy != "本机" {
+		t.Errorf("作废的记录应写明原因：%+v", v)
 	}
 	// 危险操作的预览带上警告；实例不存在时连提案都不生成
 	res, err := reg.Do(ctx, ai, "instance.kill", ops.Args(`{"inst":"生存服"}`))

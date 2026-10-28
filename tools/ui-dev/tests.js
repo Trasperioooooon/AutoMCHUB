@@ -933,6 +933,181 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
     } finally { await c.close(); await resetMusic(); }
   });
   // ==================== 第五阶段结束 ====================
+  // ================================ 第三阶段：应用内 AI 助手 ================================
+  // 仿真后端里假的 AI 按用户的话挑回复（见 server.js 的「第三阶段」）；asstState 返回 asst 的状态（executed = 确认后执行过的操作）
+  const asstState = b => page.evaluate(x => fetch("/__mock/state", { method: "POST", body: JSON.stringify({ asst: x }) }).then(r => r.json()).then(j => j.data.asst), b);
+  const conPage = name => url("#/inst/" + encodeURIComponent(name) + "/console");
+  const reply = (s, timeout = 5000) => page.waitForFunction(x => [...document.querySelectorAll("#ap-body .ap-msg.assistant .md")].some(e => e.textContent.includes(x)), s, { timeout });
+  const idle = () => page.waitForFunction(() => { const b = document.querySelector("#ap-stop"); return b && b.hidden; }, null, { timeout: 5000 });
+
+  await run("AI 助手：没配置 AI 时报错横幅照样出现（本地规则的结论和怎么修），不带「让 AI 分析」；关掉后这一次不再提示；入口引导去设置，Esc 关闭", async () => {
+    await aiState({ reset: true }); await asstState({ reset: true });
+    await page.goto(conPage("机械动力整合包")); await settle(700);
+    const b = await page.$eval(".diag-banner", e => ({ text: e.textContent, err: e.classList.contains("err") })).catch(() => null);
+    assert(b && b.err && b.text.includes("缺少前置模组") && b.text.includes("一共认出 2 个问题"), "横幅：" + JSON.stringify(b));
+    assert(!(await page.$('.diag-banner [data-x="ai"]')), "没配置 AI 时不应有「让 AI 分析」");
+    await page.click(".db-more summary");
+    assert((await page.textContent(".db-more")).includes("怎么修"), "展开后应有修复建议");
+    await page.click('.diag-banner [data-x="close"]');
+    assert(!(await page.$(".diag-banner")), "关闭后横幅应消失");
+    await page.goto(conPage("机械动力整合包")); await settle(700);
+    assert(!(await page.$(".diag-banner")), "同一次的问题关掉后不应再出现");
+    await page.evaluate(() => sessionStorage.clear());
+    await page.goto(conPage("生存服 · 朋友")); await settle(700);
+    assert(!(await page.$(".diag-banner")), "没有问题时不应有横幅");
+    await page.click("#ai-btn"); await settle(300);
+    assert((await page.textContent("#ap-body")).includes("AI 还没配置") && !!(await page.$('#ap-body [data-x="setup"]')), "没配置 AI 时面板应引导去设置");
+    await page.keyboard.press("Escape"); await settle(300);
+    assert(!(await page.$("#ai-panel")), "Esc 应关闭面板");
+  });
+
+  await run("AI 助手：「让 AI 分析」先给发送预览（字数、可展开、隐私信息是占位符，取消就不发），发送后流式回复；读操作不弹确认，写操作确认后按提案参数原样执行", async () => {
+    await aiState({ reset: true, ...AI_DEEPSEEK, key: "sk-x" }); await asstState({ reset: true });
+    try {
+      await page.goto(conPage("机械动力整合包")); await settle(700);
+      await page.click('.diag-banner [data-x="ai"]');
+      await page.waitForSelector(".modal.ap-pv");
+      const pv = await page.evaluate(() => ({ body: document.querySelector(".ap-pv .m-body").textContent, q: document.querySelector(".ap-pv textarea").value,
+        pre: document.querySelector(".ap-pv .ap-pre").textContent, open: document.querySelector(".ap-pv-more").open }));
+      assert(/将发送约 \d+ 字/.test(pv.body) && pv.q.includes("分析") && !pv.open, "预览：" + JSON.stringify(pv).slice(0, 200));
+      assert(pv.pre.includes("<用户目录>") && pv.pre.includes("<局域网IP>") && !/C:\\Users\\|192\.168\./.test(pv.pre), "占位符应原样显示：" + pv.pre.slice(0, 200));
+      await page.click(".ap-pv-more summary");
+      assert(await page.$eval(".ap-pv-more", d => d.open), "应能展开查看全文");
+      await page.click('.modal [data-x="cancel"]'); await settle(300);
+      let a = await asstState({});
+      assert(a.sessions.length === 0 && !(await page.$("#ai-panel")), "取消后不发送，也不留下空会话：" + a.sessions.length);
+      await page.click('.diag-banner [data-x="ai"]');
+      await page.waitForSelector(".modal.ap-pv");
+      await page.click('.modal [data-x="ok"]');
+      await page.waitForSelector("#ai-panel .ap-card.pending", { timeout: 5000 });
+      const v = await page.evaluate(() => ({
+        title: document.querySelector("#ap-title").textContent,
+        chip: (document.querySelector(".ap-msg.user .ap-chip") || {}).textContent || "",
+        tools: [...document.querySelectorAll(".ap-tool")].map(t => t.className + "|" + t.textContent.replace(/\s+/g, " ").trim()),
+        card: document.querySelector(".ap-card.pending").textContent.replace(/\s+/g, " "),
+        usage: document.querySelectorAll(".ap-usage").length,
+        sendPrimary: document.querySelector("#ap-send").classList.contains("primary") }));
+      assert(v.title.includes("机械动力整合包") && v.chip.includes("附上了") && v.chip.includes("排错资料"), "发送后：" + JSON.stringify(v));
+      assert(v.tools.length === 1 && v.tools[0].includes("done") && v.tools[0].includes("查看模组清单"), "读操作应直接执行、不弹确认：" + v.tools);
+      assert(v.card.includes("写操作") && v.card.includes("xaerominimap.jar") && v.usage >= 2 && !v.sendPrimary, "确认卡片：" + JSON.stringify(v));
+      a = await asstState({});
+      assert(a.executed.length === 0, "没确认的写操作不应执行");
+      await page.click('.ap-card.pending [data-x="ok"]');
+      await reply("已经禁用了");
+      a = await asstState({});
+      assert(a.executed.length === 1 && JSON.stringify(a.executed[0].args) === JSON.stringify({ inst: "机械动力整合包", file: "xaerominimap.jar", enable: false }), "执行的参数应和提案一致：" + JSON.stringify(a.executed));
+      assert((await page.textContent(".ap-card .pc-out")).includes("已确认"), "卡片应显示已确认");
+      // 实际发给 AI 的内容可以点开看
+      await page.click(".ap-msg.user .ap-chip");
+      await page.waitForSelector(".modal .ap-sent");
+      assert((await page.textContent(".modal .ap-sent")).includes("<程序目录>"), "应能看到实际发送的内容");
+      await page.keyboard.press("Escape"); await settle(250);
+      assert(!!(await page.$("#ai-panel")), "Esc 先关弹窗，面板还在");
+    } finally { await page.keyboard.press("Escape"); await asstState({ reset: true }); await aiState({ reset: true }); }
+  });
+
+  await run("AI 助手：新会话可选关联的服务器；拒绝的理由交还给 AI；危险操作要多勾一次才能确认；AI 回复里的 HTML 原样显示", async () => {
+    await aiState({ reset: true, ...AI_DEEPSEEK, key: "sk-x" }); await asstState({ reset: true });
+    try {
+      await page.goto(url("#/inst/" + inst + "/console")); await settle(500);
+      await page.evaluate(() => localStorage.removeItem("amh_ai_sid"));
+      await page.click("#ai-btn"); await settle(300);
+      await page.click('#ap-body [data-x="new"]'); await settle(200);
+      const items = await page.$$eval(".dropmenu button", bs => bs.map(b => b.textContent.trim()));
+      assert(items[0] === "生存服 · 朋友（当前）" && items.includes("不关联服务器"), "新会话的菜单：" + items);
+      await page.click(".dropmenu button >> nth=0"); await settle(300);
+      assert((await page.textContent("#ap-sub")).includes("关联：生存服 · 朋友"), "应关联当前服务器");
+      await page.fill("#ap-in", "把人数改成 10"); await page.press("#ap-in", "Enter");
+      await page.waitForSelector(".ap-card.pending", { timeout: 5000 });
+      assert((await page.$$(".ap-tool.done")).length === 1, "读 server.properties 应直接执行");
+      await page.click('.ap-card.pending [data-x="reject"]');
+      await page.fill(".ap-card.pending .pc-reason input", "周末人多");
+      await page.press(".ap-card.pending .pc-reason input", "Enter");
+      await reply("周末人多");
+      assert((await page.textContent(".ap-card .pc-out")).includes("已拒绝"), "卡片应显示已拒绝");
+      assert((await asstState({})).executed.length === 0, "拒绝的不应执行");
+      await idle();
+      await page.fill("#ap-in", "重启一下"); await page.press("#ap-in", "Enter");
+      await page.waitForSelector(".ap-card.danger.pending", { timeout: 5000 });
+      const ok = await page.$eval('.ap-card.danger.pending [data-x="ok"]', b => ({ dis: b.disabled, cls: b.className }));
+      assert(ok.dis && ok.cls.includes("danger solid"), "危险操作没勾选时：" + JSON.stringify(ok));
+      await page.check('.ap-card.danger.pending [data-k="ack"]');
+      assert(!(await page.$eval('.ap-card.danger.pending [data-x="ok"]', b => b.disabled)), "勾选后应能确认");
+      await page.click('.ap-card.danger.pending [data-x="ok"]');
+      await reply("已经在重启了");
+      const ex = (await asstState({})).executed;
+      assert(ex.length === 1 && ex[0].op === "instance.restart" && ex[0].ack === true, "危险操作应带上第二次确认：" + JSON.stringify(ex));
+      await idle();
+      await page.fill("#ap-in", "你好"); await page.press("#ap-in", "Enter");
+      await reply("应该原样显示"); await idle();
+      const m = await page.evaluate(() => {
+        const md = [...document.querySelectorAll(".ap-msg.assistant .md")].pop();
+        return { h: !!md.querySelector("h4"), nest: !!md.querySelector("ol li ul li"), table: !!md.querySelector("table td"), pre: !!md.querySelector("pre code"),
+          img: md.querySelectorAll("img").length, link: (md.querySelector("a") || {}).href, xss: window.__xss, text: md.textContent };
+      });
+      assert(m.h && m.nest && m.table && m.pre && m.img === 0 && !m.xss && m.text.includes("<img src=x") && m.link === "https://docs.papermc.io/", "Markdown：" + JSON.stringify(m).slice(0, 300));
+    } finally { await page.keyboard.press("Escape"); await asstState({ reset: true }); await aiState({ reset: true }); }
+  });
+
+  await run("AI 助手：设置里的「局域网可用 AI 助手」即时生效，局域网打开时关掉就没有入口；会话记录可删除、清空", async () => {
+    await aiState({ reset: true, ...AI_DEEPSEEK, key: "sk-x" }); await asstState({ reset: true });
+    try {
+      await page.goto(url("#/settings/ai")); await settle();
+      assert(await page.$eval("#ai-lan", e => e.checked && !e.disabled), "开关默认开");
+      const t0 = reqs.length;
+      await page.click("#ai-assist-slot .switch .sw"); await settle(300);
+      assert((putBody(t0, "/api/ai/assistant") || {}).lan === false, "关掉应发 lan: false");
+      assert(await toastHas("局域网登录的设备不能用"), "应提示已关闭");
+      await aiState({ local: false }); // 模拟局域网打开
+      await page.goto(url("#/instances")); await settle();
+      assert(await page.$eval("#ai-btn", b => b.hidden), "关掉后局域网打开的界面里不应有助手入口");
+      await asstState({ lan: true });
+      await page.goto(url("#/instances")); await settle();
+      assert(!(await page.$eval("#ai-btn", b => b.hidden)), "打开后局域网也有入口");
+      await aiState({ local: true });
+      await page.evaluate(async () => {
+        for (const t of ["第一个问题", "第二个问题"]) {
+          const r = await fetch("/api/assistant/sessions", { method: "POST", body: JSON.stringify({ inst: "" }) }).then(r => r.json());
+          await fetch(`/api/assistant/sessions/${r.data.id}/messages`, { method: "POST", body: JSON.stringify({ text: t }) });
+        }
+        localStorage.removeItem("amh_ai_sid");
+      });
+      await page.goto(url("#/instances")); await settle(1500);
+      await page.click("#ai-btn"); await settle(400);
+      assert((await page.$$(".ap-row")).length === 2, "应列出 2 个会话");
+      await page.click(".ap-row [data-del] >> nth=0"); await settle(200);
+      await page.click('.modal [data-x="ok"]'); await settle(400);
+      assert((await page.$$(".ap-row")).length === 1, "删除后剩 1 个");
+      await page.click('#ap-body [data-x="clear"]'); await settle(200);
+      await page.click('.modal [data-x="ok"]'); await settle(400);
+      assert((await page.textContent("#ap-body")).includes("还没有会话") && await toastHas("已清空 1 个会话"), "清空后应是空状态");
+    } finally { await page.keyboard.press("Escape"); await asstState({ reset: true }); await aiState({ reset: true }); }
+  });
+
+  await run("AI 助手：手机宽度（390px）下面板占满、不横向溢出；在输入框里按数字键不会切页", async () => {
+    await aiState({ reset: true, ...AI_DEEPSEEK, key: "sk-x" }); await asstState({ reset: true });
+    const c = await hostCtx({ host: false }, { viewport: { width: 390, height: 844 } });
+    try {
+      const p = await c.newPage();
+      p.on("pageerror", e => errors.push(e.message));
+      await p.goto(ORIGIN + "#/instances"); await p.waitForTimeout(800);
+      await p.click("#ai-btn"); await p.waitForTimeout(400);
+      await p.click('#ap-body [data-x="new"]'); await p.waitForTimeout(200);
+      await p.click(".dropmenu button >> text=不关联服务器"); await p.waitForTimeout(400);
+      await p.fill("#ap-in", "你好"); await p.press("#ap-in", "Enter");
+      await p.waitForFunction(() => [...document.querySelectorAll(".ap-msg.assistant .md")].some(e => e.textContent.includes("原样显示")), null, { timeout: 5000 });
+      const w = await p.evaluate(() => {
+        const r = document.querySelector("#ai-panel").getBoundingClientRect();
+        return { left: r.left, width: r.width, sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth,
+          wide: [...document.querySelectorAll("#ai-panel *")].filter(e => e.getClientRects().length && e.getBoundingClientRect().right > innerWidth + 1 && !e.closest(".md-table, .md-pre, .ap-kv"))
+            .map(e => e.className || e.tagName).slice(0, 5) };
+      });
+      assert(w.left === 0 && w.width === 390 && w.sw <= w.cw && w.wide.length === 0, "手机宽度：" + JSON.stringify(w));
+      await p.focus("#ap-in"); await p.keyboard.press("2"); await p.waitForTimeout(200);
+      assert(p.url().endsWith("#/instances"), "输入框里按 2 不应切页：" + p.url());
+    } finally { await c.close(); await asstState({ reset: true }); await aiState({ reset: true }); }
+  });
+  // ============================== 第三阶段结束 ==============================
 
   await run("全程无页面报错", async () => { assert(errors.length === 0, errors.slice(0, 3).join(" | ")); });
 

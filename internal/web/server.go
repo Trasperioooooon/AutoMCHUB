@@ -16,11 +16,10 @@ import (
 	"net/http"
 	"strings"
 
-	"minedeck/internal/ai"
 	"minedeck/internal/app"
+	"minedeck/internal/assistant"
 	"minedeck/internal/inst"
 	"minedeck/internal/ops"
-	"minedeck/internal/ops/catalog"
 	"minedeck/internal/tunnel"
 )
 
@@ -28,19 +27,15 @@ import (
 var uiFS embed.FS
 
 type Server struct {
-	mgr *inst.Manager
-	tun *tunnel.Manager
-	ops *ops.Registry
+	mgr  *inst.Manager
+	tun  *tunnel.Manager
+	ops  *ops.Registry
+	asst *assistant.Service
 }
 
-// New 建好路由。aiSvc 是 AI 接入层（main 建好传进来；nil 时按程序目录建一个，只读设置、不联网）。
-func New(mgr *inst.Manager, tun *tunnel.Manager, aiSvc *ai.Service, port int) http.Handler {
-	s := &Server{mgr: mgr, tun: tun}
-	s.ops = catalog.New(catalog.Env{Mgr: mgr, Tun: tun, AI: aiSvc, Port: port, Shutdown: func() {
-		if OnShutdown != nil { // main 在 New 之后才注入 OnShutdown，用到时再取
-			OnShutdown()
-		}
-	}})
+// New 建好路由。reg 是操作层的注册表，asst 是应用内助手，都在 main 里建好：两者共用同一个注册表（提案存在里面）。
+func New(mgr *inst.Manager, tun *tunnel.Manager, reg *ops.Registry, asst *assistant.Service) http.Handler {
+	s := &Server{mgr: mgr, tun: tun, ops: reg, asst: asst}
 	mux := http.NewServeMux()
 
 	sub, _ := fs.Sub(uiFS, "ui")
@@ -112,6 +107,10 @@ func New(mgr *inst.Manager, tun *tunnel.Manager, aiSvc *ai.Service, port int) ht
 	mux.HandleFunc("PUT /api/ai/quota", s.handleAIQuota)
 	mux.HandleFunc("PUT /api/ai/prices", s.handleAIPrices)
 	mux.HandleFunc("POST /api/ai/prices/refresh", s.handleAIPricesRefresh)
+
+	// 第三阶段：应用内 AI 助手、提案的确认接口、排错和修复用的实例接口（见 assistant.go）
+	s.assistantRoutes(mux)
+	s.troubleshootRoutes(mux)
 
 	return secure(mux)
 }

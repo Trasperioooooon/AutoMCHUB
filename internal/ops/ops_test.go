@@ -302,10 +302,14 @@ func TestProposalLifecycle(t *testing.T) {
 	if _, err := f.reg.Confirm(ctx, ui, p.ID, false); CodeOf(err) != 404 || f.count("t.write") != 1 {
 		t.Fatalf("提案只能用一次：%v", err)
 	}
+	// 记两条：AI 提出（event 为 propose），确认后执行（带确认人）
 	recs := f.records(t)
-	if len(recs) != 1 || recs[0].Proposal != p.ID || recs[0].ApprovedBy != "本机" || recs[0].Src != SrcAssistant ||
+	if len(recs) != 2 || recs[0].Proposal != p.ID || recs[0].ApprovedBy != "本机" || recs[0].Src != SrcAssistant || recs[0].Event != "" ||
 		recs[0].Inst != "生存服" || string(recs[0].Args) != `{"value":42}` || !recs[0].OK {
 		t.Fatalf("操作记录不对：%+v", recs)
+	}
+	if r := recs[1]; r.Event != EvPropose || r.Proposal != p.ID || r.Src != SrcAssistant || r.Session != "s1" || r.ApprovedBy != "" || string(r.Args) != `{"value":42}` {
+		t.Fatalf("提出提案也要记一条：%+v", r)
 	}
 
 	// 危险操作：不勾二次确认不执行，提案还留着；勾了才执行
@@ -353,16 +357,19 @@ func TestProposalLifecycle(t *testing.T) {
 
 	// 拒绝
 	r := propose("t.write", `{"inst":"生存服"}`)
-	if err := f.reg.Reject(aiLocal, r.ID); CodeOf(err) != 403 {
+	if err := f.reg.Reject(aiLocal, r.ID, ""); CodeOf(err) != 403 {
 		t.Fatalf("AI 不能替人拒绝：%v", err)
 	}
-	if err := f.reg.Reject(ui, r.ID); err != nil {
+	if err := f.reg.Reject(ui, r.ID, "  先别改  "); err != nil {
 		t.Fatal(err)
+	}
+	if rec := f.records(t)[0]; rec.Event != EvReject || rec.Proposal != r.ID || rec.ApprovedBy != "本机" || rec.Reason != "先别改" || !rec.OK || rec.Src != SrcAssistant {
+		t.Fatalf("拒绝要记一条，带上理由：%+v", rec)
 	}
 	if _, err := f.reg.Confirm(ctx, ui, r.ID, false); CodeOf(err) != 404 || f.count("t.write") != 2 {
 		t.Fatalf("拒绝后不应执行：%v", err)
 	}
-	if err := f.reg.Reject(ui, r.ID); CodeOf(err) != 404 {
+	if err := f.reg.Reject(ui, r.ID, ""); CodeOf(err) != 404 {
 		t.Fatalf("重复拒绝应为 404：%v", err)
 	}
 

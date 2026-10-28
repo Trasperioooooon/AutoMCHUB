@@ -87,6 +87,7 @@ func (c *cat) appOps() {
 			cfSet, cfBroken := app.CFKeyState()
 			return map[string]any{
 				"version":     app.Version,
+				"os":          app.OSVersion(),
 				"base":        app.Base,
 				"ramMb":       app.TotalRAMMB(),
 				"availRamMb":  app.AvailRAMMB(),
