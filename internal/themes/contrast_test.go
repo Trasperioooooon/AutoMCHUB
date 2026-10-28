@@ -359,3 +359,23 @@ func TestSchemeListsInSync(t *testing.T) {
 		t.Errorf("app.js 读取外观时的默认方案应为 %s：%v", defaultScheme, m)
 	}
 }
+
+// 原生窗口在页面画出来之前用的默认底色（webviewbg_windows.go，用户还没上报过界面底色时用）
+// 必须等于默认方案的标题栏色 --chrome，否则冷启动会先闪一下别的颜色。
+func TestDefaultWindowBackground(t *testing.T) {
+	schemes, _ := parseThemes(t)
+	src, err := os.ReadFile("../../webviewbg_windows.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for mode, name := range map[string]string{"light": "defaultChromeLight", "dark": "defaultChromeDark"} {
+		m := regexp.MustCompile(name + `\s*=\s*"(#[0-9a-f]{6})"`).FindSubmatch(src)
+		if m == nil {
+			t.Errorf("webviewbg_windows.go 里找不到 %s", name)
+			continue
+		}
+		if want := schemes[defaultScheme][mode]["--chrome"]; string(m[1]) != want {
+			t.Errorf("%s = %s，应与方案 %s/%s 的 --chrome（%s）一致", name, m[1], defaultScheme, mode, want)
+		}
+	}
+}

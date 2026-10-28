@@ -290,6 +290,30 @@ const ACCENTS = [
 const MODE_LABEL = { auto: "跟随系统", light: "浅色", dark: "深色" };
 const MODE_ICON = { auto: "monitor", light: "sun", dark: "moon" };
 let appearanceView = null; // 「设置 → 外观」打开时登记的重绘函数，外观变化（含侧栏快捷切换）后同步选中态
+
+/* 冷启动不白闪：原生窗口里把当前标题栏底色（--chrome）上报给后端存进 config.json（chromeColor），
+   下次启动时宿主在创建 WebView2 之前把它设成默认底色，页面画出来之前窗口就是这个颜色（见 webviewbg_windows.go）。
+   只在原生窗口里上报（局域网手机各有各的外观，不能覆盖主机的）；值没变不重复写，连点外观选项时合并成一次。 */
+const chromeReport = { last: null, timer: 0 }; // last：后端当前存的值（boot 读到配置后才开始上报）
+function hexColor(v) {
+  v = String(v || "").trim().toLowerCase();
+  let m = v.match(/^#([0-9a-f]{3})$/);
+  if (m) return "#" + m[1].split("").map(c => c + c).join("");
+  if (/^#[0-9a-f]{6}$/.test(v)) return v;
+  m = v.match(/^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/);
+  return m ? "#" + m.slice(1, 4).map(n => Math.min(255, +n).toString(16).padStart(2, "0")).join("") : "";
+}
+function reportChrome() {
+  if (typeof window.hostWinClose !== "function" || chromeReport.last === null) return;
+  clearTimeout(chromeReport.timer);
+  chromeReport.timer = setTimeout(() => {
+    const c = hexColor(getComputedStyle(document.documentElement).getPropertyValue("--chrome"));
+    if (!c || c === chromeReport.last) return;
+    const prev = chromeReport.last;
+    chromeReport.last = c;
+    api("/api/config", { method: "PUT", body: { chromeColor: c } }).catch(() => { chromeReport.last = prev; });
+  }, 400);
+}
 const Appearance = {
   get() {
     const d = document.documentElement.dataset;
@@ -307,6 +331,7 @@ const Appearance = {
     // 卡片上的 MOTD 按明暗取色，切换后重绘
     document.querySelectorAll(".inst-meta[data-motd]").forEach(el => { if (el.dataset.motd) renderMotd(el, el.dataset.motd); });
     if (appearanceView) appearanceView();
+    reportChrome();
   },
 };
 function paintThemeBtn() {
@@ -2596,6 +2621,8 @@ async function applyBackground() {
   }
   navigate();
   document.dispatchEvent(new Event("md-ready")); // 启动画面（若在播）据此在方块拼完后淡出
+  chromeReport.last = (info.config && info.config.chromeColor) || "";
+  reportChrome();
   applyBackground();
   // 协议为新增项：老用户虽已 onboarded，但未同意过协议（tosAccepted）仍需补一次
   if (!info.config || !info.config.onboarded || !info.config.tosAccepted) showOnboarding(info);

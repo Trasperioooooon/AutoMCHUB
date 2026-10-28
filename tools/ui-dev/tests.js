@@ -31,7 +31,9 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
   const errors = [];
   page.on("pageerror", e => errors.push(e.message));
   const reqs = [];
-  page.on("request", r => reqs.push({ t: Date.now(), m: r.method(), u: new URL(r.url()).pathname }));
+  page.on("request", r => reqs.push({ t: Date.now(), m: r.method(), u: new URL(r.url()).pathname, b: r.method() === "PUT" ? r.postData() || "" : "" }));
+  // 某次之后有没有改过某个配置键（PUT /api/config 的请求体里带这个键）——原生窗口还会顺带上报界面底色，不能只看路径
+  const putConfig = (since, key) => reqs.slice(since).some(r => r.m === "PUT" && r.u === "/api/config" && key in JSON.parse(r.b || "{}"));
   const settle = (ms = 400) => page.waitForTimeout(ms);
   const inst = encodeURIComponent("生存服 · 朋友");
   await page.goto(ORIGIN);
@@ -234,7 +236,7 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
     assert(!(await page.$eval("#cf-save", b => b.disabled)), "改动后保存键应可点");
     const before = reqs.length;
     await page.press("#cf-key", "Enter"); await settle(300);
-    assert(reqs.slice(before).some(r => r.m === "PUT" && r.u === "/api/config"), "回车未保存");
+    assert(putConfig(before, "cfApiKey"), "回车未保存");
     assert(await page.$eval("#cf-save", b => b.disabled), "保存后应恢复置灰");
   });
 
@@ -427,12 +429,12 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
     assert((await rows()).join() === "auto:true:true,mirror:false:false,official:false:false", "初始选中不对：" + await rows());
     let before = reqs.length;
     await page.click('#src-cards .row-item[data-v="mirror"]'); await settle(250);
-    assert(reqs.slice(before).some(r => r.m === "PUT" && r.u === "/api/config"), "点选未保存");
+    assert(putConfig(before, "source"), "点选未保存");
     assert((await rows()).join() === "auto:false:false,mirror:true:true,official:false:false", "点选后选中不对：" + await rows());
     await page.focus('#src-cards .row-item[data-v="official"]');
     before = reqs.length;
     await page.keyboard.press("Enter"); await settle(250);
-    assert(reqs.slice(before).some(r => r.m === "PUT" && r.u === "/api/config") && (await rows())[2] === "official:true:true", "键盘未选中：" + await rows());
+    assert(putConfig(before, "source") && (await rows())[2] === "official:true:true", "键盘未选中：" + await rows());
     await page.click('#src-cards .row-item[data-v="auto"]'); await settle(250); // 复原
     await page.click('.set-nav[data-sec="storage"]'); await settle();
     const g = await page.$eval("#set-body .group", el => [el.classList.contains("has-ico"), el.querySelectorAll(".row-item").length, el.querySelectorAll(".ri-ico").length]);
@@ -441,7 +443,7 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
     await page.click('.set-nav[data-sec="startup"]'); await settle();
     before = reqs.length;
     await page.click('.row-item:has([data-cfg="minimizeToTray"]) .sw'); await settle(250);
-    assert(reqs.slice(before).some(r => r.m === "PUT" && r.u === "/api/config"), "开关未即时保存");
+    assert(putConfig(before, "minimizeToTray"), "开关未即时保存");
     await page.click('.row-item:has([data-cfg="minimizeToTray"]) .sw'); await settle(250); // 复原
   });
 
@@ -467,6 +469,33 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
       assert(await page.$eval(card + " [data-stat]", el => el.classList.contains("closed")), "停止后状态行未收起");
       assert((await page.$(card + ' [data-act="start"]')) !== null, "停止后应显示「启动」");
     } finally { await setStatus("stopped"); }
+  });
+
+  await run("冷启动白闪：原生窗口把标题栏底色上报存进配置，换配色后跟着更新；局域网浏览器不上报", async () => {
+    const chromeOf = (p, scheme, theme) => p.evaluate(([s, t]) => fetch("/themes.css").then(r => r.text()).then(css =>
+      (css.split(`[data-scheme="${s}"][data-theme="${t}"]`)[1].match(/--chrome:\s*([^;]+);/) || [])[1].trim()), [scheme, theme]);
+    const cfg = p => p.evaluate(() => fetch("/api/app", { headers: { "X-Token": "mock" } }).then(r => r.json()).then(j => j.data.config.chromeColor));
+    await page.evaluate(() => fetch("/api/config", { method: "PUT", headers: { "X-Token": "mock" }, body: JSON.stringify({ chromeColor: "" }) }));
+    const c = await hostCtx({ host: true });
+    try {
+      const p = await c.newPage();
+      await p.goto(ORIGIN + "#/settings/appearance"); await p.waitForTimeout(900);
+      const theme = await p.evaluate(() => document.documentElement.dataset.theme);
+      assert((await cfg(p)) === await chromeOf(p, "craft", theme), `启动后未上报默认方案的标题栏色：${await cfg(p)}`);
+      await p.click('[data-scheme-pick="nord"]'); await p.waitForTimeout(800);
+      assert((await cfg(p)) === await chromeOf(p, "nord", theme), `换配色后未更新：${await cfg(p)}`);
+      const bad = await p.evaluate(() => fetch("/api/config", { method: "PUT", headers: { "X-Token": "mock" }, body: JSON.stringify({ chromeColor: "red" }) }).then(r => r.status));
+      assert(bad === 400, "非法颜色应返回 400：" + bad);
+      await p.click('[data-scheme-pick="craft"]'); await p.waitForTimeout(800);
+    } finally { await c.close(); }
+    const lan = await hostCtx({ host: false });
+    try {
+      const p = await lan.newPage();
+      const puts = [];
+      p.on("request", r => { if (r.method() === "PUT" && r.url().endsWith("/api/config")) puts.push(r.postData()); });
+      await p.goto(ORIGIN + "?scheme=github#/instances"); await p.waitForTimeout(900);
+      assert(!puts.some(b => b.includes("chromeColor")), "局域网浏览器不应上报界面底色：" + puts);
+    } finally { await lan.close(); }
   });
 
   await run("减少动态：切页、菜单、弹窗、提示都不播动画（状态直接切换）", async () => {

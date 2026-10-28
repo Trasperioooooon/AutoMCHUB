@@ -41,7 +41,7 @@ const CORES = [
 // 每次 start() 都从这份初始数据开始：4 台服务器（运行中 / 已停止 / 启动中 / 代理端）、2 条隧道、已完成首启
 function newState(ui) {
   const state = {
-    config: { source: "auto", onboarded: true, tosAccepted: true, backupKeep: 10, listenLan: false, webhookUrl: "", updateRepo: "Trasperioooooon/MineDeck", checkUpdateOnStart: true, minimizeToTray: true, cfApiKey: "" },
+    config: { source: "auto", onboarded: true, tosAccepted: true, backupKeep: 10, listenLan: false, webhookUrl: "", updateRepo: "Trasperioooooon/MineDeck", checkUpdateOnStart: true, minimizeToTray: true, cfApiKey: "", chromeColor: "" },
     autoStart: false,
     instances: [
       { name: "生存服 · 朋友", core: "paper", kind: "game", mc: "1.21.4", build: "232", javaMajor: 21, xmxMb: 4096, xmsMb: 0, port: 25565, status: "running", motd: "§a生存服 §7· §e一起来玩！", dir: "D:\\MineDeck\\servers\\server-20261020-2130", createdAt: "2026-10-20T21:30:00+08:00", consoleEncoding: "auto", onlineCount: 3, uptimeSec: 7980, maxPlayers: 20, extraJvm: [] },
@@ -124,7 +124,16 @@ function handler(state, ui, portOf) {
       if (p === "/api/app") return ok(res, { version: "2.6.1", base: "D:\\MineDeck", ramMb: 16384, availRamMb: 9216, port: portOf(), serversRoot: "D:\\MineDeck\\servers", backupsRoot: "D:\\MineDeck\\backups", config: state.config, lanSet: false, autoStart: state.autoStart, ips: ["172.22.48.1", "192.168.1.23", "10.0.0.5"] });
       if (p === "/api/bg") return ok(res, { images: [] });
       if (p === "/api/cores") return ok(res, CORES);
-      if (p === "/api/config" && m === "PUT") { const b = await readBody(req); if ("autoStart" in b) state.autoStart = !!b.autoStart; Object.assign(state.config, b); delete state.config.autoStart; return ok(res, state.config); }
+      if (p === "/api/config" && m === "PUT") {
+        const b = await readBody(req);
+        // 同 web.go：chromeColor 只收 #rrggbb（存为小写），格式不对整次拒绝；空串清除
+        if ("chromeColor" in b) {
+          if (b.chromeColor !== "" && !/^#[0-9a-f]{6}$/i.test(b.chromeColor)) return err(res, 400, "chromeColor 须为 #rrggbb 形式的颜色");
+          b.chromeColor = b.chromeColor.toLowerCase();
+        }
+        if ("autoStart" in b) state.autoStart = !!b.autoStart;
+        Object.assign(state.config, b); delete state.config.autoStart; return ok(res, state.config);
+      }
       if (p === "/api/mcversions") {
         const snaps = u.searchParams.get("snapshots") === "1";
         const list = [...(snaps ? SNAPS.map(id => ({ id, type: "snapshot", latest: false })) : []), ...VERSIONS.map((id, i) => ({ id, type: "release", latest: i === 0, ...(u.searchParams.get("core") === "vanilla" ? { releaseTime: new Date(Date.UTC(2026, 9, 1) - i * 47 * 864e5).toISOString().replace(".000Z", "+00:00") } : {}) }))];

@@ -451,6 +451,7 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		AutoStart          *bool   `json:"autoStart"`
 		ListenLAN          *bool   `json:"listenLan"`
 		LanPassword        *string `json:"lanPassword"` // 明文仅在本次请求中出现，存储为 bcrypt 哈希
+		ChromeColor        *string `json:"chromeColor"` // 界面标题栏底色 #rrggbb（下次启动时 WebView2 的默认底色）；空串清除
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeErr(w, 400, err)
@@ -469,6 +470,15 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, fmt.Errorf("Webhook 地址需以 http(s):// 开头"))
 			return
 		}
+	}
+	var chromeColor string
+	if body.ChromeColor != nil && *body.ChromeColor != "" {
+		c, ok := app.ParseHexColor(*body.ChromeColor)
+		if !ok {
+			writeErr(w, 400, fmt.Errorf("chromeColor 须为 #rrggbb 形式的颜色"))
+			return
+		}
+		chromeColor = c
 	}
 	if body.ServersDir != nil {
 		if d := strings.TrimSpace(*body.ServersDir); d != "" {
@@ -538,6 +548,9 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if newPassHash != "" {
 			c.AccessPasswordHash = newPassHash
+		}
+		if body.ChromeColor != nil {
+			c.ChromeColor = chromeColor
 		}
 		if body.ListenLAN != nil {
 			if *body.ListenLAN && c.AccessPasswordHash == "" {
