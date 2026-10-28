@@ -466,6 +466,18 @@ func TestEmptyReply(t *testing.T) {
 	if h := f.history()[0]; h.Kind != "failed" || !strings.Contains(h.Err, "模型没有给出回复") {
 		t.Errorf("记录：%+v", h)
 	}
+	// 只有空白的回复也一样（不发一条空的 tellraw）
+	f.advance(16 * time.Second)
+	f.ai.queue(textReply(" \n\t "))
+	f.say("Steve", "@AI 你好")
+	n := len(got)
+	got = f.tellraws()
+	if len(got) != n+1 || got[n].target != "Steve" || !strings.Contains(got[n].body, "AI 没有给出回复") {
+		t.Errorf("空白回复：%+v", got)
+	}
+	if h := f.history()[0]; h.Kind != "failed" || !strings.Contains(h.Err, "模型没有给出回复") {
+		t.Errorf("记录：%+v", h)
+	}
 }
 
 // 执行权限在排队、回答的时候被收回了：命令照样不执行（每条命令执行前按最新的设置再查一次）。

@@ -49,13 +49,14 @@ func (r *room) answer(j *job) {
 	}
 	r.record(rec)
 	if s.reg != nil {
-		args := map[string]any{"inst": r.name, "chars": utf8.RuneCountInString(j.ask.Question), "opts": optNames2(j.ask.Opts),
+		args := map[string]any{"inst": r.name, "chars": utf8.RuneCountInString(j.ask.Question), "opts": optLabels(j.ask.Opts),
 			"exec": j.exec, "result": rec.Kind, "usage": usage.Total(), "commands": len(rec.Commands)} // 键名不能带 token：操作记录会把它当密钥写成 ***
 		s.reg.Record(caller, "gameai.ask", ops.ArgsOf(args), err, s.now().Sub(start))
 	}
 }
 
-func optNames2(opts []Opt) []string {
+// optLabels 选项写成 /私、/问 这样（操作记录里用）。
+func optLabels(opts []Opt) []string {
 	out := make([]string, 0, len(opts))
 	for _, o := range opts {
 		out = append(out, "/"+string(o))
@@ -115,7 +116,13 @@ func (r *room) converse(ctx context.Context, j *job, set Settings, caller ops.Ca
 			return "", failText(err), err
 		}
 		if len(res.ToolCalls) == 0 {
-			return strings.TrimSpace(res.Text), "", nil
+			if t := strings.TrimSpace(res.Text); t != "" {
+				return t, "", nil
+			}
+			if len(*cmds) > 0 {
+				return summary(*cmds), "", nil
+			}
+			return "", failText(errEmpty), errEmpty // 只有空白
 		}
 		if round >= maxRounds-1 {
 			if t := strings.TrimSpace(res.Text); t != "" {

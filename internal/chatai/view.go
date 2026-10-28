@@ -166,18 +166,26 @@ func (s *Service) Update(inst string, p Patch) (*View, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 先拿 fileMu（两次改设置排好队），磁盘在 r.mu 外面写：OnLine 在读服务器输出的协程里也要拿 r.mu
+	r.fileMu.Lock()
 	r.mu.Lock()
 	next, err := p.Apply(r.set)
-	if err != nil {
+	dir := r.dir
+	r.mu.Unlock()
+	if err == nil {
+		if e := saveSettings(dir, next); e != nil {
+			err = fmt.Errorf("保存游戏内 AI 的设置失败：%w", e)
+		}
+	}
+	if err == nil {
+		r.mu.Lock()
+		r.set, r.rules = next, next.Rules()
 		r.mu.Unlock()
+	}
+	r.fileMu.Unlock()
+	if err != nil {
 		return nil, err
 	}
-	if err := saveSettings(r.dir, next); err != nil {
-		r.mu.Unlock()
-		return nil, fmt.Errorf("保存游戏内 AI 的设置失败：%w", err)
-	}
-	r.set, r.rules = next, next.Rules()
-	r.mu.Unlock()
 	r.persist()
 	return s.View(inst)
 }
