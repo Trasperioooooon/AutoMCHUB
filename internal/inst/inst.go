@@ -82,8 +82,9 @@ type Manager struct {
 	creating map[string]bool // 正在创建中的实例名（注册进 insts 前的占位，防并发/重复创建同名实例）
 	Tasks    *tasks.Manager
 
-	autoMu   sync.Mutex
-	autoHook func(AutoAction) // 定时任务、崩溃自动重启执行后的回调（操作层用它写操作记录）
+	autoMu    sync.Mutex
+	autoHook  func(AutoAction) // 定时任务、崩溃自动重启执行后的回调（操作层用它写操作记录）
+	startHook func(string)     // 起服务器进程之前的回调（音乐共享在这里写好桥接模组的配置和 voice_host），见 hooks.go
 }
 
 func NewManager() (*Manager, error) {

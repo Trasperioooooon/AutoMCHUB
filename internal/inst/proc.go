@@ -55,6 +55,7 @@ func (m *Manager) Start(name string) error {
 	if err != nil {
 		return err
 	}
+	m.beforeStart(i) // 不能持有 procMu：回调里会查实例状态
 	i.procMu.Lock()
 	defer i.procMu.Unlock()
 	if i.state != "" && i.state != "stopped" {
