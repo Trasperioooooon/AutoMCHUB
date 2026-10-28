@@ -60,6 +60,7 @@ type Manager struct {
 func NewManager() *Manager {
 	m := &Manager{running: map[string]*runState{}, starting: map[string]bool{}, consoles: map[string]*procutil.Console{}, lastErr: map[string]string{}, broken: map[string]bool{}}
 	m.load()
+	scrubCustomConfigs() // 不管 tunnels.json 在不在、读不读得出来都清
 	return m
 }
 
@@ -90,7 +91,7 @@ func (m *Manager) load() {
 				t.Credential, migrated = sealed, true
 			}
 		default:
-			if _, err := secret.Unseal(t.Credential); err != nil {
+			if !secret.Readable(t.Credential) {
 				m.broken[t.ID] = true
 			}
 		}
@@ -98,7 +99,6 @@ func (m *Manager) load() {
 	if migrated {
 		m.save()
 	}
-	scrubCustomConfigs()
 }
 
 // scrubCustomConfigs 删掉旧版留在 runtimes/frpc/custom 里、写着明文 token 的配置文件。
@@ -300,7 +300,7 @@ func (m *Manager) Start(id string) error {
 	// 先解凭据再准备 frpc：解不开就不必下载 frpc
 	cred, err := secret.Unseal(snap.Credential)
 	if err != nil {
-		err = fmt.Errorf("凭据无法解开（可能换了电脑或 Windows 用户），请删除这条隧道后重新添加")
+		err = fmt.Errorf("凭据无法解开（可能换了电脑或 Windows 用户），请重新填写这条隧道的凭据（界面上可以删除后重新添加）")
 		con.Append("[MineDeck] ❌ " + err.Error())
 		return err
 	}

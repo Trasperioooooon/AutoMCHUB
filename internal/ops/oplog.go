@@ -36,9 +36,10 @@ type Log struct {
 	MaxMonths int
 	MaxBytes  int64
 
-	dir  string
-	mu   sync.Mutex
-	last string // 上次写的文件名：换文件时顺手清理旧文件
+	dir    string
+	mu     sync.Mutex
+	last   string // 上次写的文件名：换文件时顺手清理旧文件
+	writes int    // 写了多少条：程序长时间开着时，每 100 条也清理一次
 }
 
 func NewLog(dir string) *Log {
@@ -78,7 +79,8 @@ func (l *Log) Write(rec Record) {
 	if err != nil {
 		log.Println("写操作记录失败:", err)
 	}
-	if name != l.last {
+	l.writes++
+	if name != l.last || l.writes%100 == 0 {
 		l.last = name
 		l.pruneLocked(name)
 	}

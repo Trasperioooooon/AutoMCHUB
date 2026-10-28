@@ -46,6 +46,13 @@ func TestParseLines(t *testing.T) {
 		{"[20:15:03] [Server thread/INFO]: Notch[/127.0.0.1:5000] logged in with entity id 7 at (1.5, 64.0, -3.5)", ev{Join, "Notch", ""}},
 		{"[20:15:03 INFO]: Notch[<ip address withheld>] logged in with entity id 7 at ([world]1.5, 64.0, -3.5)", ev{Join, "Notch", ""}},
 		{"[20:15:03] [Server thread/INFO]: Notch lost connection: Timed out", ev{Leave, "Notch", ""}},
+		// 离线模式、Floodgate、旧版中文名：进服退服照样计入；聊天仍只认正版名字的写法
+		{"[20:15:03] [Server thread/INFO]: Mr-X joined the game", ev{Join, "Mr-X", ""}},
+		{"[20:15:03 INFO]: .Steve[/127.0.0.1:5000] logged in with entity id 7 at ([world]1.5, 64.0, -3.5)", ev{Join, ".Steve", ""}},
+		{"[20:15:03] [Server thread/INFO] [minecraft/ServerGamePacketListenerImpl]: .Steve lost connection: Disconnected", ev{Leave, ".Steve", ""}},
+		{"[20:15:03] [Server thread/INFO]: 史蒂夫 left the game", ev{Leave, "史蒂夫", ""}},
+		{"[20:15:03] [Server thread/INFO]: <Mr-X> hi", ev{}},
+		{"[20:15:03] [Server thread/INFO]: Mr-X-has-a-very-long-name joined the game", ev{}},
 		// 登录、配置阶段断开写的是「名字 (/地址)」或整个 GameProfile，不是在线玩家退服
 		{"[20:15:03] [Server thread/INFO]: Notch (/127.0.0.1:5000) lost connection: Disconnected", ev{}},
 		{"[20:15:03] [Server thread/INFO]: GameProfile[id=1, name=Notch] lost connection: Disconnected", ev{}},

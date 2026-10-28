@@ -212,18 +212,18 @@ func callerOf(r *http.Request) ops.Caller {
 	return ops.Caller{Source: ops.SrcLAN, Actor: host}
 }
 
-// do 解析请求 → ops.Do → 写回响应。先判权限，再调 args 取参数（取不到按它带的状态码报，默认 400），最后执行。
+// do 解析请求 → ops.Do → 写回响应。先判权限，再调 parse 取参数（取不到按它带的状态码报，默认 400），最后执行。
 // 成功时响应仍是 {"ok":true,"data":…}；失败时状态码取自操作层的错误。
-func (s *Server) do(w http.ResponseWriter, r *http.Request, name string, args func() (ops.Args, error)) {
+func (s *Server) do(w http.ResponseWriter, r *http.Request, name string, parse func() (ops.Args, error)) {
 	c := callerOf(r)
 	if err := s.ops.Check(c, name); err != nil {
 		writeErr(w, ops.CodeOf(err), err)
 		return
 	}
 	var a ops.Args
-	if args != nil {
+	if parse != nil {
 		var err error
-		if a, err = args(); err != nil {
+		if a, err = parse(); err != nil {
 			writeErr(w, ops.CodeOf(err), err)
 			return
 		}

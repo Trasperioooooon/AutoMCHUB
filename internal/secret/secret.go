@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -55,12 +56,44 @@ func Unseal(s string) (string, error) {
 	return string(b), nil
 }
 
+// Readable 只判断密文能不能解开（不是 "dpapi:" 开头的旧明文算能）：解出来的明文缓冲区立即清零，不转成字符串。
+// 结果按密文缓存（同一个 Windows 用户下，同一段密文能不能解开不会变），查状态不必每次都解密。
+func Readable(s string) bool {
+	if !IsSealed(s) {
+		return true
+	}
+	readableMu.Lock()
+	ok, hit := readable[s]
+	readableMu.Unlock()
+	if hit {
+		return ok
+	}
+	if blob, err := base64.StdEncoding.DecodeString(s[len(prefix):]); err == nil {
+		if b, err := unprotect(blob); err == nil {
+			clear(b)
+			ok = true
+		}
+	}
+	readableMu.Lock()
+	readable[s] = ok
+	readableMu.Unlock()
+	return ok
+}
+
+var (
+	readableMu sync.Mutex
+	readable   = map[string]bool{}
+)
+
 // Store 一个 JSON 文件里的一组密钥，形如 {"cf.key": "dpapi:…"}，文件权限 0600。
-// 每次读写都直接读写文件，内存里不留明文，也不缓存密文。
+// 每次读写都直接读写文件，内存里不留明文。
 type Store struct{ path string }
 
 // fileMu 串行化所有 Store 的读-改-写（同一文件可能有多个 Store 值）。
 var fileMu sync.Mutex
+
+// errCorrupt secrets.json 不是合法的 JSON（手改坏了、写到一半断电）。
+var errCorrupt = errors.New("格式不对")
 
 func NewStore(path string) *Store { return &Store{path: path} }
 
@@ -74,7 +107,7 @@ func (s *Store) load() (map[string]string, error) {
 		return nil, err
 	}
 	if err := json.Unmarshal(b, &m); err != nil {
-		return nil, fmt.Errorf("%s 格式不对: %w", s.path, err)
+		return nil, fmt.Errorf("%s %w: %v", s.path, errCorrupt, err)
 	}
 	return m, nil
 }
@@ -93,13 +126,20 @@ func (s *Store) Get(name string) (string, error) {
 	return Unseal(m[name])
 }
 
-// State 不交出明文，只说这一项是否已设置、能否解开。
+// State 不解出明文，只说这一项是否已设置、能否解开。文件读不了或格式坏了，也按「解不开、要重填」报。
 func (s *Store) State(name string) (set, unreadable bool) {
-	v, err := s.Get(name)
-	if err != nil {
+	fileMu.Lock()
+	m, err := s.load()
+	fileMu.Unlock()
+	switch {
+	case err != nil:
+		return false, true
+	case m[name] == "":
+		return false, false
+	case !Readable(m[name]):
 		return false, true
 	}
-	return v != "", false
+	return true, false
 }
 
 // Set 加密后存入一项；plain 为空串时删除这一项。先写临时文件再改名，写到一半断电也不会留下半个文件。
@@ -114,6 +154,11 @@ func (s *Store) Set(name, plain string) error {
 	fileMu.Lock()
 	defer fileMu.Unlock()
 	m, err := s.load()
+	if errors.Is(err, errCorrupt) {
+		// 坏掉的文件里什么也解不出来，从空的重新开始，否则用户永远存不进新的密钥
+		log.Printf("%v，已重新建立", err)
+		m, err = map[string]string{}, nil
+	}
 	if err != nil {
 		return err
 	}

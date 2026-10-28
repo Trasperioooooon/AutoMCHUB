@@ -109,4 +109,34 @@ func TestStore(t *testing.T) {
 	if _, err := st.Get("cf.key"); !errors.Is(err, ErrUnreadable) {
 		t.Errorf("Get 应返回 ErrUnreadable：%v", err)
 	}
+	// 文件坏了：按「解不开」报；存新密钥时从空文件重新开始，不会一直存不进去
+	if err := os.WriteFile(path, []byte(`{"cf.key":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if set, bad := st.State("cf.key"); set || !bad {
+		t.Errorf("文件坏了应报 unreadable：%v, %v", set, bad)
+	}
+	if err := st.Set("cf.key", "fresh-key"); err != nil {
+		t.Fatalf("文件坏了时应能重新存：%v", err)
+	}
+	if v, err := st.Get("cf.key"); v != "fresh-key" || err != nil {
+		t.Errorf("重新存后 Get = %q, %v", v, err)
+	}
+}
+
+// 查状态不解出明文字符串，结果按密文缓存；换一段密文会重新判断。
+func TestReadableCache(t *testing.T) {
+	good, err := Seal("k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !Readable(good) || !Readable(good) || Readable("dpapi:AAAA") || Readable("dpapi:@@") || !Readable("旧版明文") {
+		t.Error("Readable 判断不对")
+	}
+	readableMu.Lock()
+	cached := readable[good]
+	readableMu.Unlock()
+	if !cached {
+		t.Error("能解开的结果应缓存")
+	}
 }

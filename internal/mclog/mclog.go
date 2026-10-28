@@ -53,6 +53,8 @@ type Line struct {
 	Unsigned bool   // 聊天：带「[Not Secure] 」前缀（1.19.1 起服务器记录没有签名的聊天时会加）
 }
 
+const trackName = `[^\s<>\[\]]{1,16}` // 进服退服认的名字：1–16 个字符，不含空白和 < > [ ]
+
 var (
 	// 前缀格式依次尝试，三种互不重叠（Forge 在线程方括号后面还有一段记录器）。
 	// Mohist、Banner 这类混合端的格式没有核实，三种都试，哪个对上算哪个。
@@ -60,16 +62,20 @@ var (
 	vanillaRe = regexp.MustCompile(`^\[(\d{2}:\d{2}:\d{2})\] \[([^\]]+)/([A-Z]+)\]: (.*)$`)
 	paperRe   = regexp.MustCompile(`^\[(\d{2}:\d{2}:\d{2}) ([A-Z]+)\]: (.*)$`)
 
-	// 正文规则，名字只认 1–16 位字母、数字、下划线（正版名字的规则）。
+	// 聊天的发送者只认 1–16 位字母、数字、下划线（正版名字的规则）：第四阶段要把它放进 tellraw，宁可漏认（设计文档 §6.1）。
 	chatRe = regexp.MustCompile(`^(\[Not Secure\] )?<([A-Za-z0-9_]{1,16})> (.*)$`)
-	// 系统消息「%s joined the game」「%s (formerly known as %s) joined the game」「%s left the game」（原版语言文件 en_us.json）
-	joinRe = regexp.MustCompile(`^([A-Za-z0-9_]{1,16})(?: \(formerly known as [A-Za-z0-9_]{1,16}\))? joined the game$`)
-	leftRe = regexp.MustCompile(`^([A-Za-z0-9_]{1,16}) left the game$`)
-	// PlayerList 的「{}[{}] logged in with entity id {} at ({}, {}, {})」和游戏连接断开时的「{} lost connection: {}」：
+	// 进服退服的名字放宽到「1–16 个字符，不含空白和 < > [ ]」：离线模式（MineDeck 默认）允许 Mr-X 这类名字，
+	// Floodgate 的基岩版玩家带 . 前缀，旧版离线服还可能有中文名，都要计入在线人数。放宽不影响防伪造：
+	// 聊天行的正文以 < 或「[Not Secure] 」开头，/me、/say、命令回显都带空格，凑不成「整段正文 = 名字 + 固定文字」。
+	// 在线名单因此可能出现 @a 这类名字，第四阶段拿它校验聊天发送者时，要先按 §6.1 丢掉以 @ 开头和含 " \ § 的名字。
+	joinRe = regexp.MustCompile(`^(` + trackName + `)(?: \(formerly known as ` + trackName + `\))? joined the game$`)
+	leftRe = regexp.MustCompile(`^(` + trackName + `) left the game$`)
+	// 系统消息「%s joined the game」「%s (formerly known as %s) joined the game」「%s left the game」（原版语言文件 en_us.json）之外，
+	// 还认 PlayerList 的「{}[{}] logged in with entity id {} at ({}, {}, {})」和游戏连接断开时的「{} lost connection: {}」：
 	// 用的是账号名，不受队伍前缀影响；插件关掉进服、退服提示时也照样有。登录、配置阶段断开的那两条写的是「名字 (/地址)」或整个
 	// GameProfile，对不上这里的写法，不会误删在线玩家。
-	loginRe = regexp.MustCompile(`^([A-Za-z0-9_]{1,16})\[[^\]]*\] logged in with entity id \d+ at \(.*\)$`)
-	lostRe  = regexp.MustCompile(`^([A-Za-z0-9_]{1,16}) lost connection: .*$`)
+	loginRe = regexp.MustCompile(`^(` + trackName + `)\[[^\]]*\] logged in with entity id \d+ at \(.*\)$`)
+	lostRe  = regexp.MustCompile(`^(` + trackName + `) lost connection: .*$`)
 
 	// 聊天只认这两个线程：服务端主线程，和 Paper 的异步聊天线程（推断）
 	asyncChatRe = regexp.MustCompile(`^Async Chat Thread - #\d+$`)

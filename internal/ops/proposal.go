@@ -47,7 +47,9 @@ func (r *Registry) propose(ctx context.Context, c Caller, op *Op, args Args) (*P
 		if err != nil {
 			return nil, err
 		}
-		plan = p
+		if p != nil {
+			plan = p
+		}
 	}
 	now := r.now()
 	p := &Proposal{ID: newID(), Op: op.Name, Title: op.Title, Level: op.Level, Args: bytes.Clone(args),
@@ -128,7 +130,11 @@ func (r *Registry) Confirm(ctx context.Context, approver Caller, id string, ack 
 		if err != nil {
 			return nil, Errorf(409, "提案作废：%v。请让 AI 重新预览", err)
 		}
-		if changed := diffPre(p.Plan.Pre, plan.Pre); len(changed) > 0 {
+		var pre map[string]string
+		if plan != nil {
+			pre = plan.Pre
+		}
+		if changed := diffPre(p.Plan.Pre, pre); len(changed) > 0 {
 			return nil, Errorf(409, "提案作废：预览之后%s变了，请让 AI 重新预览", strings.Join(changed, "、"))
 		}
 	}
