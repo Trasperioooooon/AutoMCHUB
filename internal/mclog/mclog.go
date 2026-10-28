@@ -62,8 +62,10 @@ var (
 	vanillaRe = regexp.MustCompile(`^\[(\d{2}:\d{2}:\d{2})\] \[([^\]]+)/([A-Z]+)\]: (.*)$`)
 	paperRe   = regexp.MustCompile(`^\[(\d{2}:\d{2}:\d{2}) ([A-Z]+)\]: (.*)$`)
 
-	// 聊天的发送者只认 1–16 位字母、数字、下划线（正版名字的规则）：第四阶段要把它放进 tellraw，宁可漏认（设计文档 §6.1）。
+	// 聊天的发送者只认 1–16 位字母、数字、下划线（正版名字的规则）：游戏内 AI 要把它放进 tellraw，宁可漏认（设计文档 §6.1）。
 	chatRe = regexp.MustCompile(`^(\[Not Secure\] )?<([A-Za-z0-9_]{1,16})> (.*)$`)
+	// 放宽后（游戏内 AI 的实例设置，§6.1 第 4 步）：1–16 个不含空白和 < > 的字符。用不用得上、哪些名字要丢掉，由调用方决定。
+	looseChatRe = regexp.MustCompile(`^(\[Not Secure\] )?<([^\s<>]{1,16})> (.*)$`)
 	// 进服退服的名字放宽到「1–16 个字符，不含空白和 < > [ ]」：离线模式（MineDeck 默认）允许 Mr-X 这类名字，
 	// Floodgate 的基岩版玩家带 . 前缀，旧版离线服还可能有中文名，都要计入在线人数。放宽不影响防伪造：
 	// 聊天行的正文以 < 或「[Not Secure] 」开头，/me、/say、命令回显都带空格，凑不成「整段正文 = 名字 + 固定文字」。
@@ -108,8 +110,17 @@ func ValidName(name string) bool {
 	return true
 }
 
+// ChatOptions 聊天识别的两个放宽项（游戏内 AI 的实例设置，§6.1 第 3、4 步）。进服、退服的识别不受影响。
+type ChatOptions struct {
+	LooseNames bool // 发送者放宽成 1–16 个不含空白和 < > 的字符（离线模式可能允许更多字符）
+	AnyThread  bool // 不看线程名（线程名对不上的服）；Forge 格式仍要求记录器是 MinecraftServer / DedicatedServer
+}
+
 // Parse 识别一行控制台输出。
-func Parse(raw string) Line {
+func Parse(raw string) Line { return ParseWith(raw, ChatOptions{}) }
+
+// ParseWith 同 Parse，按 o 放宽聊天的识别。
+func ParseWith(raw string, o ChatOptions) Line {
 	l := Line{Text: Clean(strings.TrimRight(raw, "\r\n"))}
 	if strings.HasPrefix(l.Text, "> ") || strings.HasPrefix(l.Text, "[MineDeck]") {
 		l.Kind = MineDeck
@@ -127,8 +138,12 @@ func Parse(raw string) Line {
 	if l.Level != "INFO" {
 		return l
 	}
-	if l.chatSource() {
-		if m := chatRe.FindStringSubmatch(l.Body); m != nil {
+	if l.chatSource(o.AnyThread) {
+		re := chatRe
+		if o.LooseNames {
+			re = looseChatRe
+		}
+		if m := re.FindStringSubmatch(l.Body); m != nil {
 			l.Kind, l.Unsigned, l.Player, l.Message = Chat, m[1] != "", m[2], m[3]
 			return l
 		}
@@ -148,13 +163,13 @@ func Parse(raw string) Line {
 	return l
 }
 
-// chatSource 这一行是不是由记录聊天的地方打出来的：线程是主线程或异步聊天线程；
+// chatSource 这一行是不是由记录聊天的地方打出来的：线程是主线程或异步聊天线程（anyThread 时不看）；
 // Forge 格式下记录器还得是 MinecraftServer / DedicatedServer。Paper 格式没有线程和记录器，不查。
-func (l *Line) chatSource() bool {
+func (l *Line) chatSource(anyThread bool) bool {
 	if l.Format == FormatPaper {
 		return true
 	}
-	if l.Thread != "Server thread" && !asyncChatRe.MatchString(l.Thread) {
+	if !anyThread && l.Thread != "Server thread" && !asyncChatRe.MatchString(l.Thread) {
 		return false
 	}
 	return l.Format != FormatForge || l.Logger == "minecraft/MinecraftServer" || l.Logger == "minecraft/DedicatedServer"

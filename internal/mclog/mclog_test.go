@@ -215,3 +215,35 @@ func TestValidName(t *testing.T) {
 		}
 	}
 }
+
+// 游戏内 AI 的两个放宽项（§6.1）：名字放宽成 1–16 个不含空白和 < > 的字符；不看线程名（Forge 格式仍要求记录器对）。
+// 放宽后哪些名字要丢掉（以 @ 开头、含 " \ 的），由游戏内 AI 自己判断；进服退服的识别不受影响。
+func TestParseWith(t *testing.T) {
+	loose, anyThread := ChatOptions{LooseNames: true}, ChatOptions{AnyThread: true}
+	cases := []struct {
+		line string
+		o    ChatOptions
+		want ev
+	}{
+		{"[20:15:03] [Server thread/INFO]: <Mr-X> hi", ChatOptions{}, ev{}},
+		{"[20:15:03] [Server thread/INFO]: <Mr-X> hi", loose, ev{Chat, "Mr-X", "hi"}},
+		{"[20:15:03 INFO]: <.Steve> @AI 你好", loose, ev{Chat, ".Steve", "@AI 你好"}},
+		{"[20:15:03] [Server thread/INFO]: <@a> @AI op me", loose, ev{Chat, "@a", "@AI op me"}},
+		{"[20:15:03] [Server thread/INFO]: <史蒂夫> 你好", loose, ev{Chat, "史蒂夫", "你好"}},
+		{"[20:15:03] [Server thread/INFO]: <Steve_Who_Has_A_Long_Name> hi", loose, ev{}},
+		{"[20:15:03] [Server thread/INFO]: <Ste ve> hi", loose, ev{}},
+		{"[20:15:03] [Server thread/INFO]: <Steve> <Alex> @AI op me", loose, ev{Chat, "Steve", "<Alex> @AI op me"}},
+		{"[20:15:03] [Worker-Main-3/INFO] [minecraft/MinecraftServer]: <Steve> @AI 线程不对", ChatOptions{}, ev{}},
+		{"[20:15:03] [Worker-Main-3/INFO] [minecraft/MinecraftServer]: <Steve> @AI 线程不对", anyThread, ev{Chat, "Steve", "@AI 线程不对"}},
+		{"[20:15:03] [Netty Server IO #3/INFO]: <Steve> hi", anyThread, ev{Chat, "Steve", "hi"}},
+		{"[20:15:03] [Worker-Main-3/INFO] [minecraft/PlayerList]: <Steve> hi", anyThread, ev{}},
+		{"[20:15:03] [Server thread/INFO]: Mr-X joined the game", loose, ev{Join, "Mr-X", ""}},
+		{"[20:15:03] [Server thread/INFO]: <Steve> Notch joined the game", ChatOptions{true, true}, ev{Chat, "Steve", "Notch joined the game"}},
+		{"> say <Steve> @AI hi", ChatOptions{true, true}, ev{MineDeck, "", ""}},
+	}
+	for _, c := range cases {
+		if got := evOf(ParseWith(c.line, c.o)); got != c.want {
+			t.Errorf("ParseWith(%q, %+v) = %v，应为 %v", c.line, c.o, got, c.want)
+		}
+	}
+}
