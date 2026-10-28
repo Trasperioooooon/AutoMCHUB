@@ -47,7 +47,7 @@ MineDeck 现在能开服、管服，但遇到报错、要改配置时，用户�
 
 - 模型名换得很快（DeepSeek 已换代，智谱已到 5.x）。预设只给"建议模型"，模型字段可以改，并提供"获取模型列表"（摘要）。
 - Anthropic 的支持地区名单里没有中国大陆（摘要：[支持地区](https://www.anthropic.com/supported-countries)）。国内一般也连不上 Anthropic 和 OpenAI（推断）。预设里要写清楚。
-- Claude 官方 Go SDK（`anthropic-sdk-go` v2.4.0）是纯 Go。在本机编了两个最小程序对比：只用标准库发流式请求的 Windows exe 约 5.8 MB，换成官方 SDK 约 11.4 MB，多出约 5.7 MB（核实：本机实测，`-trimpath -ldflags="-s -w"`）。MineDeck 现在约 8 MB。所以 Claude 这一路也自己发 HTTP，不用官方 SDK（已定，§4.1）。
+- Claude 官方 Go SDK（`anthropic-sdk-go` v2.4.0）是纯 Go。在本机编了两个最小程序对比：只用标准库发流式请求的 Windows exe 约 5.8 MB，换成官方 SDK 约 11.4 MB，多出约 5.7 MB（核实：本机实测，`-trimpath -ldflags="-s -w"`）。MineDeck 界面 v5 内嵌字体后约 10.5 MB（v4 时约 8.6 MB）。所以 Claude 这一路也自己发 HTTP，不用官方 SDK（已定，§4.1）。
 
 ### 2.2 密钥与现有代码里的问题
 
