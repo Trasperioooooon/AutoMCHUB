@@ -254,7 +254,8 @@ func orderedResults(w *Wait) []ai.ToolResult {
 
 // addUser 追加用户的话：脱敏后发给 AI（附上排错资料的话一起）；界面上显示原话。
 func (s *Service) addUser(sess *Session, text, pack string) bool {
-	sent := s.redact.Text(text)
+	masked := s.redact.Text(text)
+	sent := masked
 	if pack != "" {
 		sent += "\n\n" + pack
 	}
@@ -269,6 +270,7 @@ func (s *Service) addUser(sess *Session, text, pack string) bool {
 	if sent != text {
 		it.Sent = sent
 	}
+	it.Masked = masked != text
 	if pack != "" {
 		it.Attach = utf8.RuneCountInString(pack)
 		sess.attach = nil
@@ -709,6 +711,9 @@ func outcomeText(outcome, reason, errText string) string {
 
 // Context 「让 AI 分析」：打包这个会话关联的实例的排错资料（脱敏后），存起来等用户看过预览再发；返回将要发送的全文。
 func (s *Service) Context(ctx context.Context, who ops.Caller, id string) (*Preview, error) {
+	if err := s.allow(who); err != nil {
+		return nil, err
+	}
 	sess, err := s.get(who, id)
 	if err != nil {
 		return nil, err

@@ -111,6 +111,7 @@ type Item struct {
 	Text      string      `json:"text,omitempty"`
 	Sent      string      `json:"sent,omitempty"`      // 用户的话：实际发给 AI 的内容（脱敏后、带上附加的排错资料），和 Text 一样时为空
 	Attach    int         `json:"attach,omitempty"`    // 用户的话：附加了多少字的排错资料
+	Masked    bool        `json:"masked,omitempty"`    // 用户的话：里面的隐私信息（路径里的用户名、局域网 IP、Key 等）发送前替换掉了
 	Withdrawn bool        `json:"withdrawn,omitempty"` // 用户的话：没得到回复，已经从历史里撤回
 	Tools     []*ToolItem `json:"tools,omitempty"`     // AI 的回复：这次调用的工具
 	Usage     *ai.Usage   `json:"usage,omitempty"`
@@ -235,16 +236,24 @@ func (s *Service) Status(who ops.Caller) Status {
 	return st
 }
 
-// allow 这个请求能不能用助手。
-func (s *Service) allow(who ops.Caller) error {
+// allowView 这个请求能不能看、删助手的会话。不要求 AI 配好：停用 AI 之后也能看历史、清空会话。
+func (s *Service) allowView(who ops.Caller) error {
 	if !who.Source.Human() {
 		return ops.Errorf(403, "只有人能用助手")
 	}
-	if !s.ai.Enabled() {
-		return ops.Wrap(400, ai.ErrDisabled)
-	}
 	if !who.Local && !s.ai.LANAssistant() {
 		return ops.Errorf(403, "主机关闭了「局域网可用 AI 助手」，局域网登录的设备不能用助手")
+	}
+	return nil
+}
+
+// allow 这个请求能不能用助手（开会话、生成发送预览）：还要 AI 配好了。发消息由 start 经 ai.Begin 检查。
+func (s *Service) allow(who ops.Caller) error {
+	if err := s.allowView(who); err != nil {
+		return err
+	}
+	if !s.ai.Enabled() {
+		return ops.Wrap(400, ai.ErrDisabled)
 	}
 	return nil
 }
@@ -254,7 +263,7 @@ func visible(who ops.Caller, sess *Session) bool { return who.Local || !sess.Ori
 
 // get 取会话并检查权限。
 func (s *Service) get(who ops.Caller, id string) (*Session, error) {
-	if err := s.allow(who); err != nil {
+	if err := s.allowView(who); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
@@ -297,7 +306,7 @@ type Summary struct {
 
 // List 会话列表，最近动过的在前。
 func (s *Service) List(who ops.Caller) ([]Summary, error) {
-	if err := s.allow(who); err != nil {
+	if err := s.allowView(who); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
@@ -429,7 +438,7 @@ func (s *Service) Delete(who ops.Caller, id string) error {
 
 // Clear 清空会话：本机清空全部，局域网的设备只清空局域网开的。返回删了几个。
 func (s *Service) Clear(who ops.Caller) (int, error) {
-	if err := s.allow(who); err != nil {
+	if err := s.allowView(who); err != nil {
 		return 0, err
 	}
 	s.mu.Lock()

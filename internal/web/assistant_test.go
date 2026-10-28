@@ -176,7 +176,7 @@ func lastText(v assistant.View) string {
 }
 
 // 第三阶段新增的 27 个接口逐个调一遍：状态码、错误信息、响应结构。会请求 AI、起进程、下载的都挑了在那之前就返回的参数。
-// 没配置 AI 时助手不可用，本地排错（横幅的数据来源）照样能用。
+// 没配置 AI 时不能开会话，本地排错（横幅的数据来源）照样能用。
 func TestAssistantRoutes(t *testing.T) {
 	e := newFullEnv(t)
 	ip := "/api/instances/%E7%94%9F%E5%AD%98%E6%9C%8D" // 生存服
@@ -185,7 +185,8 @@ func TestAssistantRoutes(t *testing.T) {
 	if st.Data.Enabled || st.Data.Allowed || !st.Data.Local || !st.Data.LAN || st.Data.Missing == "" {
 		t.Errorf("没配置 AI 时的状态：%+v", st.Data)
 	}
-	e.call(t, "GET", "/api/assistant/sessions", "", 400)
+	e.call(t, "GET", "/api/assistant/sessions", "", 200) // 历史照样能看、能清空，只是不能开会话、发消息
+	e.call(t, "POST", "/api/assistant/sessions", `{"inst":"生存服"}`, 400)
 	var rep struct {
 		Data struct {
 			Findings []any `json:"findings"`

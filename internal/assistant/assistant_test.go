@@ -498,6 +498,44 @@ func TestLANAndDisabled(t *testing.T) {
 	if _, err := f.as.Create(local, ""); err == nil {
 		t.Error("停用后不能开会话")
 	}
+	if err := f.as.Send(local, mine, "在吗", false); ops.CodeOf(err) != 400 {
+		t.Errorf("停用后不能发消息：%v", err)
+	}
+	if _, err := f.as.Context(context.Background(), local, mine); ops.CodeOf(err) != 400 {
+		t.Errorf("停用后不能生成发送预览：%v", err)
+	}
+	// 历史照样能看、能清空（停用 AI 之后也要能删掉自己的数据）
+	if l, err := f.as.List(local); err != nil || len(l) != 2 {
+		t.Errorf("停用后还能看历史：%v %+v", err, l)
+	}
+	if n, err := f.as.Clear(local); err != nil || n != 2 {
+		t.Errorf("停用后也能清空：%d %v", n, err)
+	}
+}
+
+// 用户的话里有隐私信息：界面上显示原话，发给 AI 的是替换后的，并标出来（可以点开看实际发送的内容）。
+func TestUserTextMasked(t *testing.T) {
+	f := newFixture(t)
+	id := f.open(local)
+	f.ai.queue(textReply("好的"), textReply("嗯"))
+	raw := `C:\Users\alice\Desktop 里的服务器，朋友用 ` + lanIP + ` 连不上`
+	if err := f.as.Send(local, id, raw, false); err != nil {
+		t.Fatal(err)
+	}
+	v := f.wait(id, func(v *View) bool { return len(v.Items) == 2 })
+	u := v.Items[0]
+	sent, _ := f.as.Sent(local, id, u.ID, "")
+	if u.Text != raw || !u.Masked || u.Sent != "" || strings.Contains(sent, lanIP) || !strings.Contains(sent, phIP) || strings.Contains(sent, winUser) {
+		t.Errorf("原话 %q，masked=%v，实际发送 %q", u.Text, u.Masked, sent)
+	}
+	if strings.Contains(string(f.ai.requests()[0]), lanIP) {
+		t.Error("请求里有局域网 IP")
+	}
+	_ = f.as.Send(local, id, "没有隐私信息的一句话", false)
+	v = f.wait(id, func(v *View) bool { return len(v.Items) == 4 })
+	if v.Items[2].Masked {
+		t.Errorf("没有替换就不标：%s", dump(v.Items[2]))
+	}
 }
 
 // AI 设置改了：OpenAI 兼容换模型照常；换了地址，旧会话不能接着用。额度用完不能发。
