@@ -54,11 +54,15 @@ func TestLevelsFollowDesign(t *testing.T) {
 	want := map[ops.Level][]string{
 		ops.Read: {"app.info", "app.update.check", "instance.list", "task.get", "instance.props.get", "instance.policies.get",
 			"instance.backups.list", "instance.players.get", "instance.resources.search", "mc.cores", "mc.versions", "mc.builds",
-			"java.list", "java.scan", "tunnel.list", "ops.log"},
+			"java.list", "java.scan", "tunnel.list", "ops.log",
+			// 第三阶段：排错用的读能力
+			"instance.console.tail", "instance.logs.read", "instance.crashes", "instance.diag", "instance.mods.list", "instance.config.read", "port.check"},
 		ops.Write: {"instance.create", "instance.start", "instance.settings.set", "instance.props.set", "instance.policies.set",
-			"instance.backup.create", "instance.whitelist.add", "instance.whitelist.remove", "instance.resources.install", "tunnel.start"},
+			"instance.backup.create", "instance.whitelist.add", "instance.whitelist.remove", "instance.resources.install", "tunnel.start",
+			"instance.java.set", "instance.config.write", "instance.mods.toggle"},
 		ops.Danger: {"instance.stop", "instance.kill", "instance.command", "instance.backup.restore", "instance.players.op",
-			"instance.players.deop", "instance.players.kick", "instance.players.ban", "instance.players.pardon", "tunnel.stop"},
+			"instance.players.deop", "instance.players.kick", "instance.players.ban", "instance.players.pardon", "tunnel.stop",
+			"instance.restart"},
 		ops.HumanOnly: {"app.config.set", "app.shutdown", "app.update.apply", "host.pickdir", "host.openpath", "instance.import",
 			"instance.delete", "instance.opendir", "instance.backup.delete", "java.add", "tunnel.add", "tunnel.update", "tunnel.delete",
 			// AI 设置（第二阶段）：AI 永远看不到、也改不了自己的设置和 Key（§3.3）
@@ -111,8 +115,8 @@ func TestAIToolLists(t *testing.T) {
 			t.Errorf("助手的工具清单里有仅人工的操作 %s", op.Name)
 		}
 	}
-	if n := len(reg.Available(ops.Caller{Source: ops.SrcAssistant, Local: true})); n != 16+10+10 {
-		t.Errorf("助手能用 %d 个操作，应为读 16 + 写 10 + 危险 10", n)
+	if n := len(reg.Available(ops.Caller{Source: ops.SrcAssistant, Local: true})); n != 23+13+11 {
+		t.Errorf("助手能用 %d 个操作，应为读 23 + 写 13 + 危险 11", n)
 	}
 	if l := reg.Available(ops.Caller{Source: ops.SrcGameChat, Actor: "Steve"}); len(l) != 0 {
 		t.Errorf("游戏内 AI 不该有工具：%v", l)

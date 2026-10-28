@@ -280,3 +280,20 @@ func TestCrashSummary(t *testing.T) {
 		t.Errorf("hs_err 摘要：%q", hs)
 	}
 }
+
+func TestLineLevel(t *testing.T) {
+	for line, want := range map[string]string{
+		"[12:00:00] [Server thread/WARN]: Can't keep up!":                         "warn",
+		"[12:00:00] [main/ERROR] [mixin/]: Mixin apply failed":                    "error",
+		"[12:00:00 FATAL]: boom":                                                  "error",
+		"java.lang.NullPointerException: x":                                       "error",
+		"\tat a.b.C.d(C.java:1)":                                                  "error",
+		"Caused by: java.io.IOException":                                          "error",
+		"[12:00:00] [Server thread/INFO]: Done (1.0s)!":                           "",
+		"[12:00:00] [Server thread/INFO] [minecraft/MinecraftServer]: <Steve> hi": "",
+	} {
+		if got := LineLevel(line); got != want {
+			t.Errorf("%q：%q，应为 %q", line, got, want)
+		}
+	}
+}

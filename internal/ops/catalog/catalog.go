@@ -56,6 +56,9 @@ func New(env Env) *ops.Registry {
 	c.tunnelOps()
 	c.logOps()
 	c.aiOps()
+	c.troubleshootOps()
+	c.fileOps()
+	c.portOps()
 	if env.Mgr != nil {
 		env.Mgr.SetAutoHook(func(a inst.AutoAction) {
 			reg.Record(ops.Caller{Source: ops.SrcSchedule, Actor: a.Actor, Local: true}, a.Op, ops.ArgsOf(a.Args), a.Err, a.Dur)

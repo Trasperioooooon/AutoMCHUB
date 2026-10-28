@@ -142,3 +142,17 @@ func HsErrSummary(text string) string {
 	}
 	return strings.Join(out, "\n")
 }
+
+// LineLevel 一行输出的严重程度：error（ERROR / FATAL、异常行和堆栈）、warn（WARN），其余为空串。查看控制台时按级别过滤用。
+func LineLevel(l string) string {
+	if m := levelRe.FindStringSubmatch(l); m != nil {
+		if m[1]+m[2] == "WARN" {
+			return "warn"
+		}
+		return "error"
+	}
+	if exceptionRe.MatchString(l) || frameLineRe.MatchString(l) {
+		return "error"
+	}
+	return ""
+}
