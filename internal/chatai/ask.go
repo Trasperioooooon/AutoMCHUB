@@ -116,7 +116,7 @@ func ParseAsk(msg string, prefixes []string) *Ask {
 func parseOpts(a *Ask, s string) {
 	seen := map[Opt]bool{}
 	var unknown []string
-	noSpace := false
+	noSpace, after := false, "" // after：第一个不认识的选项里，中文选项名后面的部分连同后文（举例时在选项名后面补个空格）
 	i := skipSeps(s, 0)
 	for i < len(s) {
 		r, n := utf8.DecodeRuneInString(s[i:])
@@ -140,7 +140,9 @@ func parseOpts(a *Ask, s string) {
 			}
 		} else {
 			if len(unknown) == 0 {
-				noSpace = startsWithOptName(name)
+				if noSpace = startsWithOptName(name); noSpace {
+					after = s[i+n+len(optPrefixOf(name)):]
+				}
 			}
 			unknown = append(unknown, name)
 		}
@@ -155,7 +157,7 @@ func parseOpts(a *Ask, s string) {
 		a.Action = ActUnknown
 		if noSpace {
 			a.Action = ActNoSpace
-			a.Example = strings.TrimSpace(strings.TrimPrefix(unknown[0], optPrefixOf(unknown[0])))
+			a.Example = strings.TrimFunc(after, unicode.IsSpace)
 		}
 	case seen[OptQuota]: // 带了 /额度（没带 /帮助）就只回额度
 		a.Action = ActQuota

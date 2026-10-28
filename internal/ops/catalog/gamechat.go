@@ -302,7 +302,7 @@ func (c *cat) gameChatOps() {
 	c.reg.Register(&ops.Op{
 		Name: "gameai.whitelist", Title: "一键开启白名单", Level: ops.HumanOnly, LocalOnly: true, LocalMsg: localMsg,
 		Desc: "授权玩家让 AI 执行命令时，服务器没开白名单的话用它（§6.5）：先把勾选的人加进白名单，再开白名单，免得把好友关在外面。" +
-			"运行中走控制台命令（whitelist add、whitelist on），同时把 server.properties 的 white-list 改成 true；停着时直接改名单文件和 server.properties。",
+			"运行中走控制台命令（whitelist add、whitelist on），发 whitelist on 之前先把 server.properties 的 white-list 改成 true；停着时直接改名单文件和 server.properties。",
 		Params: withInst(map[string]*ops.Schema{
 			"players": ops.Array("先加进白名单的人", ops.String("玩家名，1–16 位字母、数字、下划线").Len(1, 16)).MaxLen(100),
 		}),
@@ -337,11 +337,7 @@ func (c *cat) gameChatOps() {
 				}
 				listed[strings.ToLower(n)] = true
 			}
-			if i.Status() == "running" {
-				if err := c.Mgr.Command(p.Inst, "whitelist on"); err != nil {
-					return nil, err
-				}
-			}
+			// 先改 server.properties 再发 whitelist on：服务器执行 whitelist on 时自己也会写这个文件，先后错开，不会两边同时写
 			props, err := inst.LoadProps(i.PropsPath())
 			if err != nil {
 				return nil, ops.Wrap(500, err)
@@ -349,6 +345,11 @@ func (c *cat) gameChatOps() {
 			props.Set("white-list", "true")
 			if err := props.Save(i.PropsPath()); err != nil {
 				return nil, ops.Wrap(500, errors.New("改 server.properties 失败："+err.Error()))
+			}
+			if i.Status() == "running" {
+				if err := c.Mgr.Command(p.Inst, "whitelist on"); err != nil {
+					return nil, err
+				}
 			}
 			return view(caller, p.Inst)
 		},

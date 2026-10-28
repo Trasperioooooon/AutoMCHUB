@@ -306,6 +306,22 @@ func TestGameChatEndToEnd(t *testing.T) {
 	if rs := h.([]chatai.Record); len(rs) != 1 || rs[0].Reply != "天气已经改成晴天了。" || len(rs[0].Commands) != 1 || rs[0].Commands[0].Output != "Set the weather to clear" {
 		t.Errorf("最近的问答：%+v", rs)
 	}
+	// 服务器运行中一键开启白名单：先 whitelist add 再 whitelist on；server.properties 在发 whitelist on 之前改好
+	n := len(e.stdinLines())
+	v, err := e.do(t, localUI, "gameai.whitelist", map[string]any{"inst": "生存服", "players": []string{"Steve", "Alex"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !v.(*chatai.View).WhitelistOn {
+		t.Error("应已开启白名单")
+	}
+	waitFor(t, "whitelist on", 10*time.Second, func() bool { return len(e.stdinLines()) >= n+3 })
+	if got := strings.Join(e.stdinLines()[n:], "|"); got != "whitelist add Steve|whitelist add Alex|whitelist on" {
+		t.Errorf("运行中一键开白名单：%s", got)
+	}
+	if pr, _ := os.ReadFile(filepath.Join(e.dir, "server.properties")); !strings.Contains(string(pr), "white-list=true") {
+		t.Errorf("server.properties：%s", pr)
+	}
 }
 
 // game.info：游戏内 AI 唯一能调的操作，只读；游戏内调别的操作一律 403。

@@ -144,4 +144,20 @@ func TestHintText(t *testing.T) {
 	if h := hintText("@AI", long, false); !strings.Contains(h, "不认识 /abcdefghijklmnop。") {
 		t.Errorf("提示里的选项名最多 16 个字：%s", h)
 	}
+	// 举例时只在选项名后面补空格，后文原样带上
+	for msg, want := range map[string]string{
+		"@AI /私今晚 /问 你好": "选项和问题之间要空一格，比如 @AI /私 今晚 /问 你好",
+		"@AI /私/问 你好":    "选项之间要空一格，比如 @AI /私 /问 你好",
+	} {
+		if h := hintText("@AI", ParseAsk(msg, defPrefixes), false); h != want {
+			t.Errorf("%s：%s", msg, h)
+		}
+	}
+	// 只有一个 /；不认识的不像命令名时，「怎么用 /…」拿 tp 举例
+	if h := hintText("@AI", ParseAsk("@AI / 你好", defPrefixes), false); !strings.HasPrefix(h, "/ 后面要紧跟选项名，比如 @AI /私 今晚怎么打末影龙。") {
+		t.Errorf("只有一个 /：%s", h)
+	}
+	if h := hintText("@AI", ParseAsk("@AI 、天气 晴", defPrefixes), false); !strings.Contains(h, "不认识 /天气。") || !strings.HasSuffix(h, "比如 @AI 怎么用 /tp") {
+		t.Errorf("不认识的中文选项：%s", h)
+	}
 }

@@ -3,8 +3,10 @@ package chatai
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"minedeck/internal/ai"
 )
@@ -93,7 +95,11 @@ func hintText(prefix string, a *Ask, authorized bool) string {
 	}
 	switch a.Action {
 	case ActNoSpace:
-		return fmt.Sprintf("选项和问题之间要空一格，比如 %s /%s %s", prefix, optPrefixOf(a.Unknown), ex)
+		what := "选项和问题之间"
+		if r, _ := utf8.DecodeRuneInString(ex); isMark(r) {
+			what = "选项之间" // @AI /私/问 你好
+		}
+		return fmt.Sprintf("%s要空一格，比如 %s /%s %s", what, prefix, optPrefixOf(a.Unknown), ex)
 	case ActMisplaced:
 		return fmt.Sprintf("选项要写在问题前面，比如 %s /私 %s", prefix, ex)
 	}
@@ -101,12 +107,18 @@ func hintText(prefix string, a *Ask, authorized bool) string {
 	if authorized {
 		opts += "/问（只回答、不执行命令）、"
 	}
-	name := a.Unknown
-	if name == "" {
+	if a.Unknown == "" { // 只有一个 /（或 ／、、），后面没跟选项名
+		return fmt.Sprintf("/ 后面要紧跟选项名，比如 %s /私 今晚怎么打末影龙。可用：%s/额度、/帮助", prefix, opts)
+	}
+	name := a.Unknown // 举例「怎么用 /tp」：不认识的像个命令名才拿它举例
+	if !cmdNameRe.MatchString(name) {
 		name = "tp"
 	}
 	return fmt.Sprintf("不认识 /%s。可用：%s/额度、/帮助。想问命令的用法，把命令写在问题中间，比如 %s 怎么用 /%s", a.Unknown, opts, prefix, name)
 }
+
+// cmdNameRe 像个命令名：字母开头，字母、数字、_、-、:（minecraft:tp）。
+var cmdNameRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_:-]{0,15}$`)
 
 // providerName 隐私提示里的服务商：预设的名字；自定义的写接口地址的主机名；本机模型写明不出本机。
 // 西文名字前后各空一格（「发给 DeepSeek 处理」）。
