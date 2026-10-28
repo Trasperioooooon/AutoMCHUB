@@ -30,7 +30,7 @@ func (f Feature) valid() bool { return f == FeatAssistant || f == FeatGameChat |
 type Cost struct {
 	Amount   float64 `json:"amount"`
 	Currency string  `json:"currency"`
-	Source   string  `json:"source"` // litellm / custom
+	Source   string  `json:"source"` // litellm / custom / local（本机模型，不计费）
 }
 
 // Totals 一段时间的合计。Tokens 是额度按的那个数（输入 + 输出 + 缓存命中 + 缓存写入）。
