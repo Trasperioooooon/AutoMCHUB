@@ -424,13 +424,13 @@ window.MDMusic = (() => {
       const sig = JSON.stringify([cap.mode, m, devs, v.device, s.bridge.variant, s.bridge.installed, s.serverStatus, s.local, v.advOpen, !!s.broadcast]);
       if (box.dataset.sig === sig) return;
       box.dataset.sig = sig;
-      const rows = [row({ tile: tile("gear"), title: "高级选项", sub: "采集方式、整机录音用哪个播放设备、桥接模组的加载方式。",
+      const rows = [row({ tile: tile("gear"), title: "高级选项", sub: s.local ? "采集方式、整机录音用哪个播放设备、桥接模组的加载方式。" : "桥接模组的加载方式。",
         right: `<span class="ri-chev">${icon("chevronDown")}</span>`, cls: "expandable" + (v.advOpen ? " open" : ""), attrs: `id="mu-adv-head" role="button" tabindex="0" aria-expanded="${v.advOpen}"` })];
-      if (cap.mode === "process") rows.push(row({ tile: tile("music"), title: "采集方式", cls: "mu-adv-row",
+      if (cap.mode === "process" && s.local) rows.push(row({ tile: tile("music"), title: "采集方式", cls: "mu-adv-row",
         sub: "默认只录一个程序；改成整机录音会把游戏声音、语音聊天一起录进去（有回声）。",
         right: `<div class="seg" role="radiogroup" aria-label="采集方式">${[["process", "只录一个程序"], ["system", "整机录音"]].map(([k, l]) =>
           `<button type="button" role="radio" aria-checked="${m === k}" class="${m === k ? "on" : ""}" data-mode="${k}"${s.broadcast ? " disabled" : ""}>${l}</button>`).join("")}</div>` }));
-      else if (cap.mode === "system") rows.push(row({ tile: tile("music"), title: "采集方式：整机录音", cls: "mu-adv-row", sub: `这台电脑（${esc(cap.os)}）只能录整机的声音；Windows 11 才能只录一个程序。` }));
+      else if (cap.mode === "system" && s.local) rows.push(row({ tile: tile("music"), title: "采集方式：整机录音", cls: "mu-adv-row", sub: `这台电脑（${esc(cap.os)}）只能录整机的声音；Windows 11 才能只录一个程序。` }));
       if (m === "system" && s.local) {
         const def = devs.find(d => d.default);
         rows.push(row({ tile: tile("volume"), title: "播放设备", cls: "mu-adv-row",
