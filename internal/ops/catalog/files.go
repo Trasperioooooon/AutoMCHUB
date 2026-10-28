@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -11,6 +12,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
 
 	"minedeck/internal/inst"
 	"minedeck/internal/modinfo"
@@ -257,19 +261,33 @@ func (c *cat) fileOps() {
 		Edits   []cfgEdit `json:"edits"`
 		Content *string   `json:"content"`
 	}
-	// plan 算出写完之后的内容；old 是现在的内容（文件不存在为空），exists 表示文件在不在
-	plan := func(p cfgWriteArgs) (i *inst.Instance, rel, abs, old, next string, exists bool, err error) {
-		if i, err = c.get(p.Inst); err != nil {
+	// cfgPlan 一次修改算出来的结果。old、next 是统一成 UTF-8、\n 换行的文本（和读给 AI 看的一样）；
+	// 写回时按原文件的编码和换行还原，备份存原文件的字节，撤销时原样写回备份。
+	type cfgPlan struct {
+		i         *inst.Instance
+		rel, abs  string
+		old, next string
+		exists    bool
+		raw, undo []byte // 原文件、要恢复成的那份备份（mode=undo）
+		format    textFormat
+	}
+	// plan 算出写完之后的内容
+	plan := func(p cfgWriteArgs) (pl cfgPlan, err error) {
+		if pl.i, err = c.get(p.Inst); err != nil {
 			return
 		}
-		if rel, abs, err = configPath(i, p.Path, true); err != nil {
+		i := pl.i
+		if pl.rel, pl.abs, err = configPath(i, p.Path, true); err != nil {
 			return
 		}
-		b, rerr := os.ReadFile(abs)
-		exists = rerr == nil
-		if exists {
-			old = decodeText(b)
+		rel := pl.rel
+		b, rerr := os.ReadFile(pl.abs)
+		pl.exists = rerr == nil
+		if pl.exists {
+			pl.raw, pl.format = b, sniffText(b)
+			pl.old = pl.format.decode(b)
 		}
+		exists, old := pl.exists, pl.old
 		switch p.Mode {
 		case "", "edit":
 			if !exists {
@@ -280,9 +298,9 @@ func (c *cat) fileOps() {
 				err = ops.Errorf(400, "edits 不能为空")
 				return
 			}
-			next = old
+			pl.next = old
 			for k, e := range p.Edits {
-				switch n := strings.Count(next, e.Find); {
+				switch n := strings.Count(pl.next, e.Find); {
 				case e.Find == "":
 					err = ops.Errorf(400, "第 %d 处修改的 find 是空的", k+1)
 				case n == 0 && placeholders("", e.Find) != "":
@@ -295,20 +313,20 @@ func (c *cat) fileOps() {
 				if err != nil {
 					return
 				}
-				next = strings.Replace(next, e.Find, e.Replace, 1)
+				pl.next = strings.Replace(pl.next, e.Find, e.Replace, 1)
 			}
 		case "replace":
 			if p.Content == nil {
 				err = ops.Errorf(400, "mode=replace 时要给 content")
 				return
 			}
-			next = *p.Content
+			pl.next = *p.Content
 		case "reset":
 			if !exists {
 				err = ops.Errorf(404, "没有 %s，不用恢复默认", rel)
 				return
 			}
-			next = ""
+			pl.next = ""
 		case "undo":
 			bk := latestBackup(i, rel)
 			if bk == "" {
@@ -320,15 +338,17 @@ func (c *cat) fileOps() {
 				err = ops.Wrap(500, berr)
 				return
 			}
-			next = decodeText(b)
+			pl.undo, pl.next = b, sniffText(b).decode(b)
 		default:
 			err = ops.Errorf(400, "mode 只能是 edit、replace、reset、undo")
 			return
 		}
 		if p.Mode != "reset" && p.Mode != "undo" {
-			if bad := placeholders(old, next); bad != "" {
+			if bad := placeholders(old, pl.next); bad != "" {
 				err = ops.Errorf(400, "新内容里有 MineDeck 替换掉的隐私占位符（%s），不能原样写回；只改需要改的那几行（用 edits）", bad)
+				return
 			}
+			_, err = pl.format.encode(pl.next) // GBK 的文件写不进 GBK 表示不了的字：提案阶段就报出来
 		}
 		return
 	}
@@ -351,10 +371,11 @@ func (c *cat) fileOps() {
 			if err != nil {
 				return nil, err
 			}
-			i, rel, _, old, next, exists, err := plan(p)
+			cp, err := plan(p)
 			if err != nil {
 				return nil, err
 			}
+			i, rel, old, next, exists := cp.i, cp.rel, cp.old, cp.next, cp.exists
 			pl := &ops.Plan{Pre: map[string]string{rel: textHash(old, exists)}}
 			switch p.Mode {
 			case "reset":
@@ -382,13 +403,14 @@ func (c *cat) fileOps() {
 			if err != nil {
 				return nil, err
 			}
-			i, rel, abs, old, next, exists, err := plan(p)
+			cp, err := plan(p)
 			if err != nil {
 				return nil, err
 			}
+			i, rel, abs := cp.i, cp.rel, cp.abs
 			res := map[string]any{"path": rel, "mode": map[bool]string{true: p.Mode, false: "edit"}[p.Mode != ""]}
-			if exists && p.Mode != "undo" {
-				bk, err := backupConfig(i, rel, old)
+			if cp.exists && p.Mode != "undo" {
+				bk, err := backupConfig(i, rel, cp.raw)
 				if err != nil {
 					return nil, ops.Errorf(500, "备份原文件失败，没有修改：%v", err)
 				}
@@ -403,7 +425,13 @@ func (c *cat) fileOps() {
 				if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 					return nil, ops.Wrap(500, err)
 				}
-				if err := writeAtomic(abs, []byte(next)); err != nil {
+				data := cp.undo // 撤销：原样写回那份备份
+				if p.Mode != "undo" {
+					if data, err = cp.format.encode(cp.next); err != nil {
+						return nil, err
+					}
+				}
+				if err := writeAtomic(abs, data); err != nil {
 					return nil, ops.Wrap(500, err)
 				}
 				if p.Mode == "undo" {
@@ -529,14 +557,14 @@ func backupDir(i *inst.Instance) string { return filepath.Join(i.Dir, ".minedeck
 var unsafeName = regexp.MustCompile(`[^\w.\-]+`)
 
 // backupConfig 备份一份配置文件：<实例>/.minedeck/config-backups/<路径>~<时间>，同一个文件最多留 20 份。返回备份的相对路径。
-func backupConfig(i *inst.Instance, rel, content string) (string, error) {
+func backupConfig(i *inst.Instance, rel string, content []byte) (string, error) {
 	dir := backupDir(i)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
 	key := unsafeName.ReplaceAllString(strings.ReplaceAll(rel, "/", "__"), "_")
 	name := key + "~" + time.Now().Format("20060102-150405.000")
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, name), content, 0o644); err != nil {
 		return "", err
 	}
 	if all := backupsOf(i, rel); len(all) > 20 {
@@ -567,6 +595,36 @@ func latestBackup(i *inst.Instance, rel string) string {
 		return all[len(all)-1]
 	}
 	return ""
+}
+
+// textFormat 配置文件原来的编码和换行。读给 AI 看时统一成 UTF-8 和 \n，写回时照原样还原：
+// 不把 GBK 的配置改成 UTF-8（老版本 Java 在中文 Windows 上默认按 GBK 读插件配置），不丢 BOM，Windows 换行不变成 \n。
+type textFormat struct{ gbk, bom, crlf bool }
+
+var utf8BOM = []byte("\xef\xbb\xbf")
+
+func sniffText(b []byte) textFormat {
+	body := bytes.TrimPrefix(b, utf8BOM)
+	return textFormat{gbk: !utf8.Valid(body), bom: len(body) < len(b), crlf: bytes.Contains(body, []byte("\r\n"))}
+}
+
+func (f textFormat) decode(b []byte) string { return strings.ReplaceAll(decodeText(b), "\r\n", "\n") }
+
+func (f textFormat) encode(s string) ([]byte, error) {
+	if f.crlf {
+		s = strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\n", "\r\n")
+	}
+	if f.gbk {
+		b, err := simplifiedchinese.GBK.NewEncoder().Bytes([]byte(s))
+		if err != nil {
+			return nil, ops.Errorf(400, "原文件是 GBK 编码，新内容里有 GBK 表示不了的字（如表情符号），写不进去")
+		}
+		return b, nil
+	}
+	if f.bom {
+		return append(append([]byte{}, utf8BOM...), s...), nil
+	}
+	return []byte(s), nil
 }
 
 // writeAtomic 先写临时文件再改名，写到一半断电不会留下半个配置文件。

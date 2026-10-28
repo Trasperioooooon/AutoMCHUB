@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"net"
@@ -346,6 +347,54 @@ func TestConfigWrite(t *testing.T) {
 	}
 	if bks, _ := filepath.Glob(filepath.Join(dir, ".minedeck", "config-backups", "world__serverconfig__create-server.toml~*")); len(bks) != 1 {
 		t.Errorf("恢复默认前应备份：%v", bks)
+	}
+}
+
+// 写回时保持原文件的编码和换行：GBK + Windows 换行的插件配置改完还是 GBK + \r\n（多行的 find 照样找得到），
+// 带 BOM 的 UTF-8 不丢 BOM；备份存的是原文件的字节，撤销原样恢复；GBK 表示不了的字在提案阶段就报错。
+func TestConfigWriteKeepsFormat(t *testing.T) {
+	reg, _, dir := newModCatalog(t)
+	ctx := context.Background()
+	gbk := func(s string) []byte { b, _ := simplifiedchinese.GBK.NewEncoder().Bytes([]byte(s)); return b }
+	yml := filepath.Join(dir, "plugins", "Essentials", "config.yml")
+	orig := gbk("欢迎: 你好\r\nmotd: 测试\r\n")
+	_ = os.MkdirAll(filepath.Dir(yml), 0o755)
+	_ = os.WriteFile(yml, orig, 0o644)
+	bom := filepath.Join(dir, "config", "bom.toml")
+	_ = os.WriteFile(bom, []byte("\xef\xbb\xbfa = 1\n"), 0o644)
+	run := func(args string) error {
+		t.Helper()
+		res, err := reg.Do(ctx, bot, "instance.config.write", ops.Args(args))
+		if err != nil {
+			return err
+		}
+		_, err = reg.Confirm(ctx, human, res.(*ops.Proposal).ID, false)
+		return err
+	}
+	if err := run(`{"inst":"整合包","path":"plugins/Essentials/config.yml","edits":[{"find":"欢迎: 你好\nmotd: 测试","replace":"欢迎: 大家好\nmotd: 测试"}]}`); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(yml); !bytes.Equal(b, gbk("欢迎: 大家好\r\nmotd: 测试\r\n")) {
+		t.Errorf("GBK + \\r\\n 应保持：%q", b)
+	}
+	bks, _ := filepath.Glob(filepath.Join(dir, ".minedeck", "config-backups", "plugins__Essentials__config.yml~*"))
+	if b, _ := os.ReadFile(bks[0]); len(bks) != 1 || !bytes.Equal(b, orig) {
+		t.Errorf("备份应是原文件的字节：%q", b)
+	}
+	if _, err := reg.Do(ctx, bot, "instance.config.write", ops.Args(`{"inst":"整合包","path":"plugins/Essentials/config.yml","edits":[{"find":"大家好","replace":"🎉"}]}`)); ops.CodeOf(err) != 400 || !strings.Contains(err.Error(), "GBK") {
+		t.Errorf("GBK 表示不了的字应在提案阶段报错：%v", err)
+	}
+	if err := run(`{"inst":"整合包","path":"plugins/Essentials/config.yml","mode":"undo"}`); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(yml); !bytes.Equal(b, orig) {
+		t.Errorf("撤销应原样恢复：%q", b)
+	}
+	if err := run(`{"inst":"整合包","path":"config/bom.toml","edits":[{"find":"a = 1","replace":"a = 2"}]}`); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(bom); string(b) != "\xef\xbb\xbfa = 2\n" {
+		t.Errorf("BOM 应保留：%q", b)
 	}
 }
 
