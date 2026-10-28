@@ -53,6 +53,9 @@ type Settings struct {
 
 	Quota  map[Feature]int64 `json:"quota,omitempty"` // 每日 token 上限，0 或没有 = 不限
 	Prices []CustomPrice     `json:"prices,omitempty"`
+
+	// LANAssistant 局域网登录的设备能不能用应用内助手（§10.3）；没有 = 默认开
+	LANAssistant *bool `json:"lanAssistant,omitempty"`
 }
 
 // CustomPrice 用户自填的单价（每百万 token），优先于公开数据，也能补上查不到的模型。
@@ -192,6 +195,39 @@ func (s *Service) snapshot() Settings {
 
 // Enabled 是否已配置好（选了服务商、填了 Key 和模型）。
 func (s *Service) Enabled() bool { return s.missing(s.snapshot()) == "" }
+
+// LANAssistant 局域网登录的设备能不能用应用内助手（设置里的开关，默认开）。
+func (s *Service) LANAssistant() bool { return boolOr(s.snapshot().LANAssistant, true) }
+
+// SetLANAssistant 打开或关闭「局域网可用 AI 助手」。
+func (s *Service) SetLANAssistant(on bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.st.LANAssistant = &on
+	return s.saveLocked()
+}
+
+// Current 当前的服务商、协议、地址和模型（会话据此判断设置是不是改过了：改了就要开新会话）。
+type Current struct {
+	Preset   string   `json:"preset"`
+	Protocol Protocol `json:"protocol"`
+	BaseURL  string   `json:"baseUrl"`
+	Model    string   `json:"model"`
+}
+
+// Current 见 Current 类型；没配置时为空。
+func (s *Service) Current() Current {
+	st := s.snapshot()
+	if s.missing(st) != "" {
+		return Current{}
+	}
+	return Current{Preset: st.Preset, Protocol: st.Protocol, BaseURL: st.BaseURL, Model: st.Model}
+}
+
+// Usage 某项功能今天的用量和每日额度（0 表示不限）。不联网。
+func (s *Service) Usage(f Feature) (today Totals, limit int64) {
+	return s.ledger.Today(f), s.snapshot().Quota[f]
+}
 
 // paid 配置好了、而且不是本机模型：只有这时才去取价格数据（只配了 Ollama 的不取）。
 func (s *Service) paid(st Settings) bool {
@@ -618,7 +654,8 @@ type View struct {
 	Prices       PriceStatus        `json:"prices"`
 	ModelPrice   *ModelPrice        `json:"modelPrice,omitempty"`
 	CustomPrices []CustomPrice      `json:"customPrices"`
-	Local        bool               `json:"local"` // 请求来自本机（只有本机能改 AI 设置），由调用方填
+	LANAssistant bool               `json:"lanAssistant"` // 局域网登录的设备能不能用应用内助手
+	Local        bool               `json:"local"`        // 请求来自本机（只有本机能改 AI 设置），由调用方填
 }
 
 // DomesticNote 国内四家的费用提示（§4.4）。
@@ -629,7 +666,7 @@ func (s *Service) View() View {
 	st := s.snapshot()
 	set, broken := s.keyState()
 	v := View{Presets: Presets(), KeySet: set, KeyBroken: broken, Quota: st.Quota, Prices: s.prices.Status(),
-		CustomPrices: st.Prices, Today: map[Feature]Totals{}, Month: map[Feature]Totals{}}
+		CustomPrices: st.Prices, Today: map[Feature]Totals{}, Month: map[Feature]Totals{}, LANAssistant: boolOr(st.LANAssistant, true)}
 	if v.CustomPrices == nil {
 		v.CustomPrices = []CustomPrice{}
 	}

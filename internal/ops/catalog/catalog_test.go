@@ -62,7 +62,8 @@ func TestLevelsFollowDesign(t *testing.T) {
 		ops.HumanOnly: {"app.config.set", "app.shutdown", "app.update.apply", "host.pickdir", "host.openpath", "instance.import",
 			"instance.delete", "instance.opendir", "instance.backup.delete", "java.add", "tunnel.add", "tunnel.update", "tunnel.delete",
 			// AI 设置（第二阶段）：AI 永远看不到、也改不了自己的设置和 Key（§3.3）
-			"ai.settings.get", "ai.provider.set", "ai.models.list", "ai.test", "ai.quota.set", "ai.prices.set", "ai.prices.refresh"},
+			"ai.settings.get", "ai.provider.set", "ai.models.list", "ai.test", "ai.quota.set", "ai.prices.set", "ai.prices.refresh",
+			"ai.assistant.set"},
 	}
 	n := 0
 	for level, names := range want {
@@ -96,7 +97,7 @@ func TestLevelsFollowDesign(t *testing.T) {
 		}
 	}
 	slices.Sort(local)
-	if strings.Join(local, ",") != "ai.models.list,ai.prices.refresh,ai.prices.set,ai.provider.set,ai.quota.set,ai.test,"+
+	if strings.Join(local, ",") != "ai.assistant.set,ai.models.list,ai.prices.refresh,ai.prices.set,ai.provider.set,ai.quota.set,ai.test,"+
 		"host.openpath,host.pickdir,instance.opendir,java.add" {
 		t.Errorf("仅本机的操作：%v", local)
 	}
@@ -159,9 +160,20 @@ func TestPropsProposalFlow(t *testing.T) {
 	if got := read(); !strings.Contains(got, "max-players=10") || !strings.Contains(got, "motd=hello") {
 		t.Fatalf("没有按提案的参数写：%s", got)
 	}
+	// 记录（新的在前）：执行、第二次提出、作废（文件变了）、第一次提出
 	recs, _ := reg.Log.Query(ops.Query{})
-	if len(recs) != 1 || recs[0].Proposal != p.ID || recs[0].ApprovedBy != "本机" || recs[0].Src != ops.SrcAssistant || recs[0].Inst != "生存服" {
-		t.Fatalf("操作记录：%+v", recs)
+	var events []string
+	for _, r := range recs {
+		events = append(events, r.Event)
+	}
+	if strings.Join(events, ",") != ",propose,void,propose" {
+		t.Fatalf("操作记录的节点：%q", events)
+	}
+	if recs[0].Proposal != p.ID || recs[0].ApprovedBy != "本机" || recs[0].Src != ops.SrcAssistant || recs[0].Inst != "生存服" || !recs[0].OK {
+		t.Fatalf("操作记录：%+v", recs[0])
+	}
+	if v := recs[2]; v.OK || !strings.Contains(v.Err, "server.properties") || v.ApprovedBy != "本机" {
+		t.Errorf("作废的记录应写明原因：%+v", v)
 	}
 	// 危险操作的预览带上警告；实例不存在时连提案都不生成
 	res, err := reg.Do(ctx, ai, "instance.kill", ops.Args(`{"inst":"生存服"}`))

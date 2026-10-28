@@ -435,3 +435,40 @@ func TestCostWithFallbackAttempts(t *testing.T) {
 		t.Errorf("国内的服务商要注明按国际站美元价估算：%+v", mp)
 	}
 }
+
+// 「局域网可用 AI 助手」默认开；关掉后存进设置文件，重启后还在，停用 AI 也不影响它。
+// Current 只在配置好时给出服务商和模型（会话据此判断设置改过没有）。
+func TestLANAssistantSetting(t *testing.T) {
+	dir := t.TempDir()
+	nd := &noDial{}
+	keys := &memKeys{m: map[string]string{}}
+	s := NewService(Options{Dir: dir, Keys: keys, HTTP: nd.client()})
+	if !s.LANAssistant() || !s.View().LANAssistant {
+		t.Fatal("默认应开着")
+	}
+	if c := s.Current(); c != (Current{}) {
+		t.Errorf("没配置时：%+v", c)
+	}
+	if err := s.SetLANAssistant(false); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetProvider(ProviderPatch{Preset: strp("ollama"), Model: strp("qwen3:8b")}); err != nil {
+		t.Fatal(err)
+	}
+	if c := s.Current(); c.Preset != "ollama" || c.Model != "qwen3:8b" || c.Protocol != OpenAI || c.BaseURL == "" {
+		t.Errorf("配置好之后：%+v", c)
+	}
+	if err := s.SetProvider(ProviderPatch{Preset: strp("")}); err != nil {
+		t.Fatal(err)
+	}
+	s2 := NewService(Options{Dir: dir, Keys: keys, HTTP: nd.client()})
+	if s2.LANAssistant() || s2.View().LANAssistant {
+		t.Error("关掉之后重启应还是关着")
+	}
+	if used, limit := s2.Usage(FeatAssistant); used.Tokens != 0 || limit != 0 {
+		t.Errorf("用量：%+v %d", used, limit)
+	}
+	if d := nd.dials(); len(d) != 0 {
+		t.Errorf("不该联网：%v", d)
+	}
+}

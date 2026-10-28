@@ -21,10 +21,12 @@ type Record struct {
 	Src        Source          `json:"src"`
 	Actor      string          `json:"actor,omitempty"`
 	Session    string          `json:"session,omitempty"`
-	Inst       string          `json:"inst,omitempty"` // 参数里的实例名（args 里不再重复）
-	Args       json.RawMessage `json:"args,omitempty"` // 脱敏后的参数：Key、密码、凭据一律写成 ***
+	Event      string          `json:"event,omitempty"` // 提案的节点：propose（AI 提出）、reject（人拒绝）、void（作废）；执行的那条没有
+	Inst       string          `json:"inst,omitempty"`  // 参数里的实例名（args 里不再重复）
+	Args       json.RawMessage `json:"args,omitempty"`  // 脱敏后的参数：Key、密码、凭据一律写成 ***
 	Proposal   string          `json:"proposal,omitempty"`
-	ApprovedBy string          `json:"approvedBy,omitempty"`
+	ApprovedBy string          `json:"approvedBy,omitempty"` // 确认（或拒绝）提案的人
+	Reason     string          `json:"reason,omitempty"`     // 拒绝的理由
 	OK         bool            `json:"ok"`
 	Err        string          `json:"err,omitempty"`
 	MS         int64           `json:"ms"`
@@ -191,6 +193,13 @@ func secretName(k string) bool {
 	}
 	return strings.HasSuffix(k, "key") // key、cfApiKey、aiKey……
 }
+
+// Redact 把密钥类的值写成 ***（空值保留，看得出是「清除」）。v 是 JSON 解出来的值（map、切片、字符串……）。
+// 操作记录用它；交给 AI 的工具结果也用它（再加上 assistant 包的文本脱敏）。
+func Redact(v any) any { return redact(v) }
+
+// SecretName 键名像不像密钥（Key、密码、令牌、凭据、Webhook 地址）。
+func SecretName(k string) bool { return secretName(k) }
 
 // redact 把密钥类的值写成 ***（空值保留，看得出是「清除」）。两种情况：键名像密钥的字段；
 // 以及 {"key": 名称, "value": 值} 这样的键值对里名称像密钥的，比如 server.properties 的 rcon.password。

@@ -151,6 +151,11 @@ func (c *Conversation) push(k msgKind, raw json.RawMessage) {
 }
 
 // AddUser 追加用户的一句话。上一条必须是 AI 的回复（或者会话刚开始），而且没有等着交回的工具结果。
+//
+// 上一条也可以是交回的工具结果：AI 拿到工具结果后的那次回复被用户停止、出错或者是空的，用户接着说话
+// （或者用户没处理确认卡片就发了新消息，提案取消后的结果先交回）。OpenAI 兼容是在 tool 消息后面接一条
+// user 消息；Claude 是紧跟在工具结果那条 user 消息后面再来一条，服务端会把相邻的两条合成一轮
+// （工具结果在前、文字在后）。两种写法都只是追加，前面的消息一个字节都不动。
 func (c *Conversation) AddUser(text string) error {
 	if strings.TrimSpace(text) == "" {
 		return errors.New("消息是空的")
@@ -158,7 +163,7 @@ func (c *Conversation) AddUser(text string) error {
 	if len(c.pending) > 0 {
 		return errors.New("上一条回复里的工具调用还没交回结果")
 	}
-	if k := c.last(); k == kindUser || k == kindToolResults {
+	if c.last() == kindUser {
 		return errors.New("还没收到上一条消息的回复")
 	}
 	if c.proto == Anthropic {
@@ -168,6 +173,9 @@ func (c *Conversation) AddUser(text string) error {
 	}
 	return nil
 }
+
+// NeedsReply 最后一条是用户的话或交回的工具结果，还等着 AI 回复（这时可以直接 Chat）。
+func (c *Conversation) NeedsReply() bool { k := c.last(); return k == kindUser || k == kindToolResults }
 
 // UndoUser 撤回最后一条还没得到回复的用户消息（请求出错、被拒答、用户点了停止之后，用户想换个说法时用）。
 // 它后面没有任何回复，撤回不影响之前的思考块和缓存。最后一条不是用户的话时什么也不做，返回 false。

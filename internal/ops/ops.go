@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -79,6 +80,11 @@ type Op struct {
 	LocalMsg  string // 从别的设备调用「仅本机」操作时的提示；空则用通用说法
 	InGame    bool   // 游戏内 AI、AI 伙伴也能调用（只对读操作有效）；默认不开放
 	NoLog     bool   // 不写操作记录：不改任何状态的仅人工操作（打开目录、选择文件夹）
+	// HumanParams 只能由人决定的参数：AI 发起时一律去掉（给 AI 的工具说明里也没有），比如新建实例的 eula、root。
+	HumanParams []string
+	// Consent 确认提案时要由确认的人勾选的同意（如 Minecraft EULA），勾了才把这个参数设成 true 再执行。
+	// 它对应的参数应当也列在 HumanParams 里：AI 不能替用户同意。
+	Consent *Consent
 	// Preview 写操作：只算出会改什么，不真的去改。Plan.Pre 是前置条件，确认时重算一遍比对，变了提案作废。
 	// 没有 Preview 的写操作，提案只带标题，没有前置条件可查。
 	Preview func(ctx context.Context, c Caller, a Args) (*Plan, error)
@@ -88,11 +94,41 @@ type Op struct {
 // ToolName 给 AI 用的工具名：点换成下划线（两家的工具名都只允许字母、数字、下划线和横线）。
 func ToolName(name string) string { return strings.ReplaceAll(name, ".", "_") }
 
+// Consent 只能由人在确认时给出的同意。
+type Consent struct {
+	Param string `json:"param"`         // 参数名，如 eula
+	Text  string `json:"text"`          // 确认卡片上勾选框旁边的文字
+	URL   string `json:"url,omitempty"` // 条款原文的地址
+	// Need 这次要不要（比如代理端不用同意 EULA）；nil 表示总要。
+	Need func(a Args) bool `json:"-"`
+}
+
+// AISchema 给 AI 的参数说明（JSON Schema）：去掉只能由人决定的参数。没有参数时是一个空对象。
+// 编码是确定的（键按固定顺序），同一个操作每次得到的字节都一样，工具清单的前缀缓存才能命中。
+func (op *Op) AISchema() json.RawMessage {
+	if op.Params == nil {
+		return json.RawMessage(`{"type":"object","properties":{}}`)
+	}
+	if len(op.HumanParams) == 0 {
+		return json.RawMessage(encode(op.Params))
+	}
+	s := *op.Params
+	s.Properties = map[string]*Schema{}
+	for k, v := range op.Params.Properties {
+		if !slices.Contains(op.HumanParams, k) {
+			s.Properties[k] = v
+		}
+	}
+	s.Required = slices.DeleteFunc(slices.Clone(op.Params.Required), func(k string) bool { return slices.Contains(op.HumanParams, k) })
+	return json.RawMessage(encode(&s))
+}
+
 // Plan 写操作的预览。
 type Plan struct {
 	Summary string            `json:"summary"`           // 一句话说明，如「把 生存服 的 max-players 从 20 改成 10」
 	Changes []Change          `json:"changes,omitempty"` // 改动清单（改前 / 改后）
 	Warning string            `json:"warning,omitempty"` // 危险操作的醒目警告，如「在线的 3 人会掉线」
+	Diff    string            `json:"diff,omitempty"`    // 文本文件的改动（逐行对比，见 LineDiff）
 	Pre     map[string]string `json:"-"`                 // 前置条件：名称 → 指纹（文件哈希、实例状态……），只在服务端比对
 }
 
@@ -178,6 +214,7 @@ type Registry struct {
 	ops       map[string]*Op
 	order     []string
 	proposals map[string]*Proposal
+	resolved  []func(Resolution)
 	now       func() time.Time
 }
 
@@ -287,7 +324,11 @@ func (r *Registry) Do(ctx context.Context, c Caller, name string, a Args) (any, 
 	if err != nil {
 		return nil, err
 	}
-	args, err := op.normalize(a)
+	var skip []string // AI 发起时，只能由人决定的参数去掉，也不算必填
+	if c.Source.AI() && len(op.HumanParams) > 0 {
+		a, skip = dropParams(a, op.HumanParams), op.HumanParams
+	}
+	args, err := op.normalize(a, skip)
 	if err != nil {
 		return nil, err
 	}
@@ -297,8 +338,37 @@ func (r *Registry) Do(ctx context.Context, c Caller, name string, a Args) (any, 
 	return r.exec(ctx, c, op, args, "", "")
 }
 
+// dropParams 去掉参数里的这几项（AI 发起时只能由人决定的参数）。不是 JSON 对象就原样返回，交给校验去报错。
+func dropParams(a Args, names []string) Args {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(a, &obj) != nil || obj == nil {
+		return a
+	}
+	for _, n := range names {
+		delete(obj, n)
+	}
+	b, err := json.Marshal(obj)
+	if err != nil {
+		return a
+	}
+	return Args(b)
+}
+
+// setParam 把参数里的一项设成 v（确认时勾了同意，就把 eula 设成 true）。
+func setParam(a Args, name string, v any) Args {
+	var obj map[string]any
+	dec := json.NewDecoder(bytes.NewReader(a))
+	dec.UseNumber()
+	if len(a) == 0 || dec.Decode(&obj) != nil || obj == nil {
+		obj = map[string]any{}
+	}
+	obj[name] = v
+	return encode(obj)
+}
+
 // normalize 校验参数并规范化：解析成 JSON 对象（null 和空白都当作 {}），按 Params 校验，再按键排序重新编码。
-func (op *Op) normalize(a Args) (Args, error) {
+// skip 里的参数不算必填（AI 发起时去掉了的只能由人决定的参数）。
+func (op *Op) normalize(a Args, skip []string) (Args, error) {
 	var v any
 	if len(bytes.TrimSpace(a)) > 0 {
 		dec := json.NewDecoder(bytes.NewReader(a))
@@ -318,7 +388,13 @@ func (op *Op) normalize(a Args) (Args, error) {
 		return nil, Errorf(400, "参数应为 JSON 对象")
 	}
 	if op.Params != nil {
-		if err := op.Params.validate("", obj); err != nil {
+		s := op.Params
+		if len(skip) > 0 {
+			c := *s
+			c.Required = slices.DeleteFunc(slices.Clone(s.Required), func(k string) bool { return slices.Contains(skip, k) })
+			s = &c
+		}
+		if err := s.validate("", obj); err != nil {
 			return nil, &Error{Code: 400, Err: err}
 		}
 	}
@@ -339,22 +415,30 @@ func (r *Registry) exec(ctx context.Context, c Caller, op *Op, args Args, propos
 	start := time.Now()
 	res, err := op.Run(ctx, c, args)
 	if op.Level != Read && !op.NoLog {
-		r.record(c, op.Name, args, proposal, approvedBy, err, time.Since(start))
+		r.record(c, op.Name, args, "", proposal, approvedBy, err, time.Since(start))
 	}
 	return res, err
 }
 
 // Record 记下一条没有经过 Do 的操作（定时任务、崩溃自动重启这类程序自己发起的事），格式和 Do 写的一样。
 func (r *Registry) Record(c Caller, name string, args Args, err error, d time.Duration) {
-	r.record(c, name, args, "", "", err, d)
+	r.record(c, name, args, "", "", "", err, d)
 }
 
-func (r *Registry) record(c Caller, name string, args Args, proposal, approvedBy string, err error, d time.Duration) {
+// 提案的几个节点也各记一条（Record.Event）：AI 提出、人拒绝、提案作废（过期或前置条件变了）。确认后执行的那一条照常记，
+// 不带 event。
+const (
+	EvPropose = "propose"
+	EvReject  = "reject"
+	EvVoid    = "void"
+)
+
+func (r *Registry) record(c Caller, name string, args Args, event, proposal, approvedBy string, err error, d time.Duration) {
 	if r.Log == nil {
 		return
 	}
 	rec := Record{
-		T: r.now().Format(time.RFC3339), Op: name, Src: c.Source, Actor: c.Actor, Session: c.Session,
+		T: r.now().Format(time.RFC3339), Op: name, Src: c.Source, Actor: c.Actor, Session: c.Session, Event: event,
 		Proposal: proposal, ApprovedBy: approvedBy, OK: err == nil, MS: d.Milliseconds(),
 	}
 	rec.Inst, rec.Args = splitArgs(args)
