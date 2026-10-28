@@ -109,6 +109,65 @@ AI 是可选功能。没配置时（`enabled` 为 false）MineDeck 不连接任�
 - 失败的操作也记，`ok` 为 false，`err` 是错误信息。
 - Key、密码、令牌、凭据、Webhook 地址，以及 server.properties 里像密码的项（如 `rcon.password`），在 `args` 里一律写成 `***`（清空时保留空串）。
 
+### 应用内 AI 助手（第三阶段）
+
+对话本身不改任何东西，所以会话接口不走操作层；AI 调用的工具都经过操作层：读操作直接执行，写操作和危险操作生成提案，人确认后才执行（见下一节）。局域网会话要主机开着「局域网可用 AI 助手」（默认开）才能用，而且只看得见、只能处理局域网开的会话；本机都看得见。看、删会话不要求 AI 配好（停用 AI 后也能清空历史）；开会话、发消息、生成发送预览要求 AI 配好，没配好返回 400。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/assistant` | 状态：`enabled`（AI 配好了）、`allowed`（这个请求能用助手）、`local`、`lan`（「局域网可用 AI 助手」开关）、`missing`、`preset`、`model`、`quota {used, limit}`（助手今天的用量和每日额度，单位 token，`limit` 为 0 表示不限） |
+| GET | `/api/assistant/sessions` | 会话列表，最近动过的在前：`[{id, title, inst, updated, origin: local/lan, actor, busy?, waiting?}]` |
+| POST | `/api/assistant/sessions` | 开新会话 `{inst}`（可以不关联实例），返回会话。系统提示和工具清单此时定下，之后不变 |
+| DELETE | `/api/assistant/sessions` | 清空：本机清空全部，局域网只清空局域网开的。返回 `{deleted}` |
+| GET / DELETE | `/api/assistant/sessions/{id}` | 取会话 / 删掉（正在进行的回复停掉，没处理的提案作废） |
+| POST | `/api/assistant/sessions/{id}/messages` | 发消息 `{text, attach}`：在后台开始回复，立刻返回，结果经事件推送。<br>• `attach` 为 true 时附上之前预览过的排错资料（30 分钟内有效，过期返回 409）；只附资料时 `text` 可以空。<br>• 正在回复时返回 409，额度用完返回 429，消息超过 2 万字返回 400。<br>• 有确认卡片没处理就发新消息时，没处理的提案作废，结果一起交还给 AI |
+| POST | `/api/assistant/sessions/{id}/context` | 生成发送预览（「让 AI 分析」）：按关联的实例打包排错资料（实例信息、本地规则的结论、本次启动以来精简过的控制台、本次启动之后的崩溃报告和 hs_err 摘要、相关模组，约 2 万 token 以内），脱敏后返回 `{lead, text, chars, tokens}`。`lead` 是默认的提问，`text` 是将要发送的全文。会话没关联实例时返回 400 |
+| POST | `/api/assistant/sessions/{id}/stop` | 停止正在进行的回复（已经执行的工具不撤回） |
+| POST | `/api/assistant/sessions/{id}/continue` | 上次的回复没完成（停止、出错、空回复），或者确认卡片都处理完了：接着回复。没有要继续的返回 409 |
+| GET | `/api/assistant/sessions/{id}/events` | SSE（可用 `?token=`）：先推 `{"type":"session","session":…}`（完整的会话），之后是增量：<br>• `item`：新增或更新一条（按 `id` 替换）；<br>• `delta`：回复的文字片段 `{id, text}`；`tool_start`、`thinking`：正在调用工具、正在思考；<br>• `state`：`busy/waiting/needReply/stale/long/attach/title/quota`；<br>• `retry`：服务商出错，正在重试；`remove`：撤掉一条（没有内容的空回复）。<br>客户端跟不上时连接被断开，重连后重新拿一份完整的 |
+| GET | `/api/assistant/sessions/{id}/sent?item=&tool=` | 实际发给 AI 的内容 `{text}`：用户的话（脱敏后、带上排错资料的），或者某次工具调用交还给 AI 的内容 |
+| PUT | `/api/ai/assistant` | 「局域网可用 AI 助手」开关 `{lan}`，返回同 `GET /api/ai/settings`。**仅本机**，仅人工 |
+
+- **会话**：`{id, title, inst, created, updated, origin, actor, model, preset, items[], busy, waiting, needReply, stale?, long?, attach?, quota}`。`waiting` 表示有确认卡片在等；`stale` 不为空表示 AI 设置改过（换了服务商、协议或地址，或者 Claude 换了模型），这个会话不能接着用；`long` 表示会话很长了，建议开新会话；`attach` 是打包好、等着发送的排错资料的字数。`GET /api/ai/settings` 多了 `lanAssistant` 字段。
+- **会话里的一条**（`items[]`）：`{id, kind: user/assistant/notice, t, text, attach?, masked?, withdrawn?, tools?, usage?, cost?, model?, partial?, level?}`。
+  - `masked`：用户的话里的隐私信息发送前被替换了。`withdrawn`：这句没得到回复，已从对话里撤回。
+  - `partial`：回复没说完就停了（不在历史里）。`notice` 是提示（已停止、请求失败、空回复等），`level` 为 info / warn / error。
+  - `tools[]`：`{id, name, op, title, level: R/W/D, args, status, error?, proposal?}`。`status` 是 running、done、error、skipped、pending（等确认）、confirmed、failed、rejected、expired、invalid、canceled（没处理就发了新消息）。`proposal` 是确认卡片要显示的内容，处理完后多了 `outcome`、`reason`、`by`、`error`。
+- **发给 AI 之前一律脱敏**：程序目录、用户目录、路径里的 Windows 用户名、计算机名、局域网 IP（含本机各网卡的地址）换成 `<程序目录>`、`<用户目录>`、`<用户名>`、`<计算机名>`、`<局域网IP>`；Key、访问密码哈希、MineDeck 令牌、长得像 Key 的长串、配置里像密码的值写成 `***`；玩家名保留。工具结果外面加「以下是数据」的边界标记，超过 16 KB 截断并注明。新建实例时要人勾的 `eula` 和主机路径 `root` 不在 AI 能填的参数里。
+- **会话保存**：存在 `<程序目录>/data/ai/sessions/<id>.json`，只留最近 20 个；重启后读回，接着聊时发给 AI 的历史逐字节不变。读回时还在等确认的提案按过期处理。
+- 一轮最多调 8 次工具。空回复（Claude 空的 `end_turn`、OpenAI 兼容只给了思考内容）不进历史，提示换个说法再问。
+
+### 提案：AI 提出的写操作（第三阶段）
+
+AI 调用写操作或危险操作时，操作层不执行，而是生成提案，5 分钟内有效。提案里存着规范化后的参数和预览 `plan`：一句话说明 `summary`、改动清单 `changes [{what, before, after}]`、危险操作的警告 `warning`、文本文件的逐行对比 `diff`。人确认后按存下的参数原样执行；执行前先检查前置条件（预览时记下的文件指纹、实例状态等），变了就作废。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/ops/proposals?session=` | 还在等确认的提案，只列这个请求能处理的：`[{id, op, title, level, args, plan, consent?, caller, created, expires}]` |
+| POST | `/api/ops/proposals/{id}/confirm` | 确认并执行，返回执行结果。body `{ack, consent}`：<br>• 危险操作要 `ack: true`（第二次确认），缺了返回 400；<br>• 带 `consent` 的提案（如新建实例的 EULA）要 `consent: true`，同意只能由人在确认时给出；<br>• 提案不存在或已处理返回 404，过期 410，前置条件变了 409（提案作废）。<br>只有人能确认；「仅本机」的操作只能在本机确认 |
+| POST | `/api/ops/proposals/{id}/reject` | 拒绝 `{reason}`，理由可以不填，会交还给 AI |
+
+- 局域网会话只能处理局域网开的助手会话里的提案，而且主机要开着「局域网可用 AI 助手」；本机会话的提案只能在本机处理（403）。
+- 操作记录里，提案的每个节点各记一条，用 `event` 区分：`propose`（提出）、`reject`（拒绝，`approvedBy` 是拒绝的人，`reason` 是理由）、`void`（过期或作废，`reason` 写明原因）。确认后执行的那条没有 `event`，带 `proposal`（提案编号）和 `approvedBy`（确认的人）。
+
+### 排错和修复（第三阶段）
+
+AI 助手用的读写能力，网页也能直接调。人调用时，写操作直接执行，不出提案。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/instances/{name}/diag` | 本地规则排错，不联网：检查最近一次启动以来的控制台，返回 `{status, findings[], crashed, exit, lines}`。<br>每个 finding 是 `{rule, title, summary, details[], fixes[], evidence[], mods[], files[], severity: error/warn}`。`rule` 是 13 类之一：`missing-deps`、`client-only`、`wrong-loader`、`duplicate-mods`、`incompatible-mods`、`mixin`、`java-version`、`port-in-use`、`out-of-memory`、`watchdog`、`eula`、`client-mismatch`、`broken-config`；另有 `jvm-option`（JVM 参数不被支持，归在 Java 一类）和 `crash`（异常退出但没认出原因）。<br>界面的报错横幅据此显示，没配置 AI 也照样有 |
+| GET | `/api/instances/{name}/console/tail?lines=&level=&q=&since=` | 控制台最近的输出（内存里最多 3000 行）。`lines` 默认 100；`level` 为 `warn` / `error` 时只看这一级及更严重的；`q` 是关键字；`since=start` 只看最近一次启动以来的 |
+| GET | `/api/instances/{name}/logs?file=&lines=&q=` | 读 `logs/latest.log`（`file=debug` 时读 `debug.log`）末尾 `lines` 行，默认 200。给了 `q` 就改成搜索，最多 50 处，每处带前后 2 行。GBK 编码的日志自动转码 |
+| GET | `/api/instances/{name}/crash-reports?file=&full=` | 不给 `file` 时列出 `crash-reports/` 里的崩溃报告和 `hs_err_pid*.log`：`{reports: [{name, kind: crash/jvm, size, modified, thisStart}]}`，新的在前。给了 `file` 返回摘要（开头、Description、第一个异常、加载器标出的可疑模组、Java 版本和内存）；`full=1` 返回原文的前 16 KB |
+| GET | `/api/instances/{name}/mods?q=&detail=` | 解析 mods 目录（插件服是 plugins）里的 jar：`{dir, count, disabled, mods[]}`。给了 `q` 或 `detail=1` 时，每项带上加载器、依赖、mixin 配置等 |
+| POST | `/api/instances/{name}/mods/toggle` | `{file, enable}`：把 jar 改名成 `.jar.disabled` 来禁用，改回来就是启用；不删文件，重启后生效 |
+| GET | `/api/instances/{name}/config?path=&start=&lines=` | 读 `config/`、`defaultconfigs/`、`<世界>/serverconfig/`、`plugins/<插件>/` 下的配置文件，1 MB 以内，按行分页。`path` 为空时列出能读的目录，是目录时列出里面的文件 |
+| PUT | `/api/instances/{name}/config` | 改配置文件 `{path, mode, edits?, content?}`：<br>• `edit`（默认）：`edits: [{find, replace}]` 逐处替换，原文要一字不差且只出现一次；<br>• `replace`：用 `content` 整体替换，文件不存在时新建；<br>• `reset`：备份后删掉，让模组重新生成默认配置；<br>• `undo`：恢复成上一次的备份。<br>改之前自动备份到 `<实例>/.minedeck/config-backups/`，每个文件留 20 份。读和比对按 UTF-8、`\n` 换行，写回时保持原文件的编码（UTF-8、带 BOM 的 UTF-8 或 GBK）和换行。内容里有脱敏占位符（`***`、`<用户名>` 等）时拒绝写入 |
+| PUT | `/api/instances/{name}/java` | `{major, path?}`：给实例换 Java，下次启动生效。本机或 MineDeck 已经有这个版本就直接换，返回 `{java}`；没有就在后台下载便携版，返回 `{taskId}`（进度见 `/api/tasks/{id}`） |
+| POST | `/api/instances/{name}/restart` | 重启：先保存世界并停止（最多等 40 秒），再启动。服务器没在运行时返回 400。危险操作 |
+| GET | `/api/ports/{port}?proto=` | 端口占用：`{port, tcp?, udp?, instances?}`。每个协议是 `{free, owners?: [{pid, process, instance?, minedeck?}], note?}`；`instances` 是配置了这个端口的实例。`proto` 为 `tcp` / `udp`，空串两种都查 |
+
 所有响应统一为 `{"ok": true, "data": ...}` 或 `{"ok": false, "error": "..."}`。
 
 ## Webhook 事件
