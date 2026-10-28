@@ -6,7 +6,8 @@ import java.util.ArrayDeque;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 音频引擎：一个每 20 毫秒走一步的线程。
+ * 音频引擎：一个每 20 毫秒走一步的线程。这个线程只做音频（取帧、编码、交给 SVC），不碰 socket 和文件：
+ * 读配置、发 STATUS 这些定时检查在 {@link VoiceBridge} 自己的线程里，对方不读数据、磁盘卡顿都拖不住音频。
  *
  * <p>每一步从抖动缓冲里取一帧（960 个采样），用 SVC 的 Opus 编码器编一次，同一份数据发给所有听众。
  * 抖动缓冲：广播开始时先攒 3 帧（60 毫秒）再播；超过 10 帧就丢掉最旧的；取空了就跳过这一步，
@@ -17,7 +18,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <p>没有广播连接、又开了自测模式时，用 {@link SelfTestTone} 生成的测试音代替。
  * 定时按"开始时间 + 第几帧 × 20 毫秒"算，偶尔睡过头会在下一步追回来；落后超过 100 毫秒（比如 GC 卡顿）
- * 就重新对齐，不补发。另外每 100 步（2 秒）调用一次 housekeeping。
+ * 就重新对齐，不补发。
  */
 final class AudioEngine implements Runnable {
 
@@ -27,11 +28,9 @@ final class AudioEngine implements Runnable {
     static final int HIGH_WATER_FRAMES = 5;
     static final int HIGH_WATER_STEPS = 50;
     static final int IDLE_STEPS_BEFORE_FLUSH = 5;
-    static final int STEPS_PER_HOUSEKEEPING = 100;
 
     private final OpusEncoder encoder;
     private final Listeners listeners;
-    private final Runnable housekeeping;
 
     private final Object lock = new Object();
     private final ArrayDeque<short[]> queue = new ArrayDeque<short[]>();
@@ -39,6 +38,8 @@ final class AudioEngine implements Runnable {
     private int highSteps;
     private volatile boolean sessionActive;
     private volatile boolean selftest;
+    /** 只在引擎线程里用：自测模式刚打开时测试音从头放（不在别的线程里改它的进度）。 */
+    private boolean selftestSeen;
     private final SelfTestTone tone = new SelfTestTone();
 
     private volatile boolean running;
@@ -74,10 +75,9 @@ final class AudioEngine implements Runnable {
         }
     }
 
-    AudioEngine(OpusEncoder encoder, Listeners listeners, Runnable housekeeping) {
+    AudioEngine(OpusEncoder encoder, Listeners listeners) {
         this.encoder = encoder;
         this.listeners = listeners;
-        this.housekeeping = housekeeping;
     }
 
     void start() {
@@ -114,9 +114,6 @@ final class AudioEngine implements Runnable {
     }
 
     void setSelftest(boolean on) {
-        if (on != selftest) {
-            tone.reset();
-        }
         selftest = on;
     }
 
@@ -186,20 +183,11 @@ final class AudioEngine implements Runnable {
 
     private void loop() {
         long next = System.nanoTime();
-        long steps = 0;
         while (running) {
             try {
                 step();
             } catch (Throwable t) {
                 Log.error("音频引擎出错", t);
-            }
-            steps++;
-            if (steps % STEPS_PER_HOUSEKEEPING == 0) {
-                try {
-                    housekeeping.run();
-                } catch (Throwable t) {
-                    Log.error("定时检查出错", t);
-                }
             }
             next += FRAME_NANOS;
             long wait = next - System.nanoTime();
@@ -301,7 +289,12 @@ final class AudioEngine implements Runnable {
                 return null;
             }
         }
-        if (selftest) {
+        boolean on = selftest;
+        if (on && !selftestSeen) {
+            tone.reset();
+        }
+        selftestSeen = on;
+        if (on) {
             from[0] = Protocol.SOURCE_SELFTEST;
             return tone.next();
         }

@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.SecureRandom;
@@ -17,8 +18,9 @@ import java.util.UUID;
 /**
  * 配置文件 {@code config/minedeck/voicebridge.properties}（相对服务器的工作目录，也就是实例目录）。
  *
- * <p>MineDeck 启动服务器前写好它；文件不存在时模组生成一份关闭状态的模板。模组每 2 秒检查一次
- * 文件有没有变，变了就重新读，不用重启服务器。
+ * <p>MineDeck 启动服务器前写好它；文件不存在时模组生成一份关闭状态的模板。模组每 2 秒读一次文件、
+ * 和上次应用的内容逐字节比较，变了就重新应用，不用重启服务器。不看修改时间和大小：同一毫秒里连写两次、
+ * 或者在修改时间只精确到 2 秒的盘（FAT32）上，按修改时间和大小判断会漏掉改动。
  */
 final class BridgeConfig {
 
@@ -64,17 +66,21 @@ final class BridgeConfig {
         return Paths.get("config", "minedeck", "voicebridge.properties");
     }
 
-    /** 文件的"指纹"：修改时间和大小，用来判断要不要重新读。文件不存在时返回 -1。 */
-    static long stamp(Path file) {
+    /** 读文件的全部内容；文件不存在时返回 null。 */
+    static byte[] read(Path file) throws IOException {
         try {
-            return Files.getLastModifiedTime(file).toMillis() * 31 + Files.size(file);
-        } catch (IOException e) {
-            return -1;
+            return Files.readAllBytes(file);
+        } catch (NoSuchFileException e) {
+            return null;
         }
     }
 
     static BridgeConfig load(Path file) throws IOException {
-        String text = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+        return parse(Files.readAllBytes(file));
+    }
+
+    static BridgeConfig parse(byte[] bytes) throws IOException {
+        String text = new String(bytes, StandardCharsets.UTF_8);
         if (text.startsWith("\uFEFF")) {
             // 记事本另存为"UTF-8 带 BOM"时会有这个字符
             text = text.substring(1);

@@ -7,68 +7,6 @@ import (
 	"testing"
 )
 
-func TestFrameRoundTrip(t *testing.T) {
-	samples := make([]int16, frameSamples)
-	for i := range samples {
-		samples[i] = int16(i*37 - 16000)
-	}
-	var buf bytes.Buffer
-	if err := writeFrame(&buf, typePCM, pcmFrame(7, samples)); err != nil {
-		t.Fatal(err)
-	}
-	raw := buf.Bytes()
-	if len(raw) != headerSize+pcmPayload {
-		t.Fatalf("PCM 帧长度 %d，应为 %d", len(raw), headerSize+pcmPayload)
-	}
-	if raw[0] != typePCM || raw[1] != 0 || binary.LittleEndian.Uint16(raw[2:]) != pcmPayload {
-		t.Fatalf("帧头不对：% x", raw[:4])
-	}
-	f, err := readFrame(bytes.NewReader(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if binary.LittleEndian.Uint32(f.payload) != 7 {
-		t.Fatal("序号不对")
-	}
-	for i, want := range samples {
-		if got := int16(binary.LittleEndian.Uint16(f.payload[4+2*i:])); got != want {
-			t.Fatalf("第 %d 个采样 %d，应为 %d", i, got, want)
-		}
-	}
-}
-
-func TestHelloLayout(t *testing.T) {
-	p, err := helloPayload("0123456789abcdef", "房主")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if binary.LittleEndian.Uint16(p) != protoVersion || p[2] != 16 || string(p[3:19]) != "0123456789abcdef" || string(p[19:]) != "房主" {
-		t.Fatalf("HELLO 布局不对：% x", p)
-	}
-	if _, err := helloPayload(string(make([]byte, 256)), ""); err == nil {
-		t.Fatal("超长令牌应该报错")
-	}
-}
-
-func TestParseStatus(t *testing.T) {
-	p := make([]byte, 25)
-	binary.LittleEndian.PutUint16(p[0:], 2)
-	binary.LittleEndian.PutUint16(p[2:], 3)
-	p[4] = 1
-	binary.LittleEndian.PutUint32(p[5:], 100)
-	binary.LittleEndian.PutUint32(p[9:], 99)
-	binary.LittleEndian.PutUint32(p[13:], 98)
-	binary.LittleEndian.PutUint32(p[17:], 1)
-	binary.LittleEndian.PutUint32(p[21:], 2)
-	s, err := parseStatus(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if s.listeners != 2 || s.buffered != 3 || s.source != 1 || s.received != 100 || s.played != 99 || s.sent != 98 || s.dropped != 1 || s.underruns != 2 {
-		t.Fatalf("解析结果不对：%+v", s)
-	}
-}
-
 func wavBytes(format, channels, rate, bits int, data []byte) []byte {
 	var b bytes.Buffer
 	le := binary.LittleEndian

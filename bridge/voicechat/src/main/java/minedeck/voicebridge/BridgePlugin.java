@@ -26,7 +26,7 @@ import java.util.UUID;
 public final class BridgePlugin implements VoicechatPlugin {
 
     public static final String PLUGIN_ID = "minedeck_voicebridge";
-    public static final String VERSION = "0.1.0";
+    public static final String VERSION = "0.2.0";
 
     private VoiceBridge current;
 

@@ -261,9 +261,39 @@ public final class FakeSvc {
         check(waitUntil(5000, () -> portOpen(port)), "改回 enabled=true 后端口重新打开");
 
         // ---------------------------------------------------------------------------------
+        section("13a. 配置文件改了，但修改时间和大小都没变（比如同一毫秒里连写两次）：模组也要重新读");
+        writeConfig(config, true, port, token, "Host", false);
+        check(waitUntil(5000, () -> listeners(plugin).equals(Set.of(alice.id))), "排除 Host 后听众只剩 Alice：" + listeners(plugin));
+        java.nio.file.attribute.FileTime stampBefore = Files.getLastModifiedTime(config);
+        long sizeBefore = Files.size(config);
+        writeConfig(config, true, port, token, "Abcd", false); // 和 Host 一样长
+        Files.setLastModifiedTime(config, stampBefore);
+        check(Files.size(config) == sizeBefore && Files.getLastModifiedTime(config).equals(stampBefore), "新文件的大小和修改时间都和旧的一样");
+        check(waitUntil(5000, () -> listeners(plugin).equals(Set.of(alice.id, host.id))), "模组读到了新内容，Host 回到听众里：" + listeners(plugin));
+
+        // ---------------------------------------------------------------------------------
+        section("13b. 发送端只发不收（从不读模组的回复）：模组的其他线程不能被它拖住，还要主动断开它");
+        writeConfig(config, true, port, token, "Alice", false);
+        check(waitUntil(5000, () -> listeners(plugin).equals(Set.of(host.id))), "先排除 Alice，听众只剩 Host：" + listeners(plugin));
+        Flood flood = new Flood(port, token);
+        check(flood.handshakeOk, "握手成功，开始只发不收（每帧 4 KB 的 PING，模组要回同样大的 PONG）");
+        Thread.sleep(1500);
+        writeConfig(config, true, port, token, "Host", false);
+        check(waitUntil(5000, () -> listeners(plugin).equals(Set.of(alice.id))), "只发不收开始后改配置，生效（听众只剩 Alice）：" + listeners(plugin));
+        Thread.sleep(3000); // 这时双方的 socket 缓冲早就满了：模组回 PONG 的写入卡住，之后发 STATUS 也会卡住
+        writeConfig(config, true, port, token, "", false);
+        check(waitUntil(5000, () -> listeners(plugin).equals(Set.of(alice.id, host.id))),
+                "卡住几秒之后再改配置，照样生效（Alice 和 Host 都是听众；定时检查没有被卡住）：" + listeners(plugin));
+        check(flood.waitEnded(10000), "模组发现对方不读数据，断开了这个连接（" + flood.describe() + "）");
+        flood.close();
+        Result afterFlood = run(testsend, "-addr", addr, "-token", token, "-duration", "1s", "-quiet", "-name", "after-flood");
+        check(afterFlood.code == 0 && afterFlood.out.contains("握手成功"), "之后新的广播连接正常（退出码 " + afterFlood.code + "）");
+
+        // ---------------------------------------------------------------------------------
         section("14. 语音服务器停止");
         Proc live = start(testsend, "-addr", addr, "-token", token, "-duration", "0", "-quiet", "-name", "live");
         check(waitUntil(3000, () -> live.output().contains("握手成功")), "停服前有一个正在广播的连接");
+        Object bridgeBefore = field(plugin, "current");
         server.closed = true;
         events.fire(VoicechatServerStoppedEvent.class, server.event(VoicechatServerStoppedEvent.class, null, null));
         Result liveResult = live.waitFor(5000);
@@ -271,6 +301,14 @@ public final class FakeSvc {
         check(waitUntil(3000, () -> !portOpen(port)), "端口已关闭");
         check(waitUntil(3000, () -> !threadAlive("MineDeck-VoiceBridge-Audio")), "音频线程已退出");
         check(server.encoders.get(0).closed, "编码器已关闭（SVC 2.6.3 以下不关会泄漏内存）");
+        check(waitUntil(3000, () -> !threadAlive("MineDeck-VoiceBridge-Housekeeping")), "定时检查线程已退出");
+        // 定时检查刚读完配置、还没应用时语音服务器停了：停服之后才应用的这份配置不能把端口重新打开
+        Path late = work.resolve("late.properties");
+        writeConfig(late, true, port, token, "", false);
+        Object lateConfig = invokeStatic("minedeck.voicebridge.BridgeConfig", "load", new Class<?>[]{Path.class}, late);
+        invoke(field(bridgeBefore, "control"), "apply", new Class<?>[]{lateConfig.getClass()}, lateConfig);
+        check(!portOpen(port) && waitUntil(2500, () -> !portOpen(port)) && !threadAlive("MineDeck-VoiceBridge-Accept"),
+                "停服之后才应用的配置没有把端口重新打开");
 
         // ---------------------------------------------------------------------------------
         section("15. 语音服务器再次启动（SVC 重启语音服务器时会这样）");
@@ -283,6 +321,24 @@ public final class FakeSvc {
         events.fire(PlayerConnectedEvent.class, server2.event(PlayerConnectedEvent.class, carol.connection, null));
         Result r3 = run(testsend, "-addr", addr, "-token", token, "-duration", "1s", "-quiet");
         check(r3.code == 0 && server2.received(carol) >= 45, "重启后照常推送（Carol 收到 " + server2.received(carol) + " 帧）");
+
+        // ---------------------------------------------------------------------------------
+        section("16. MineDeck 自己的客户端（internal/bridge 的 bridge.Client）：推音频；配置里的端口和令牌改了，客户端重读配置接着连");
+        server2.resetCounters();
+        Proc cl = start(testsend, "-config", config.toString(), "-client", "-duration", "0", "-name", "minedeck-client");
+        check(waitUntil(6000, () -> cl.output().contains("已连上桥接模组")), "客户端按配置文件连上了");
+        check(waitUntil(4000, () -> server2.received(carol) >= 50), "Carol 收到了客户端推的音频（" + server2.received(carol) + " 帧）");
+        int port2 = freePort();
+        String token2 = "devtest" + UUID.randomUUID().toString().replace("-", "");
+        writeConfig(config, true, port2, token2, "", false);
+        check(waitUntil(6000, () -> portOpen(port2)), "模组改到了新端口 " + port2 + "（旧连接收到 END：端口改了）");
+        check(waitUntil(10000, () -> count(cl.output(), "已连上桥接模组") >= 2 && cl.output().contains("127.0.0.1:" + port2)),
+                "客户端重读了配置，用新端口和新令牌重新连上");
+        int beforeSwitch = server2.received(carol);
+        check(waitUntil(4000, () -> server2.received(carol) >= beforeSwitch + 50), "换端口以后 Carol 继续收到音频");
+        cl.term();
+        Result clResult = cl.waitFor(5000);
+        check(clResult.code == 0 && clResult.out.contains("已停止"), "客户端停止时发 END 后退出（退出码 " + clResult.code + "）");
         server2.closed = true;
         events.fire(VoicechatServerStoppedEvent.class, server2.event(VoicechatServerStoppedEvent.class, null, null));
 
@@ -913,6 +969,11 @@ public final class FakeSvc {
             process.destroyForcibly();
         }
 
+        /** 像按 Ctrl+C 那样请它退出（SIGTERM）。不用 Process.destroy()：它会顺手关掉输出流，之后打印的就收不到了。 */
+        void term() {
+            process.toHandle().destroy();
+        }
+
         Result waitFor(long ms) throws InterruptedException {
             boolean done = process.waitFor(ms, TimeUnit.MILLISECONDS);
             if (!done) {
@@ -1025,6 +1086,86 @@ public final class FakeSvc {
         return h[0] & 0xFF;
     }
 
+    /** 只发不收的发送端：握手后不停地发 4 KB 的 PING，从不读模组的回复。 */
+    static final class Flood {
+        final Socket socket = new Socket();
+        final boolean handshakeOk;
+        final Thread thread;
+        volatile long sentFrames;
+        volatile String endedBy;
+
+        Flood(int port, String token) throws IOException {
+            socket.connect(new InetSocketAddress("127.0.0.1", port), 2000);
+            socket.setSoTimeout(3000);
+            OutputStream out = socket.getOutputStream();
+            out.write(frame(0x01, hello(1, token, "flood")));
+            int[] code = new int[1];
+            handshakeOk = readFrame(socket.getInputStream(), code) == 0x02;
+            byte[] ping = frame(0x20, new byte[4096]);
+            thread = new Thread(() -> {
+                try {
+                    while (true) {
+                        out.write(ping);
+                        sentFrames++;
+                    }
+                } catch (IOException e) {
+                    endedBy = e.toString();
+                }
+            }, "devtest-flood");
+            thread.setDaemon(true);
+            if (handshakeOk) {
+                thread.start();
+            }
+        }
+
+        boolean waitEnded(long ms) throws InterruptedException {
+            thread.join(ms);
+            return !thread.isAlive() && endedBy != null;
+        }
+
+        String describe() {
+            return "发了 " + sentFrames + " 帧，" + (endedBy != null ? "写入失败：" + endedBy : "仍在写");
+        }
+
+        void close() throws InterruptedException {
+            try {
+                socket.close();
+            } catch (IOException ignored) {
+                // 已经关了
+            }
+            thread.join(3000);
+        }
+    }
+
+    /** 模组当前的听众（读模组自己记的那张表，两种推送方式都适用）；语音服务器没在运行时为空集合。 */
+    @SuppressWarnings("unchecked")
+    static Set<UUID> listeners(Object plugin) {
+        try {
+            Object bridge = field(plugin, "current");
+            return bridge == null ? Set.of() : new HashSet<>((Set<UUID>) field(field(bridge, "listeners"), "targets"));
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    static Object field(Object target, String name) throws ReflectiveOperationException {
+        java.lang.reflect.Field f = target.getClass().getDeclaredField(name);
+        f.setAccessible(true);
+        return f.get(target);
+    }
+
+    static Object invoke(Object target, String name, Class<?>[] types, Object... args) throws ReflectiveOperationException {
+        Method m = target.getClass().getDeclaredMethod(name, types);
+        m.setAccessible(true);
+        return m.invoke(target, args);
+    }
+
+    static Object invokeStatic(String className, String name, Class<?>[] types, Object... args) throws ReflectiveOperationException {
+        Method m = Class.forName(className).getDeclaredMethod(name, types);
+        m.setAccessible(true);
+        return m.invoke(null, args);
+    }
+
     // ===================================================================================
     // 杂项
 
@@ -1060,6 +1201,14 @@ public final class FakeSvc {
         } catch (IOException e) {
             return false;
         }
+    }
+
+    static int count(String text, String part) {
+        int n = 0;
+        for (int i = text.indexOf(part); i >= 0; i = text.indexOf(part, i + part.length())) {
+            n++;
+        }
+        return n;
     }
 
     static boolean threadAlive(String name) {

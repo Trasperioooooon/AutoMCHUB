@@ -19,7 +19,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $apiVersion = '2.6.27'
-$modVersion = '0.1.0'
+$modVersion = '0.2.0'
 $jarDate = '2026-01-01T00:00:00Z'
 $cache = if ($env:MINEDECK_CACHE) { $env:MINEDECK_CACHE } else { Join-Path $PSScriptRoot '.cache' }
 $utf8 = New-Object System.Text.UTF8Encoding $false
@@ -88,7 +88,8 @@ Copy-Item -Recurse -Force (Join-Path $PSScriptRoot 'src\main\resources\*') $main
 # Pack the files in sorted order with a fixed timestamp, so the jar is byte-for-byte reproducible.
 function Make-Jar([string]$dir, [string]$jarFile) {
     $manifest = Join-Path $work 'MANIFEST.txt'
-    $text = "Manifest-Version: 1.0`nImplementation-Title: MineDeck Voice Bridge`nImplementation-Version: $modVersion`nImplementation-Vendor: MineDeck`n"
+    # Write Created-By ourselves, otherwise jar fills in the JDK version and a different JDK update changes the jar.
+    $text = "Manifest-Version: 1.0`nCreated-By: MineDeck bridge/voicechat build script`nImplementation-Title: MineDeck Voice Bridge`nImplementation-Version: $modVersion`nImplementation-Vendor: MineDeck`n"
     [System.IO.File]::WriteAllText($manifest, $text, $utf8)
     if (Test-Path $jarFile) { Remove-Item -Force $jarFile }
     $root = (Resolve-Path $dir).Path.TrimEnd('\') + '\'

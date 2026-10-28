@@ -11,11 +11,23 @@ import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 在 127.0.0.1 上监听，接收 MineDeck（或 testsend）的广播连接。同一时间只接受一个广播连接。
+ *
+ * <p>发给对方的帧（WELCOME、ERROR、PONG、STATUS、END）都放进这个连接自己的发送队列，由它的发送线程去写：
+ * 别的线程（定时检查、停服）调 {@link Connection#sendStatus()}、{@link Connection#end(String)} 从不会卡在
+ * socket 上。对方一直不读数据时 socket 写满，发送线程的一次写入卡住超过 5 秒（或者回 PONG 时 5 秒都排不进队列），
+ * 就断开这个连接。
+ *
+ * <p>{@link #close(String)} 之后这个对象就作废了：再调 {@link #apply(BridgeConfig)}、{@link #tick()} 什么都不做，
+ * 不会在停服之后又把端口打开（定时检查刚读完配置、语音服务器就停了，两边会撞在一起）。
  */
 final class ControlServer {
 
@@ -24,6 +36,12 @@ final class ControlServer {
     static final int IDLE_TIMEOUT_MS = 5000;
     static final int MAX_CONNECTIONS = 4;
     static final long BIND_RETRY_MS = 10_000L;
+    /** 发送队列最多攒这么多帧（PONG 每秒一个、STATUS 每 2 秒一个，正常时几乎是空的）。 */
+    static final int OUTBOX_FRAMES = 64;
+    /** 一次写入卡住（对方不读数据，socket 写满）超过这么久就断开。 */
+    static final long WRITE_STALL_MS = 5000L;
+    /** 主动结束连接时，最多等 END 发出去这么久，然后不管发没发出去都断开。 */
+    static final long END_FLUSH_MS = 500L;
 
     private final AudioEngine engine;
     private final Listeners listeners;
@@ -36,6 +54,8 @@ final class ControlServer {
     private volatile String token = "";
     /** 端口开着、还在接受新的广播连接。 */
     private volatile boolean accepting;
+    /** close() 过了：之后什么都不再打开。 */
+    private boolean closed;
 
     private final AtomicReference<Connection> active = new AtomicReference<Connection>();
     private final AtomicInteger open = new AtomicInteger();
@@ -48,6 +68,9 @@ final class ControlServer {
 
     /** 按配置开关端口。启动时和配置文件变了时调用。 */
     synchronized void apply(BridgeConfig config) {
+        if (closed) {
+            return;
+        }
         token = config.token;
         if (!config.enabled || config.problem != null) {
             if (config.enabled) {
@@ -80,9 +103,12 @@ final class ControlServer {
         tryBind();
     }
 
-    /** 每 2 秒调用：端口被占用时重试，给广播连接发 STATUS。 */
+    /** 每 2 秒调用（定时检查线程）：端口被占用时重试，给广播连接发 STATUS（只是放进发送队列，不会卡住）。 */
     void tick() {
         synchronized (this) {
+            if (closed) {
+                return;
+            }
             if (server == null && wantedPort > 0 && System.currentTimeMillis() >= nextBindAttempt) {
                 tryBind();
             }
@@ -94,6 +120,7 @@ final class ControlServer {
     }
 
     synchronized void close(String reason) {
+        closed = true;
         wantedPort = -1;
         closeServer();
         Connection c = active.get();
@@ -180,11 +207,10 @@ final class ControlServer {
         }
     }
 
-    /** 一个 TCP 连接：先握手，成为广播连接后不停地读帧。 */
+    /** 一个 TCP 连接：先握手，成为广播连接后不停地读帧；发出去的帧由它自己的发送线程写。 */
     private final class Connection implements Runnable {
         final Socket socket;
         final int id;
-        private final Object writeLock = new Object();
         private OutputStream out;
         private String name = "";
         private boolean broadcasting;
@@ -192,6 +218,13 @@ final class ControlServer {
         private long gaps;
         private boolean warnedUnknown;
         private volatile String endReason;
+
+        /** 发送队列；CLOSE 表示发完前面的帧就断开。 */
+        private final BlockingQueue<byte[]> outbox = new ArrayBlockingQueue<byte[]>(OUTBOX_FRAMES + 2);
+        private final CountDownLatch flushed = new CountDownLatch(1);
+        private volatile Thread sender;
+        /** 发送线程正在写的那一帧是什么时候开始写的（System.nanoTime）；没在写时为 0。 */
+        private volatile long writingSince;
 
         Connection(Socket socket, int id) {
             this.socket = socket;
@@ -206,6 +239,7 @@ final class ControlServer {
                 socket.setTcpNoDelay(true);
                 InputStream in = new BufferedInputStream(socket.getInputStream());
                 out = socket.getOutputStream();
+                startSender();
                 if (!handshake(in)) {
                     return;
                 }
@@ -223,6 +257,10 @@ final class ControlServer {
                 Log.error("处理广播连接时出错", t);
             } finally {
                 closeQuietly(socket);
+                Thread t = sender;
+                if (t != null) {
+                    t.interrupt();
+                }
                 open.decrementAndGet();
                 if (broadcasting) {
                     active.compareAndSet(this, null);
@@ -291,7 +329,7 @@ final class ControlServer {
             welcome[8] = (byte) Protocol.CHANNELS;
             Protocol.putU16(welcome, 9, Math.min(listeners.count(), 0xFFFF));
             System.arraycopy(version8, 0, welcome, 11, version8.length);
-            send(Protocol.WELCOME, welcome);
+            outbox.offer(Protocol.encode(Protocol.WELCOME, welcome));
             Log.info("广播连接已建立：" + displayName() + "（#" + id + "，来自 " + socket.getRemoteSocketAddress()
                     + "），当前听众 " + listeners.count() + " 位");
             return true;
@@ -317,7 +355,7 @@ final class ControlServer {
                         engine.offer(Protocol.pcmSamples(f.payload));
                         break;
                     case Protocol.PING:
-                        send(Protocol.PONG, f.payload);
+                        pong(f.payload);
                         break;
                     case Protocol.END:
                         String why = Protocol.utf8(f.payload, 0, f.payload.length).trim();
@@ -332,7 +370,13 @@ final class ControlServer {
             }
         }
 
+        /** 定时检查线程每 2 秒调用：发 STATUS（只排进队列，排不进就这次不发），顺便看发送线程是不是卡住了。 */
         void sendStatus() {
+            long since = writingSince;
+            if (since != 0 && System.nanoTime() - since > TimeUnit.MILLISECONDS.toNanos(WRITE_STALL_MS)) {
+                stalled();
+                return;
+            }
             byte[] p = new byte[25];
             Protocol.putU16(p, 0, Math.min(listeners.count(), 0xFFFF));
             Protocol.putU16(p, 2, Math.min(engine.buffered(), 0xFFFF));
@@ -342,47 +386,91 @@ final class ControlServer {
             Protocol.putU32(p, 13, engine.session.sent.get());
             Protocol.putU32(p, 17, engine.session.dropped.get());
             Protocol.putU32(p, 21, engine.session.underruns.get());
-            try {
-                send(Protocol.STATUS, p);
-            } catch (IOException e) {
-                closeQuietly(socket);
-            }
+            outbox.offer(Protocol.encode(Protocol.STATUS, p));
         }
 
-        /** 主动结束这个连接（关服、关掉共享、改端口）。 */
+        /** 主动结束这个连接（关服、关掉共享、改端口）：END 排进发送队列，最多等 0.5 秒让它发出去，然后断开。 */
         void end(String reason) {
             endReason = reason;
+            sendLast(Protocol.END, Protocol.utf8(reason));
+        }
+
+        private void sendError(int code, String message) {
+            sendLast(Protocol.ERROR, Protocol.errorPayload(code, message));
+        }
+
+        /** 发最后一帧然后断开：排进发送队列（排不进就算了），最多等 0.5 秒让它发出去。 */
+        private void sendLast(int type, byte[] payload) {
+            outbox.offer(Protocol.encode(type, payload));
+            outbox.offer(CLOSE);
             try {
-                send(Protocol.END, Protocol.utf8(reason));
-            } catch (IOException ignored) {
-                // 对方可能已经走了
+                flushed.await(END_FLUSH_MS, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
             closeQuietly(socket);
         }
 
-        private void sendError(int code, String message) {
+        /** 回 PONG：只会阻塞这个连接自己的线程；5 秒都排不进队列说明对方一直不读数据。 */
+        private void pong(byte[] payload) throws IOException {
+            boolean queued;
             try {
-                send(Protocol.ERROR, Protocol.errorPayload(code, message));
-            } catch (IOException ignored) {
-                // 对方可能已经走了
+                queued = outbox.offer(Protocol.encode(Protocol.PONG, payload), WRITE_STALL_MS, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("连接线程被中断");
+            }
+            if (!queued) {
+                stalled();
+                throw new IOException(endReason);
             }
         }
 
-        private void send(int type, byte[] payload) throws IOException {
-            byte[] frame = Protocol.encode(type, payload);
-            synchronized (writeLock) {
-                if (out == null) {
-                    throw new IOException("连接还没准备好");
-                }
-                out.write(frame);
-                out.flush();
+        /** 对方一直不读数据：断开这个连接（发送线程卡在 socket 上，END 也发不出去了）。 */
+        private void stalled() {
+            if (endReason == null) {
+                endReason = "对方 " + WRITE_STALL_MS / 1000 + " 秒没读数据，断开";
             }
+            closeQuietly(socket);
+        }
+
+        private void startSender() {
+            Thread t = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        while (true) {
+                            byte[] f = outbox.take();
+                            if (f == CLOSE) {
+                                break;
+                            }
+                            writingSince = System.nanoTime() | 1; // 0 留给「没在写」
+                            out.write(f);
+                            out.flush();
+                            writingSince = 0;
+                        }
+                    } catch (IOException e) {
+                        // 连接断了；读的那一边也会发现
+                    } catch (InterruptedException e) {
+                        // 连接结束
+                    } finally {
+                        flushed.countDown();
+                        closeQuietly(socket);
+                    }
+                }
+            }, "MineDeck-VoiceBridge-Send-" + id);
+            t.setDaemon(true);
+            sender = t;
+            t.start();
         }
 
         private String displayName() {
             return name.isEmpty() ? "未署名的发送端" : "「" + name + "」";
         }
     }
+
+    /** 发送队列里的「发完就断开」标记（按引用比较）。 */
+    private static final byte[] CLOSE = new byte[0];
 
     private static void closeQuietly(Socket s) {
         try {

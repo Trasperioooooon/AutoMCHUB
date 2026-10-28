@@ -9,7 +9,7 @@ issueTrackerURL="https://github.com/Trasperioooooon/MineDeck/issues"
 
 [[mods]]
 modId="minedeck_voicebridge"
-version="0.1.0"
+version="0.2.0"
 displayName="MineDeck Voice Bridge"
 description='''把 MineDeck 采集的音乐通过 Simple Voice Chat 推给所有玩家。只需要装在服务端。'''
 # 只装在服务端：客户端没装也不会在服务器列表里显示红叉

@@ -15,7 +15,7 @@ set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 api_version=2.6.27
-mod_version=0.1.0
+mod_version=0.2.0
 cache=${MINEDECK_CACHE:-$here/.cache}
 out_dir=$here/build
 api_jar=${SVC_API_JAR:-}
@@ -71,8 +71,9 @@ mapfile -t main_sources < <(find "$here/src/main/java" -name '*.java' | LC_ALL=C
 javac "${javac_flags[@]}" -cp "$api_jar" -d "$build/main" "${main_sources[@]}"
 cp -R "$here/src/main/resources/." "$build/main/"
 
+# 自己写 Created-By：不写的话 jar 会填上 JDK 的版本号，换一个 JDK 小版本构建出的 jar 就不一样了
 write_manifest() {
-  printf 'Manifest-Version: 1.0\nImplementation-Title: MineDeck Voice Bridge\nImplementation-Version: %s\nImplementation-Vendor: MineDeck\n' "$mod_version" > "$1"
+  printf 'Manifest-Version: 1.0\nCreated-By: MineDeck bridge/voicechat build script\nImplementation-Title: MineDeck Voice Bridge\nImplementation-Version: %s\nImplementation-Vendor: MineDeck\n' "$mod_version" > "$1"
 }
 
 # 按排好序的文件列表打包，并固定时间戳，保证可复现

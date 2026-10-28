@@ -7,7 +7,8 @@ MineDeck 在主机上采集音乐，通过本机 TCP 把 PCM 发给这个模组�
 - **不引用 Minecraft 的类**：只依赖 `java.*` 和 SVC 的插件 API，字节码是 Java 8（class 版本 52）。
 - **不包含 SVC 的任何文件**：SVC 的许可是"保留所有权利"，它的 API 只在编译时引用。
 
-目前是原型：协议、模组逻辑都已在 devtest（假 SVC）里跑通，**还没有在真的 Minecraft 服务端和客户端上测过**，见文末「验证情况」。
+Go 这一侧的客户端在 MineDeck 的 `internal/bridge`。协议、模组逻辑都已在 devtest（假 SVC）里跑通，**还没有在真的 Minecraft
+服务端和客户端上测过**，见文末「验证情况」。
 
 ## 目录
 
@@ -18,7 +19,7 @@ bridge/voicechat/
   src/fallback/                         备用方案：javafml + 两个空入口类（编译用的 @Mod 注解桩不打包）
   build.sh / build.ps1                  构建脚本（javac --release 8 + jar，不用 Gradle）
   api-from-source.sh                    从 SVC 官方源码编译 API（只在下载不了时用，只用于本地编译）
-  testsend/                             测试发送端（Go）：发测试音或 WAV，验证协议和整条链路
+  testsend/                             测试发送端（Go，协议用 MineDeck 的 internal/bridge）：发测试音或 WAV
   devtest/                              不装 Minecraft 的自动测试：假 SVC + TOML 校验
 ```
 
@@ -40,7 +41,7 @@ Windows：`.\build.ps1`、`.\build.ps1 -Fallback`（步骤和产物与 build.sh 
 3. 没有就从 `https://maven.maxhenkel.de/repository/public/de/maxhenkel/voicechat/voicechat-api/2.6.27/` 下载并校验 sha1；
 4. 下载不了时运行 `./api-from-source.sh`：从 `github.com/henkelmax/simple-voice-chat` 取 1.21.1 分支 2026-10-25 的提交（API 2.6.27，和 1.20.1 分支的 `api/` 目录逐字节相同），用 `javac --release 8` 编出一份放进缓存目录。
 
-构建脚本最后会检查：两份 toml 和 `pack.mcmeta` 都在；jar 里没有 `de/maxhenkel/` 下的文件；每个 class 的版本号都是 52；`jdeps` 显示依赖只有 `java.*` 和 `de.maxhenkel.voicechat.api.*`；`BridgePlugin` 带 `@ForgeVoicechatPlugin`。jar 里的时间戳固定、文件按顺序打包，同样的源码和 JDK 构建出的 jar 逐字节相同。
+构建脚本最后会检查：两份 toml 和 `pack.mcmeta` 都在；jar 里没有 `de/maxhenkel/` 下的文件；每个 class 的版本号都是 52；`jdeps` 显示依赖只有 `java.*` 和 `de.maxhenkel.voicechat.api.*`；`BridgePlugin` 带 `@ForgeVoicechatPlugin`。jar 里的时间戳固定、文件按顺序打包、清单里的 `Created-By` 自己写（不让 jar 填 JDK 的版本号），同样的源码和 JDK 构建出的 jar 逐字节相同。
 
 ## 安装
 
@@ -55,7 +56,7 @@ Windows：`.\build.ps1`、`.\build.ps1 -Fallback`（步骤和产物与 build.sh 
 
 路径：`<实例目录>/config/minedeck/voicebridge.properties`（相对服务端的工作目录，和 SVC 自己的 `config/voicechat/` 同一层；模组启动时会在日志里打出绝对路径）。
 
-文件不存在时，模组生成一份**端口关闭**的模板（令牌随机）。模组每 2 秒检查一次文件，改了就重新读，**不用重启服务器**：
+文件不存在时，模组生成一份**端口关闭**的模板（令牌随机）。模组每 2 秒读一次文件，内容和上次应用的不一样就重新应用，**不用重启服务器**（逐字节比较内容，不看修改时间和大小；发现变化后隔 0.15 秒再读一遍，两次一样才应用，免得读到别的程序写了一半的文件）：
 
 | 键 | 默认 | 说明 |
 |---|---|---|
@@ -68,13 +69,12 @@ Windows：`.\build.ps1`、`.\build.ps1 -Fallback`（步骤和产物与 build.sh 
 
 按名字排除：模组用反射从 SVC 给的玩家对象里找"返回 `GameProfile` 的无参方法"取名字（Forge 1.20.1 正式环境的方法名是混淆过的，所以按返回类型找，不按名字找）。取不到名字时只能按 UUID 排除，日志里每位玩家连上语音时都会打出名字和 UUID。
 
-**给 MineDeck 的写法建议**
+**MineDeck 的写法**（`internal/bridge/config.go`）
 
-- 每个实例单独选端口：可以先在 127.0.0.1 上绑定 0 号端口拿到一个空闲端口，关掉后写进配置。
-- 令牌每个实例随机生成（比如 16 字节的十六进制），只写进这个文件，不放进命令行或日志。
-- 先写临时文件再改名替换（原子替换），模组就不会读到写了一半的文件。
-- 用 UTF-8 写（带不带 BOM 都行），一行一个 `key=value`。值里不要有反斜杠（Java 的 properties 格式会把它当转义符）。
-- 改 `exclude`、`selftest`、`token` 时不用重启服务器，2 秒内生效。
+- 装桥接模组、开服前、开始广播时各检查一次：打开共享（`enabled=true`），端口从 24470 起找一个现在空着、别的实例也没用的（不用系统随机给的：Windows 的动态端口随时会被别的出站连接占走），令牌每个实例随机生成 16 字节的十六进制，只写进这个文件，不放进命令行或日志。已有的只改这几行，其余原样保留。
+- 先写临时文件再改名替换（原子替换），模组不会读到写了一半的文件。
+- 用 UTF-8 写，一行一个 `key=value`。值里不要有反斜杠（Java 的 properties 格式会把它当转义符）。
+- 「我在游戏里的名字」写进 `exclude`，2 秒内生效。刚改过配置时，客户端等 2.5 秒（模组重读一次的时间）再连，免得碰上旧端口、旧令牌。
 
 ## 协议（第 1 版）
 
@@ -121,11 +121,17 @@ MineDeck                                   模组
 - **心跳**：模组 5 秒没收到任何帧（PCM 或 PING）就断开。MineDeck 每秒至少发一帧；5 秒没收到模组的任何帧（STATUS 每 2 秒一次）就当作断线。
 - **节奏**：按实时速度发，每 20 毫秒一帧，不要一次性灌。模组按自己的时钟每 20 毫秒播一帧：缓冲最多 10 帧，多了丢最旧的；连续 1 秒多于 5 帧就丢一帧，把两边时钟的偏差追平（延迟保持在 100 毫秒左右）；取空了就跳过，重新攒 3 帧。
 - **暂停**：没声音时可以只发 PING、不发 PCM。模组 100 毫秒收不到新帧就让 SVC 收尾（客户端结束这一段声音），重新有数据时自动接上。
-- **断线重连**：连接断了就隔 1～2 秒重连。收到 ERROR 3（忙）也可以稍后重试：旧连接要么已经关闭，要么最多 5 秒后心跳超时。ERROR 1、2 说明配置或版本不对，不要重试。
+- **断线重连**：连接断了就隔 1～2 秒重连，**每次重连前重新读一遍配置文件**（端口、令牌可能刚改过：模组改端口时会给旧连接发 END「端口改了，请重新连接」）。收到 ERROR 3（忙）也可以稍后重试：旧连接要么已经关闭，要么最多 5 秒后心跳超时。ERROR 2 说明版本不对，不要重试；ERROR 1（令牌不对）、5（共享已关闭）可能只是模组还没读到新配置，等一小会儿（MineDeck 等 10 秒）还是这样再放弃。
+- **对方不读数据**：模组发给发送端的帧（WELCOME、ERROR、PONG、STATUS、END）都由这个连接自己的发送线程去写，别的线程只往它的发送队列里放，从不阻塞。发送端一直不读数据、socket 写满时，一次写入卡住超过 5 秒（或者回 PONG 时 5 秒都排不进队列），模组就断开它。
 - **没有听众时**：照常编码（日志里能看到"Opus 编码正常"），只是不发送。
 - **以后**：第 2 版打算加 `0x11 OPUS`（浏览器直接给的 Opus 包，原样转发）和 STATUS 里的听众明细。
 
-协议的 Go 实现见 `testsend/proto.go`，Java 实现见 `src/main/java/minedeck/voicebridge/Protocol.java`。
+协议的 Go 实现在 MineDeck 的 `internal/bridge`（`proto.go` 编解码，`client.go` 是带握手、心跳、断线重连的客户端），testsend 也用它；Java 实现见 `src/main/java/minedeck/voicebridge/Protocol.java`。
+
+**线程**：模组的音频线程（MineDeck-VoiceBridge-Audio）每 20 毫秒取一帧、编码、交给 SVC，只做音频，不碰 socket 和文件；
+每 2 秒一次的定时检查（重读配置、端口被占时重试、发 STATUS、每 30 秒记一次统计）在 MineDeck-VoiceBridge-Housekeeping
+线程里；每个连接有一个读线程和一个发送线程。语音服务器停止时先停定时检查线程，再关端口；端口关掉以后，
+这一轮语音服务器的对象不会再打开端口（定时检查刚读完配置、语音服务器就停了，两边撞在一起时也一样）。
 
 ## 日志
 
@@ -135,7 +141,7 @@ MineDeck                                   模组
 [voicechat] Loading plugins
 [voicechat] Loaded 1 plugin(s)
 [voicechat] Registering events for 'minedeck_voicebridge'
-[minedeck_voicebridge] MineDeck 音乐共享桥接 0.1.0 已被 SVC 加载，等待语音服务器启动
+[minedeck_voicebridge] MineDeck 音乐共享桥接 0.2.0 已被 SVC 加载，等待语音服务器启动
 [minedeck_voicebridge] 语音服务器已启动，初始化音乐共享（推送方式：多目标静态通道（SVC 2.6 及以上））
 [minedeck_voicebridge] 已注册音量分类「MineDeck 音乐共享」（id=minedeck_music）……
 [minedeck_voicebridge] 音乐共享端口已打开：127.0.0.1:24470（只接受本机连接，同一时间只接受一个广播连接）
@@ -162,6 +168,7 @@ testsend -config <实例目录>/config/minedeck/voicebridge.properties          
 testsend -config ... -tone 0 -duration 0                                           # 一直发琶音，Ctrl+C 停
 testsend -config ... -wav 歌.wav -loop                                              # 发 WAV（会转成 48 kHz 单声道）
 testsend -config ... -duration 0 -reconnect                                        # 断线自动重连（可以重启服务器试试）
+testsend -config ... -client -duration 0                                           # 用 MineDeck 自己的客户端（bridge.Client）发
 ```
 
 退出码：0 正常；1 本地错误；2 模组拒绝（会打出错误码）；3 连接中途断开。`-stall`、`-speed` 是测试心跳超时和时钟偏差用的。
@@ -175,7 +182,7 @@ SVC_OLD_API_JARS="<旧版 API jar> ..." ./devtest/run.sh     # 另外用旧版 A
 
 1. 构建主 jar 和备用 jar，做上面那些检查。
 2. 用加载器同款的库检查两份 toml：Forge 1.20.1 带的 night-config 3.6.4、NeoForge 1.21.1 带的 3.8.3，版本范围用两边都带的 maven-artifact 3.8.5；校验规则照两边加载器的源码（必填字段、modId 格式、Forge 必须写 `mandatory`、`lowcodefml` 的版本、SVC 的版本号能不能满足依赖等）。
-3. 假 SVC：像 FML 那样解析 class 文件找 `@ForgeVoicechatPlugin`，像 SVC 那样 `Class.forName` + 无参构造创建插件，再模拟语音服务器启动、三位玩家连上语音（其中一位按名字排除），然后用 testsend 依次测：端口被别的程序占着时每 10 秒重试、令牌错误、正常广播 3 秒（每位听众收到 150 帧、每帧只编码一次）、同时第二个连接被拒绝、发送端被强杀后重连、心跳超时（约 5 秒断开）、协议错误、玩家断开、改配置热重载（排除名单、自测模式、开关端口）、自测音和广播互相让位、发送端快 2% 时缓冲不会一直变长、停服时给正在广播的连接发 END 并关掉端口和线程、语音服务器重启后照常工作。
+3. 假 SVC：像 FML 那样解析 class 文件找 `@ForgeVoicechatPlugin`，像 SVC 那样 `Class.forName` + 无参构造创建插件，再模拟语音服务器启动、三位玩家连上语音（其中一位按名字排除），然后用 testsend 依次测：端口被别的程序占着时每 10 秒重试、令牌错误、正常广播 3 秒（每位听众收到 150 帧、每帧只编码一次）、同时第二个连接被拒绝、发送端被强杀后重连、心跳超时（约 5 秒断开）、协议错误、玩家断开、改配置热重载（排除名单、自测模式、开关端口）、自测音和广播互相让位、发送端快 2% 时缓冲不会一直变长、配置文件改了但修改时间和大小都没变时照样重读（13a）、发送端只发不收时定时检查不被拖住、模组主动断开它（13b）、停服时给正在广播的连接发 END 并关掉端口和线程、停服之后才应用的配置不会把端口重新打开（14）、语音服务器重启后照常工作、MineDeck 自己的客户端（`testsend -client`）推音频并在端口和令牌改了以后重读配置接着连（16）。
 
 ## 为什么一个 jar 两边都能用（读源码确认的）
 
@@ -192,12 +199,17 @@ SVC_OLD_API_JARS="<旧版 API jar> ..." ./devtest/run.sh     # 另外用旧版 A
 
 ## 验证情况
 
+第五阶段核实了代码审查指出的两个隐患，在 devtest 里用改之前的模组都能复现，改完后都通过：
+
+- **音频线程上的阻塞式 socket 写入**：属实。原来每 2 秒的定时检查跑在音频线程上，给广播连接发 STATUS 要拿这个连接的写锁；发送端只发不收时，连接线程回 PONG 卡在 socket 写入上（Java 的阻塞 socket 没有写超时）、一直占着写锁，音频线程跟着卡住：所有人的音乐、自测音和配置重读都停了，而且这个连接永远不会被断开（13b 原来两项失败）。改成：定时检查挪到单独的线程；每个连接有自己的发送线程和发送队列，别的线程只往队列里放；一次写入卡住 5 秒就断开。
+- **配置热重读的竞态**：属实，有两处。一是按「修改时间 × 31 + 大小」判断文件变没变，同一毫秒里连写两次（大小一样）、修改时间只精确到 2 秒的盘、或者两个值凑巧相抵时会漏掉改动（13a 原来失败）；改成逐字节比较内容，发现变化后隔 0.15 秒再读一遍、两次一样才应用。二是定时检查刚读完配置、还没应用时语音服务器停了，停服之后才应用的配置会把端口重新打开，留下一个没人管的监听端口，SVC 重启语音服务器后新连接会连到这个死掉的旧对象上、听众收不到声音（14、15 原来失败）；改成停服时先停定时检查线程，关掉的 ControlServer 不再打开端口。Go 这一侧：原来的 testsend 只在启动时读一次配置，模组改了端口或令牌后重连永远连不上；MineDeck 的客户端每次连接前都重读配置，刚改过配置时先等模组重读，令牌不对 / 共享已关闭在 10 秒内当作「模组还没读到新配置」继续重试（`internal/bridge` 的测试和 devtest 16 覆盖）。
+
 已做：
 
 - 构建：主 jar、备用 jar 都通过上面的检查；同样的输入两次构建 sha256 相同。
 - TOML：两份 toml 用两边加载器同款的 night-config 和 maven-artifact 解析、校验通过。
-- devtest：用 SVC API 2.6.27（多目标）跑完整流程全部通过；主 jar 和备用 jar 都跑了；另外用 2.6.0 开发中途的快照（还没有 `addTarget`）和 2.5.0 的 API 跑，自动改用旧版兼容方式，也全部通过。
-- testsend 的 Windows 版（`GOOS=windows` 编译）在 wine 里跑同一套 devtest 也全部通过，Go 单元测试在 wine 里也通过。
+- devtest：用 SVC API 2.6.27（多目标）跑完整流程全部通过（74 项）；主 jar 和备用 jar 都跑了；另外用 2.6.0 开发中途的快照（还没有 `addTarget`）和 2.5.0 的 API 跑，自动改用旧版兼容方式，也全部通过（71 项，少的 3 项只对多目标方式）。
+- testsend 的 Windows 版（`GOOS=windows` 编译）在 wine 里跑同一套 devtest：73 项通过，只有最后一项（像按 Ctrl+C 那样让 `-client` 退出）不算数——devtest 用 SIGTERM 通知它，wine 收到 SIGTERM 直接结束了进程（退出码 143）。Go 单元测试在 wine 里也通过。
 
 没做到（需要在真机上测，步骤见自测说明）：
 

@@ -7,11 +7,15 @@
 //	testsend -config ... -tone 0 -duration 0                                     # 一直发音阶，Ctrl+C 结束
 //	testsend -config ... -wav 歌.wav -loop                                        # 循环发 WAV
 //
+//	testsend -config ... -client -duration 0                                   # 用 MineDeck 自己的客户端（internal/bridge）发
+//
+// 协议的编解码用的是 MineDeck 本身的 internal/bridge，所以 devtest 同时在检验 MineDeck 的实现；
+// -client 再进一步，连接、心跳、断线重连、重读配置都交给 MineDeck 的客户端（bridge.Client）。
+//
 // 退出码：0 正常结束；1 本地错误（参数、文件、连不上）；2 模组拒绝（ERROR 帧）；3 连接中途断开。
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -21,10 +25,19 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"minedeck/internal/bridge"
+)
+
+// 协议常量都取自 internal/bridge。
+const (
+	sampleRate   = bridge.SampleRate
+	frameSamples = bridge.FrameSamples
 )
 
 type options struct {
@@ -64,6 +77,7 @@ func main() {
 		duration   = flag.Duration("duration", 30*time.Second, "发送多久；0 表示一直发（WAV 不加 -loop 时播完就停）")
 		loop       = flag.Bool("loop", false, "WAV 播完后从头再来")
 		reconnect  = flag.Bool("reconnect", false, "断线后每 2 秒重连一次，直到发完或按 Ctrl+C")
+		client     = flag.Bool("client", false, "用 MineDeck 自己的客户端（bridge.Client）发：每次连接前重读 -config，断线自动重连")
 		stall      = flag.Duration("stall", 0, "（测试用）握手后先这么久什么都不发，用来验证模组的心跳超时")
 		quiet      = flag.Bool("quiet", false, "不打印模组发来的 STATUS")
 		speed      = flag.Float64("speed", 1, "（测试用）发送速度倍数，比如 1.02 表示比实时快 2%，用来模拟两边时钟有偏差")
@@ -75,12 +89,20 @@ func main() {
 	}
 	opts := options{addr: *addr, token: *token, name: *name, reconnect: *reconnect, stall: *stall, quiet: *quiet,
 		interval: time.Duration(float64(20*time.Millisecond) / *speed)}
-	if *configPath != "" {
-		cfg, err := readProperties(*configPath)
+	if *configPath != "" && !*client {
+		p, err := bridge.LoadProps(*configPath)
 		if err != nil {
 			fatal(1, "读配置文件失败：%v", err)
 		}
+		cfg := map[string]string{}
+		for _, k := range []string{"port", "token", "enabled"} {
+			v, _ := p.Get(k)
+			cfg[k] = strings.TrimSpace(v)
+		}
 		if opts.addr == "" && cfg["port"] != "" {
+			if _, err := strconv.Atoi(cfg["port"]); err != nil {
+				fatal(1, "读配置文件失败：port 不是数字：%q", cfg["port"])
+			}
 			opts.addr = "127.0.0.1:" + cfg["port"]
 		}
 		if opts.token == "" {
@@ -93,7 +115,10 @@ func main() {
 	if opts.addr == "" {
 		opts.addr = "127.0.0.1:24470"
 	}
-	if opts.token == "" {
+	if *client && *configPath == "" {
+		fatal(1, "-client 要配合 -config 使用（客户端每次连接前都从配置文件读端口和令牌）")
+	}
+	if opts.token == "" && !*client {
 		fatal(1, "没有令牌：用 -config 指定模组配置文件，或者用 -token 直接给出")
 	}
 
@@ -127,13 +152,17 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	if *client {
+		os.Exit(runClient(ctx, *configPath, opts, src))
+	}
+
 	for attempt := 1; ; attempt++ {
 		done, err := stream(ctx, opts, src)
 		if done {
 			return
 		}
 		var se *serverError
-		if errors.As(err, &se) && se.code != errBusy {
+		if errors.As(err, &se) && se.code != bridge.ErrBusy {
 			fatal(2, "%v", err)
 		}
 		if !opts.reconnect {
@@ -159,31 +188,31 @@ func stream(ctx context.Context, opts options, src source) (done bool, err error
 	}
 	defer conn.Close()
 
-	hello, err := helloPayload(opts.token, opts.name)
+	hello, err := bridge.HelloPayload(opts.token, opts.name)
 	if err != nil {
 		fatal(1, "%v", err)
 	}
-	if err := writeFrame(conn, typeHello, hello); err != nil {
+	if err := bridge.WriteFrame(conn, bridge.TypeHello, hello); err != nil {
 		return false, err
 	}
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	f, err := readFrame(conn)
+	f, err := bridge.ReadFrame(conn)
 	if err != nil {
 		return false, fmt.Errorf("握手失败：%w", err)
 	}
-	switch f.typ {
-	case typeWelcome:
-		w, err := parseWelcome(f.payload)
+	switch f.Type {
+	case bridge.TypeWelcome:
+		w, err := bridge.ParseWelcome(f.Payload)
 		if err != nil {
 			return false, err
 		}
 		fmt.Printf("握手成功：模组 %s，协议 %d，%d Hz，每帧 %d 个采样，%d 声道，当前听众 %d 位\n",
-			w.modVersion, w.version, w.sampleRate, w.frameSamples, w.channels, w.listeners)
-	case typeError:
-		code, msg := parseError(f.payload)
+			w.ModVersion, w.Version, w.SampleRate, w.FrameSamples, w.Channels, w.Listeners)
+	case bridge.TypeError:
+		code, msg := bridge.ParseError(f.Payload)
 		return false, &serverError{code, msg}
 	default:
-		return false, fmt.Errorf("握手失败：收到意外的帧类型 0x%02x", f.typ)
+		return false, fmt.Errorf("握手失败：收到意外的帧类型 0x%02x", f.Type)
 	}
 
 	errc := make(chan error, 1)
@@ -206,19 +235,19 @@ func stream(ctx context.Context, opts options, src source) (done bool, err error
 		case err := <-errc:
 			return false, err
 		case <-ctx.Done():
-			_ = writeFrame(conn, typeEnd, []byte("用户停止"))
+			_ = bridge.WriteFrame(conn, bridge.TypeEnd, []byte("用户停止"))
 			fmt.Println("已停止")
 			return true, nil
 		default:
 		}
 		samples, ok := src.next()
 		if !ok {
-			_ = writeFrame(conn, typeEnd, []byte("发送完毕"))
+			_ = bridge.WriteFrame(conn, bridge.TypeEnd, []byte("发送完毕"))
 			fmt.Printf("发送完毕，本次共 %d 帧\n", seq)
 			time.Sleep(200 * time.Millisecond)
 			return true, nil
 		}
-		if err := writeFrame(conn, typePCM, pcmFrame(seq, samples)); err != nil {
+		if err := bridge.WriteFrame(conn, bridge.TypePCM, bridge.PCMFrame(seq, samples)); err != nil {
 			return false, fmt.Errorf("发送失败：%w", err)
 		}
 		seq++
@@ -226,7 +255,7 @@ func stream(ctx context.Context, opts options, src source) (done bool, err error
 			lastPing = time.Now()
 			var ts [8]byte
 			binary.LittleEndian.PutUint64(ts[:], uint64(lastPing.UnixNano()))
-			if err := writeFrame(conn, typePing, ts[:]); err != nil {
+			if err := bridge.WriteFrame(conn, bridge.TypePing, ts[:]); err != nil {
 				return false, fmt.Errorf("发送失败：%w", err)
 			}
 		}
@@ -243,7 +272,7 @@ func readLoop(conn net.Conn, quiet bool, errc chan<- error) {
 	var rtt time.Duration
 	for {
 		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-		f, err := readFrame(conn)
+		f, err := bridge.ReadFrame(conn)
 		if err != nil {
 			var ne net.Error
 			if errors.As(err, &ne) && ne.Timeout() {
@@ -255,64 +284,78 @@ func readLoop(conn net.Conn, quiet bool, errc chan<- error) {
 			}
 			return
 		}
-		switch f.typ {
-		case typePong:
-			if len(f.payload) == 8 {
-				sent := int64(binary.LittleEndian.Uint64(f.payload))
+		switch f.Type {
+		case bridge.TypePong:
+			if len(f.Payload) == 8 {
+				sent := int64(binary.LittleEndian.Uint64(f.Payload))
 				rtt = time.Since(time.Unix(0, sent))
 			}
-		case typeStatus:
-			s, err := parseStatus(f.payload)
+		case bridge.TypeStatus:
+			s, err := bridge.ParseStatus(f.Payload)
 			if err == nil && !quiet {
 				fmt.Printf("状态：听众 %d 位，缓冲 %d 帧，音源 %s，已收 %d 帧，已编码 %d，已发出 %d，丢弃 %d，欠载 %d，往返 %s\n",
-					s.listeners, s.buffered, sourceName(s.source), s.received, s.played, s.sent, s.dropped, s.underruns,
+					s.Listeners, s.Buffered, bridge.SourceName(s.Source), s.Received, s.Played, s.Sent, s.Dropped, s.Underruns,
 					rtt.Round(100*time.Microsecond))
 			}
-		case typeEnd:
-			errc <- &endError{reason: string(f.payload)}
+		case bridge.TypeEnd:
+			errc <- &endError{reason: string(f.Payload)}
 			return
-		case typeError:
-			code, msg := parseError(f.payload)
+		case bridge.TypeError:
+			code, msg := bridge.ParseError(f.Payload)
 			errc <- &serverError{code, msg}
 			return
 		}
 	}
 }
 
-// readProperties 读模组的 .properties 配置（只处理 key=value 这种简单写法）。
-func readProperties(path string) (map[string]string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
+// runClient 用 MineDeck 的客户端发：按实时速度每 20 毫秒交一帧（没连上时客户端直接丢掉），
+// 每 2 秒打印一次客户端的状态；客户端放弃时退出码 2。
+func runClient(ctx context.Context, configPath string, opts options, src source) int {
+	inst := filepath.Dir(filepath.Dir(filepath.Dir(filepath.Clean(configPath))))
+	if bridge.ConfigPath(inst) != filepath.Clean(configPath) {
+		fmt.Fprintf(os.Stderr, "-client 的 -config 要指向 <实例目录>/%s\n", bridge.ConfigRel)
+		return 1
 	}
-	defer f.Close()
-	m := map[string]string{}
-	sc := bufio.NewScanner(f)
-	first := true
-	for sc.Scan() {
-		line := sc.Text()
-		if first {
-			line = strings.TrimPrefix(line, "\ufeff")
-			first = false
+	cl := bridge.Start(bridge.Options{Dir: inst, Name: opts.name, Logf: func(format string, args ...any) {
+		fmt.Printf("客户端："+format+"\n", args...)
+	}})
+	next := time.Now()
+	lastPrint := time.Now()
+	for {
+		select {
+		case <-ctx.Done():
+			cl.Stop("用户停止")
+			fmt.Println("已停止")
+			return 0
+		case <-cl.Done():
+			fmt.Printf("客户端放弃了：%v\n", cl.Err())
+			return 2
+		default:
 		}
-		line = strings.TrimSpace(line)
-		if line == "" || line[0] == '#' || line[0] == '!' {
-			continue
-		}
-		k, v, ok := strings.Cut(line, "=")
+		samples, ok := src.next()
 		if !ok {
-			k, v, ok = strings.Cut(line, ":")
+			st := cl.State()
+			cl.Stop("发送完毕")
+			fmt.Printf("发送完毕：发出 %d 帧，丢掉 %d 帧，握手成功 %d 次\n", st.Sent, st.Dropped, st.Connects)
+			return 0
 		}
-		if ok {
-			m[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		cl.Send(samples)
+		if time.Since(lastPrint) >= 2*time.Second && !opts.quiet {
+			lastPrint = time.Now()
+			st := cl.State()
+			listeners := -1
+			if st.Status != nil {
+				listeners = st.Status.Listeners
+			}
+			fmt.Printf("客户端状态：%s，%s，听众 %d 位，发出 %d 帧，丢掉 %d 帧\n", st.Phase, st.Addr, listeners, st.Sent, st.Dropped)
+		}
+		next = next.Add(opts.interval)
+		if d := time.Until(next); d > 0 {
+			time.Sleep(d)
+		} else if d < -100*time.Millisecond {
+			next = time.Now()
 		}
 	}
-	if p := m["port"]; p != "" {
-		if _, err := strconv.Atoi(p); err != nil {
-			return nil, fmt.Errorf("port 不是数字：%q", p)
-		}
-	}
-	return m, sc.Err()
 }
 
 func fatal(code int, format string, args ...any) {
