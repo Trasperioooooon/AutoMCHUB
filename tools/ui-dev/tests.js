@@ -770,6 +770,170 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
     } finally { await c.close(); await aiState({ reset: true }); }
   });
 
+  // ==================== 第五阶段：音乐共享（music.js）====================
+  // 仿真后端的场景见 server.js 的 musicMockState；POST 的请求体单独记一份（上面的 reqs 只记 PUT 的）
+  const musicState = b => page.evaluate(x => fetch("/__mock/state", { method: "POST", body: JSON.stringify(x) }).then(r => r.json()).then(j => j.data), b);
+  const posts = [];
+  page.on("request", r => { if (r.method() === "POST") posts.push({ u: decodeURIComponent(new URL(r.url()).pathname), b: r.postData() || "" }); });
+  const postsTo = (since, suffix) => posts.slice(since).filter(x => x.u.endsWith(suffix));
+  const PACK = "机械动力整合包";
+  const openMusic = async (state, status = "running") => {
+    await musicState({ music: { reset: true, ...state }, status: { [PACK]: status } });
+    await page.goto(url("#/inst/" + encodeURIComponent(PACK) + "/music")); await settle(900);
+  };
+  const resetMusic = () => musicState({ music: { reset: true }, status: { [PACK]: "stopped" } });
+
+  await run("音乐共享：只有 Forge 系的服务器有这个标签；检查清单列出 SVC、桥接模组、语音端口、远程语音；点「安装」装上桥接模组", async () => {
+    try {
+      await page.goto(url("#/inst/" + inst + "/console")); await settle();
+      assert(!(await page.$('.tabs [data-t="music"]')), "Paper 服不该有音乐共享标签");
+      await openMusic({}, "stopped");
+      assert(await page.$('.tabs [data-t="music"].cur'), "Forge 服应有音乐共享标签并选中");
+      const check = await page.textContent("#mu-check");
+      for (const s of ["核心：Forge 1.20.1", "已装 1.20.1-2.5.24", "桥接模组：还没装", "语音端口：UDP 24454", "没有语音隧道", "voice_host = （空）"])
+        assert(check.includes(s), `检查清单里没有「${s}」：${check}`);
+      assert(await page.$eval("#mu-start", b => b.disabled) && (await page.textContent("#mu-why")).includes("先装桥接模组"), "没装桥接模组时不能开始");
+      const t0 = posts.length;
+      await page.click('[data-install="main"]'); await settle(500);
+      const ins = postsTo(t0, "/music/install");
+      assert(ins.length === 1 && JSON.parse(ins[0].b).variant === "main", "安装请求：" + JSON.stringify(ins));
+      assert(await toastHas("已装好桥接模组"), "应提示装好了");
+      assert((await page.textContent("#mu-check")).includes("已装 0.2.0 版"), "装好后检查清单没更新：" + await page.textContent("#mu-check"));
+      assert((await page.textContent("#mu-why")).includes("先开服"), "装好后还差开服：" + await page.textContent("#mu-why"));
+    } finally { await resetMusic(); }
+  });
+
+  await run("音乐共享：Win11 选一个正在出声的程序开始广播，选音源时电平跟着刷新；广播中显示听众、不再列音源；停止后回到选音源", async () => {
+    try {
+      await openMusic({ inst: { [PACK]: { bridge: "main" } } });
+      const rows = await page.$$eval("#mu-src [data-pid]", rs => rs.map(r => ({ exe: r.dataset.exe, on: r.getAttribute("aria-checked") === "true", lit: r.querySelectorAll(".xp i.on").length })));
+      assert(rows.length === 3 && rows[0].exe === "cloudmusic.exe" && rows[0].on && rows[0].lit > 0, "音源列表：" + JSON.stringify(rows));
+      assert(!rows.find(r => r.exe === "QQMusic.exe").lit, "没声音的程序电平应为空");
+      const s0 = reqs.length;
+      await page.waitForTimeout(2200);
+      assert(reqs.slice(s0).filter(r => r.u === "/api/music/sources").length >= 2, "选音源时应每秒刷新电平");
+      await page.click('#mu-src [data-exe="msedge.exe"]'); await settle(150);
+      assert(await page.$eval('#mu-src [data-exe="msedge.exe"]', r => r.getAttribute("aria-checked") === "true"), "点选后应选中 msedge.exe");
+      assert(!(await page.$eval("#mu-start", b => b.disabled)), "都就绪了应能开始");
+      const t0 = posts.length;
+      await page.click("#mu-start"); await settle(600);
+      const st = postsTo(t0, "/music/start");
+      assert(st.length === 1 && JSON.stringify(JSON.parse(st[0].b)) === JSON.stringify({ mode: "process", pid: 7788, exe: "msedge.exe" }), "开始广播的请求：" + JSON.stringify(st));
+      const live = await page.textContent("#mu-cast");
+      assert(live.includes("正在广播") && live.includes("msedge.exe") && live.includes("2 人在听"), "广播中：" + live);
+      const s1 = reqs.length;
+      await page.waitForTimeout(2200);
+      assert(!reqs.slice(s1).some(r => r.u === "/api/music/sources"), "广播中不该再列音源");
+      await page.click("#mu-stop"); await settle(600);
+      assert(postsTo(t0, "/music/stop").length === 1, "应发停止请求");
+      assert(await page.$("#mu-src") && (await page.textContent("#mu-last")).includes("用户停止"), "停止后应回到选音源，并写明上次怎么停的");
+    } finally { await resetMusic(); }
+  });
+
+  await run("音乐共享：只能录整机时先警告，点「仍然录整机」才开始（默认聚焦取消，取消不开始）；确认过就记住", async () => {
+    try {
+      await openMusic({ cap: "win10", inst: { [PACK]: { bridge: "main" } } });
+      assert((await page.textContent("#mu-cast")).includes("这台电脑只能录整机的声音"), "Win10 应先写明只能录整机");
+      assert(!(await page.$("#mu-src")), "整机录音不列程序");
+      let t0 = posts.length;
+      await page.click("#mu-start"); await settle(250);
+      assert((await page.textContent(".modal")).includes("游戏声音、语音聊天"), "应弹出整机录音的警告");
+      assert(await page.evaluate(() => document.activeElement.textContent.trim()) === "先不录", "默认应聚焦取消");
+      await page.click('.modal [data-x="cancel"]'); await settle(250);
+      assert(!postsTo(t0, "/music/start").length && !postsTo(t0, "/confirm-system").length, "取消后不该开始，也不该记下确认");
+      await page.click("#mu-start"); await settle(250);
+      await page.click('.modal [data-x="ok"]'); await settle(700);
+      const cf = postsTo(t0, "/api/music/confirm-system"), st = postsTo(t0, "/music/start");
+      assert(cf.length === 1 && st.length === 1 && JSON.parse(st[0].b).mode === "system", "确认后应先记下确认再开始：" + JSON.stringify(st));
+      assert((await page.textContent("#mu-cast")).includes("正在录整机声音"), "广播中应一直提示正在录整机");
+      await page.click("#mu-stop"); await settle(600);
+      t0 = posts.length;
+      await page.click("#mu-start"); await settle(600);
+      assert(!(await page.$(".modal")) && postsTo(t0, "/music/start").length === 1, "确认过以后不该再问");
+      await page.click("#mu-stop"); await settle(400);
+    } finally { await resetMusic(); }
+  });
+
+  await run("音乐共享：voice_host 和隧道地址不一样时不覆盖，可以改用隧道地址；手动填写、「我在游戏里的名字」写错就近提示；音量即时保存", async () => {
+    try {
+      await openMusic({ voiceTunnel: true, inst: { [PACK]: { bridge: "main", voiceHost: "my.domain.com:24454" } } });
+      let check = await page.textContent("#mu-check");
+      assert(check.includes("voice_host 和隧道地址不一样") && check.includes("my.domain.com:24454") && check.includes("frp-abc.natfrp.cloud:34567"), "两个地址不一样时：" + check);
+      let t0 = reqs.length;
+      await page.click("#mu-vh-tunnel"); await settle(500);
+      assert(JSON.stringify(putBody(t0, "/api/instances/" + encodeURIComponent(PACK) + "/music/voicehost")) === JSON.stringify({ fromTunnel: true }), "改用隧道地址的请求");
+      assert(await toastHas("重启服务器后生效"), "运行中改的应提示重启后生效");
+      check = await page.textContent("#mu-check");
+      assert(check.includes("voice_host = frp-abc.natfrp.cloud:34567") && (await page.textContent("#mu-restart")).includes("voice_host"), "改完：" + check);
+      // 手动填写：格式不对时报错写在输入框下面
+      await page.click("#mu-vh-toggle"); await settle(150);
+      await page.fill("#mu-vh", "不是地址!"); await page.press("#mu-vh", "Enter"); await settle(400);
+      assert((await page.textContent("#mu-vh-err")).includes("语音地址不对") && await page.$eval("#mu-vh", e => e.classList.contains("invalid")), "手动填写写错应就近提示");
+      // 我在游戏里的名字：有不能用的字符时不发请求
+      t0 = reqs.length;
+      await page.fill("#mu-ex", "Steve:1"); await page.press("#mu-ex", "Enter"); await settle(200);
+      assert((await page.textContent("#mu-ex-err")).includes("不能用的字符") && !putBody(t0, "/api/instances/" + encodeURIComponent(PACK) + "/music/settings"), "名字写错应就近提示、不保存");
+      await page.fill("#mu-ex", "Steve"); await page.press("#mu-ex", "Enter"); await settle(300);
+      assert(JSON.stringify(putBody(t0, "/api/instances/" + encodeURIComponent(PACK) + "/music/settings")) === JSON.stringify({ exclude: "Steve" }) && (await page.textContent("#mu-ex-err")) === "", "名字应保存");
+      await page.waitForTimeout(2200);
+      assert((await page.textContent("#mu-players")).includes("不再发给他"), "排除名单里的人应单独列出：" + await page.textContent("#mu-players"));
+      t0 = reqs.length;
+      await page.$eval("#mu-vol", e => { e.value = "150"; e.dispatchEvent(new Event("input")); e.dispatchEvent(new Event("change")); });
+      await settle(300);
+      assert((putBody(t0, "/api/instances/" + encodeURIComponent(PACK) + "/music/settings") || {}).volume === 150 && (await page.textContent("#mu-vol-v")) === "150%", "音量应即时保存");
+    } finally { await resetMusic(); }
+  });
+
+  await run("音乐共享：局域网打开不列音源、不给开始（录的是主机的声音），能停止主机上开始的广播", async () => {
+    try {
+      await openMusic({ inst: { [PACK]: { bridge: "main" } } });
+      await page.click("#mu-start"); await settle(500);
+      await musicState({ music: { local: false } });
+      const s0 = reqs.length;
+      await page.goto(url("#/inst/" + encodeURIComponent(PACK) + "/music")); await settle(900);
+      assert((await page.textContent("#mu-cast")).includes("正在广播") && await page.$("#mu-stop"), "局域网也能看到正在广播、能停止");
+      await page.click("#mu-stop"); await settle(600);
+      assert((await page.textContent("#mu-cast")).includes("开始广播只能在主机上操作") && !(await page.$("#mu-start")), "局域网不给开始");
+      await page.waitForTimeout(1500);
+      assert(!reqs.slice(s0).some(r => r.u === "/api/music/sources"), "局域网不该列音源");
+    } finally { await resetMusic(); }
+  });
+
+  await run("隧道：用途选「语音」时写明怎么建（SVC 端口取自绑定的服务器），自定义 frps 默认 UDP；请求体带上用途和协议；列表标出语音隧道", async () => {
+    try {
+      await musicState({ music: { reset: true, voiceTunnel: true } });
+      await page.goto(url("#/tunnels")); await settle();
+      assert((await page.textContent("#tun-list")).includes("语音"), "列表应标出语音隧道");
+      await page.click("#tn-toggle");
+      await page.selectOption("#tn-provider", "custom");
+      assert(await page.$eval("#tn-voice-tip", e => e.hidden) && await page.$eval("#tn-proto", e => e.value) === "tcp", "默认是游戏隧道、TCP");
+      await page.selectOption("#tn-bound", PACK);
+      await page.selectOption("#tn-purpose", "voice"); await settle(300);
+      const tip = await page.textContent("#tn-voice-tip");
+      assert(tip.includes("24454") && tip.includes(PACK) && tip.includes("UDP"), "语音隧道的说明：" + tip);
+      assert(await page.$eval("#tn-proto", e => e.value) === "udp" && await page.$eval("#tn-lport", e => e.value) === "24454", "自定义 frps 选语音时应默认 UDP、本地端口填 SVC 的");
+      await page.fill("#tn-name", "语音线 2"); await page.fill("#tn-saddr", "1.2.3.4"); await page.fill("#tn-rport", "34567");
+      await page.click("#tn-add"); await settle(400);
+      const body = (await musicState({})).music.tunnelBody;
+      assert(body && body.purpose === "voice" && body.proto === "udp" && body.localPort === 24454 && body.boundInstance === PACK, "添加隧道的请求体：" + JSON.stringify(body));
+    } finally { await resetMusic(); }
+  });
+
+  await run("音乐共享：手机宽度（390px）下不横向溢出", async () => {
+    await musicState({ music: { reset: true, voiceTunnel: true, inst: { [PACK]: { bridge: "main", voiceHost: "my.domain.com:24454" } } }, status: { [PACK]: "running" } });
+    const c = await hostCtx({ host: false }, { viewport: { width: 390, height: 844 } });
+    try {
+      const p = await c.newPage();
+      p.on("pageerror", e => errors.push(e.message));
+      await p.goto(ORIGIN + "#/inst/" + encodeURIComponent(PACK) + "/music"); await p.waitForTimeout(1200);
+      await p.click("#mu-adv-head"); await p.waitForTimeout(200);
+      const w = await p.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth,
+        wide: [...document.querySelectorAll("#tab-body *")].filter(e => e.getClientRects().length && e.getBoundingClientRect().right > innerWidth + 1).map(e => e.id || e.className).slice(0, 5) }));
+      assert(w.sw <= w.cw && w.wide.length === 0, "横向溢出：" + JSON.stringify(w));
+    } finally { await c.close(); await resetMusic(); }
+  });
+  // ==================== 第五阶段结束 ====================
+
   await run("全程无页面报错", async () => { assert(errors.length === 0, errors.slice(0, 3).join(" | ")); });
 
   await browser.close();

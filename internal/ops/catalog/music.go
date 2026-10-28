@@ -82,7 +82,7 @@ func (c *cat) musicOps() {
 		Desc: "实例「音乐共享」页的内容：核心支不支持、SVC 和桥接模组装没装、语音端口、远程语音隧道和 voice_host、" +
 			"谁连上了语音（谁没装 SVC、谁的版本不兼容）、这台电脑能怎么录、正在不在广播、上一次广播怎么结束的、发给好友的说明。不改任何东西。",
 		Params: withInst(nil),
-		Run: func(_ context.Context, _ ops.Caller, a ops.Args) (any, error) {
+		Run: func(_ context.Context, caller ops.Caller, a ops.Args) (any, error) {
 			p, err := bind[instArgs](a)
 			if err != nil {
 				return nil, err
@@ -91,6 +91,7 @@ func (c *cat) musicOps() {
 			if err != nil {
 				return nil, musicErr(err)
 			}
+			st.Local = caller.Local
 			return st, nil
 		},
 	})

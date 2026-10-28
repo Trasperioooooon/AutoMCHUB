@@ -46,6 +46,8 @@ type Status struct {
 	Last            *EndView       `json:"last,omitempty"`      // 上一次广播是怎么结束的
 	Restart         []string       `json:"restart,omitempty"`   // 要重启服务器才生效的改动
 	Guide           string         `json:"guide"`               // 发给好友的说明
+	// Local 看的人在不在这台电脑前（操作层按调用方填）：不在时界面上不列音源、不给开始广播
+	Local bool `json:"local"`
 }
 
 // Status 汇总实例「音乐共享」页要显示的东西：检查清单、广播状态、听众。只读，不改任何文件。

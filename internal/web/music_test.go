@@ -54,8 +54,9 @@ func TestMusicRoutes(t *testing.T) {
 		}
 	}
 
-	var st struct {
+	type status struct {
 		Data struct {
+			Local           bool   `json:"local"`
 			Supported       bool   `json:"supported"`
 			Reason          string `json:"reason"`
 			SystemConfirmed bool   `json:"systemConfirmed"`
@@ -66,11 +67,15 @@ func TestMusicRoutes(t *testing.T) {
 			Guide string `json:"guide"`
 		} `json:"data"`
 	}
+	var st, lan status
 	if err := json.Unmarshal(e.call(t, "GET", ip+"/music", "", 200).Body.Bytes(), &st); err != nil {
 		t.Fatal(err)
 	}
-	if d := st.Data; d.Supported || d.Reason == "" || !d.SystemConfirmed || d.Settings.Volume != 80 || d.Settings.Exclude != "房主" || d.Guide == "" {
+	if d := st.Data; !d.Local || d.Supported || d.Reason == "" || !d.SystemConfirmed || d.Settings.Volume != 80 || d.Settings.Exclude != "房主" || d.Guide == "" {
 		t.Errorf("状态：%+v", d)
+	}
+	if err := json.Unmarshal(e.call(t, "GET", ip+"/music", "", 200, fromLAN).Body.Bytes(), &lan); err != nil || lan.Data.Local {
+		t.Errorf("局域网看到的状态应标明不在本机：%+v %v", lan.Data, err)
 	}
 
 	var log struct {

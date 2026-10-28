@@ -59,6 +59,7 @@ function newState(ui) {
     empty: false,
     taskStage: 2,
     ai: newAIState(),
+    music: newMusicState(), // 第五阶段
   };
   state.props = catalog(ui).map(p => ({ key: p.key, value: p.key === "motd" ? "§a生存服 §7· §e一起来玩！" : String(p.def ?? "") }));
   return state;
@@ -279,6 +280,167 @@ async function aiHandler(state, req, res, p, m) {
   return err(res, 404, "not found");
 }
 
+// ==================== 第五阶段：音乐共享（同 /api/instances/{name}/music*、/api/music/*，以及隧道的「用途」）====================
+// 数据形状照抄后端（musicshare.Status、SourcesView、InstallResult、VoiceHostChange）；广播、检查都是假的。
+// 场景用 /__mock/state 的 music 字段切换：{ reset, cap: "win11" | "win10", local, systemConfirmed, voiceTunnel, inst: { 名称: {…} } }
+const MUSIC_CORES = ["neoforge", "forge", "mohist"];
+const MUSIC_CAPS = {
+  win11: { os: "Windows 11（10.0.26300）", mode: "process", warn: false },
+  win10: { os: "Windows 10（10.0.19045）", mode: "system", warn: true },
+};
+const MUSIC_WARNING = "这台电脑只能录整机的声音：游戏声音、语音聊天（好友说的话）也会一起播出去，好友会听到自己说话的回声。确认之后才能开始";
+const MUSIC_SOURCES = [
+  { pid: 4242, exe: "cloudmusic.exe", name: "网易云音乐", playing: true, peak: 0.55, devices: ["扬声器（Realtek）"] },
+  { pid: 5120, exe: "QQMusic.exe", name: "QQ音乐", playing: false, peak: 0 },
+  { pid: 7788, exe: "msedge.exe", name: "Microsoft Edge", playing: true, peak: 0.18, devices: ["扬声器（Realtek）"] },
+];
+const MUSIC_DEVICES = [{ id: "{dev-1}", name: "扬声器（Realtek）", default: true }, { id: "{dev-2}", name: "CABLE Input（虚拟声卡）", default: false }];
+const MUSIC_LOCAL_START = "音乐广播录的是这台电脑的声音，只能在这台电脑上开始";
+const VOICE_TUNNEL = { id: "t-voice", name: "语音线", provider: "natfrp", purpose: "voice", running: true, boundInstance: "机械动力整合包", autoStart: true, publicAddr: "frp-abc.natfrp.cloud:34567", lastError: "", localPort: 0 };
+function newMusicState() {
+  return {
+    cap: "win11", local: true, systemConfirmed: false, device: "",
+    // 每台 Forge 系服务器的情况：SVC 装没装、桥接模组装的哪种（""、main、javafml）、SVC 的配置、设置、要重启才生效的改动
+    inst: { "机械动力整合包": { svc: true, svcVersion: "1.20.1-2.5.24", bridge: "", voiceFound: true, voicePort: 24454, voiceHost: "", exclude: "", volume: 100, mode: "", exe: "", restart: [], last: null } },
+    broadcast: null, // { inst, mode, pid, exe, device, since }
+    tunnelBody: null, // 最近一次 POST /api/tunnels 的请求体
+  };
+}
+function musicInst(ms, name) {
+  return ms.inst[name] || (ms.inst[name] = { svc: false, svcVersion: "", bridge: "", voiceFound: false, voicePort: 24454, voiceHost: "", exclude: "", volume: 100, mode: "", exe: "", restart: [], last: null });
+}
+function musicMockState(state, b) {
+  if (b.reset) state.music = newMusicState();
+  const ms = state.music;
+  for (const k of ["cap", "local", "systemConfirmed"]) if (k in b) ms[k] = b[k];
+  if (b.inst) for (const [n, v] of Object.entries(b.inst)) Object.assign(musicInst(ms, n), v);
+  state.tunnels = state.tunnels.filter(t => t.id !== VOICE_TUNNEL.id);
+  if (b.voiceTunnel) state.tunnels.push({ ...VOICE_TUNNEL });
+}
+// 服务器不在运行了：广播跟着停（同 musicshare 的收尾）
+function musicSync(state) {
+  const ms = state.music, b = ms.broadcast;
+  if (!b) return;
+  const i = state.instances.find(x => x.name === b.inst);
+  if (!i || i.status !== "running") { ms.broadcast = null; musicInst(ms, b.inst).last = { reason: i && i.status === "stopping" ? "服务器正在停止" : "服务器已停止", at: new Date().toISOString(), error: false }; }
+}
+function musicStatus(state, i) {
+  const ms = state.music, mi = musicInst(ms, i.name), b = ms.broadcast;
+  const supported = MUSIC_CORES.includes(i.core);
+  const vt = state.tunnels.filter(t => t.purpose === "voice" && t.boundInstance === i.name)
+    .map(t => ({ id: t.id, name: t.name, provider: t.provider, running: t.running, autoStart: t.autoStart, publicAddr: t.publicAddr || undefined, lastError: t.lastError || undefined }));
+  const addr = (vt.find(t => t.publicAddr) || {}).publicAddr || "";
+  const rstate = !vt.length ? "none" : !addr ? "waiting" : !mi.voiceFound ? "pending" : mi.voiceHost === addr ? "same" : !mi.voiceHost ? "pending" : "differ";
+  const online = i.status === "running" ? ["Steve", "Alex", "Notch_CN"] : [];
+  const ex = mi.exclude.split(/[,，;；\s]+/).filter(Boolean).map(s => s.toLowerCase());
+  const voice = online.filter(n => n !== "Notch_CN");
+  let view;
+  if (b && b.inst === i.name) {
+    const dev = MUSIC_DEVICES.find(d => d.id === b.device) || MUSIC_DEVICES[0];
+    view = { inst: i.name, phase: "live", since: b.since, mode: b.mode, source: b.mode === "process" ? `${b.exe}（PID ${b.pid}）` : "整机声音：" + dev.name,
+      volume: mi.volume, listeners: voice.filter(n => !ex.includes(n.toLowerCase())).length, buffered: 6, rttMs: 1.8, sent: 1234, dropped: 0, silent: 12, modDropped: 0, underruns: 0,
+      warning: b.mode === "system" ? "整机录音：游戏声音、语音聊天也会一起播出去" : undefined, input: "float32 2 声道 48000Hz" };
+  }
+  return {
+    inst: i.name, supported, reason: supported ? undefined : "音乐共享要用 Simple Voice Chat 和桥接模组，只支持 NeoForge、Forge 服",
+    note: i.core === "mohist" ? "Mohist 上还没测过音乐共享" : undefined, serverStatus: i.status,
+    svc: mi.svc ? { installed: true, file: `voicechat-forge-${mi.svcVersion}.jar`, version: mi.svcVersion, loader: "forge" } : { installed: false },
+    bridge: { installed: !!mi.bridge, file: mi.bridge ? `minedeck-voicebridge${mi.bridge === "javafml" ? "-javafml" : ""}-0.2.0.jar` : undefined, variant: mi.bridge || undefined,
+      current: !!mi.bridge, version: "0.2.0", config: mi.bridge ? { enabled: true, port: 24470, exclude: mi.exclude, selftest: false, bypassGroupIsolation: false } : undefined,
+      loaded: i.status === "running" && mi.bridge && !mi.restart.includes("桥接模组") ? true : undefined },
+    voice: { found: mi.voiceFound, port: mi.voicePort, voiceHost: mi.voiceHost, path: "config/voicechat/voicechat-server.properties" },
+    voicePort: i.status === "running" && mi.voiceFound ? mi.voicePort : undefined,
+    remote: { tunnels: vt, addr: addr || undefined, state: rstate, managed: !!addr && mi.voiceHost === addr },
+    players: { known: true, voice: voice.filter(n => !ex.includes(n.toLowerCase())), excluded: voice.filter(n => ex.includes(n.toLowerCase())), noVoice: online.includes("Notch_CN") ? ["Notch_CN"] : [], incompatible: [] },
+    capability: { ...MUSIC_CAPS[ms.cap], warning: MUSIC_WARNING }, systemConfirmed: ms.systemConfirmed,
+    settings: { exclude: mi.exclude, volume: mi.volume, mode: mi.mode || undefined, exe: mi.exe || undefined },
+    broadcast: view, elsewhere: b && b.inst !== i.name ? b.inst : undefined, last: !view && mi.last ? mi.last : undefined,
+    restart: mi.restart.length ? mi.restart : undefined, local: ms.local,
+    guide: "服务器开了「MineDeck 音乐共享」：房主电脑上放的歌，会通过 Simple Voice Chat（简单语音聊天）播给大家。\n" +
+      (mi.svc ? `1. 客户端装 Simple Voice Chat，和服务器同一个版本最稳妥：服务器装的是 ${mi.svcVersion}。\n` : "1. 客户端装 Simple Voice Chat，版本和服务器的一样（问房主要）。\n") +
+      "2. 进服后按 V 打开语音菜单，点「调整音量」，找到「MineDeck 音乐共享」：拉到 0 就只静音音乐，不影响别人说话。" +
+      (mi.voiceHost ? `\n3. 远程连服的朋友：语音走 ${mi.voiceHost}，不用另外设置；连不上语音时告诉房主。` : ""),
+  };
+}
+async function musicHandler(state, req, res, p, m, seg) {
+  const ms = state.music;
+  musicSync(state);
+  if (p === "/api/tunnels" && m === "POST") { ms.tunnelBody = await readBody(req); return ok(res, { id: "t9" }); } // 隧道表单带上了用途、协议没有
+  if (p === "/api/music/sources" && m === "GET") {
+    if (!ms.local) return err(res, 403, MUSIC_LOCAL_START);
+    return ok(res, { capability: { ...MUSIC_CAPS[ms.cap], warning: MUSIC_WARNING }, systemConfirmed: ms.systemConfirmed, sources: MUSIC_SOURCES, devices: MUSIC_DEVICES, device: ms.device });
+  }
+  if (p === "/api/music/confirm-system" && m === "POST") {
+    if (!ms.local) return err(res, 403, "整机录音的提醒要在这台电脑上确认");
+    ms.systemConfirmed = true;
+    return ok(res, "ok");
+  }
+  const name = seg[3], sub = seg[5] || "";
+  const i = state.instances.find(x => x.name === name);
+  if (!i) return err(res, 404, "实例不存在: " + name);
+  const mi = musicInst(ms, name);
+  const supported = MUSIC_CORES.includes(i.core);
+  const b = await readBody(req);
+  if (!sub && m === "GET") return ok(res, musicStatus(state, i));
+  if (sub === "start" && m === "POST") {
+    if (!ms.local) return err(res, 403, MUSIC_LOCAL_START);
+    if (!["process", "system"].includes(b.mode)) return err(res, 400, "参数 mode 只能是 process、system 之一");
+    if (ms.broadcast) return err(res, 409, ms.broadcast.inst === name ? `已经在给「${name}」广播了` : `正在给「${ms.broadcast.inst}」广播：同一时间只能有一个广播，先停掉它`);
+    if (!supported) return err(res, 400, "音乐共享要用 Simple Voice Chat 和桥接模组，只支持 NeoForge、Forge 服");
+    if (i.status !== "running") return err(res, 400, "服务器没在运行：先开服，等它启动完成再开始广播");
+    if (!mi.bridge) return err(res, 400, "还没装桥接模组：先在检查清单里安装，然后重启服务器");
+    if (mi.restart.includes("桥接模组")) return err(res, 400, "桥接模组装好以后还没重启服务器：重启后才能广播");
+    if (!mi.svc) return err(res, 400, "mods 里没有 Simple Voice Chat：音乐要靠它推给玩家");
+    if (b.mode === "process" && !b.pid) return err(res, 400, "先在列表里选一个正在出声的程序");
+    if (b.mode === "system" && !ms.systemConfirmed) return err(res, 409, MUSIC_WARNING);
+    if (b.mode === "system" && b.device) ms.device = b.device;
+    ms.broadcast = { inst: name, mode: b.mode, pid: b.pid || 0, exe: b.exe || "", device: b.device || ms.device, since: new Date().toISOString() };
+    mi.mode = b.mode; if (b.exe) mi.exe = b.exe; mi.last = null;
+    return ok(res, musicStatus(state, i).broadcast);
+  }
+  if (sub === "stop" && m === "POST") {
+    if (!ms.broadcast || ms.broadcast.inst !== name) return err(res, 400, `没在给「${name}」广播`);
+    ms.broadcast = null;
+    mi.last = { reason: "用户停止", at: new Date().toISOString(), error: false };
+    return ok(res, "ok");
+  }
+  if (sub === "settings" && m === "PUT") {
+    if ("volume" in b && !(b.volume >= 0 && b.volume <= 200)) return err(res, 400, "参数 volume 应在 0 到 200 之间");
+    if ("exclude" in b) {
+      const names = String(b.exclude).split(/[,，;；\s]+/).filter(Boolean);
+      const bad = names.find(n => /[\\=#!:]/.test(n) || [...n].length > 36);
+      if (bad) return err(res, 400, `「${bad}」里有不能用的字符`);
+      mi.exclude = names.join(",");
+    }
+    if ("volume" in b) mi.volume = b.volume;
+    return ok(res, "ok");
+  }
+  if (sub === "install" && m === "POST") {
+    if (!supported) return err(res, 400, "音乐共享要用 Simple Voice Chat 和桥接模组，只支持 NeoForge、Forge 服");
+    if (!mi.svc) return err(res, 400, "先装 Simple Voice Chat：桥接模组声明了必须有它，没有的话服务器会起不来");
+    const v = b.variant || "main", running = i.status !== "stopped";
+    if (running && mi.bridge && mi.bridge !== v) return err(res, 409, "服务器运行中不能替换已经装着的桥接模组（文件被服务器占用）：先停服再安装");
+    const removed = mi.bridge && mi.bridge !== v ? [`minedeck-voicebridge${mi.bridge === "javafml" ? "-javafml" : ""}-0.2.0.jar`] : undefined;
+    const noop = mi.bridge === v;
+    mi.bridge = v;
+    if (running && !noop && !mi.restart.includes("桥接模组")) mi.restart.push("桥接模组");
+    return ok(res, { installed: true, file: `minedeck-voicebridge${v === "javafml" ? "-javafml" : ""}-0.2.0.jar`, variant: v, current: true, version: "0.2.0", removed, restart: running && !noop });
+  }
+  if (sub === "voicehost" && m === "PUT") {
+    const st = musicStatus(state, i);
+    let value = String(b.value || "").trim();
+    if (b.fromTunnel) { value = st.remote.addr || ""; if (!value) return err(res, 400, "语音隧道还没拿到公网地址：先启动隧道，或者手动填写语音地址"); }
+    if (value && !/^[A-Za-z0-9.-]+(:\d{1,5})?$/.test(value)) return err(res, 400, `语音地址不对：${value}（写成 域名:端口 或 IP:端口）`);
+    if (!mi.voiceFound) return err(res, 400, "SVC 的配置还没生成：先开一次服（SVC 第一次启动时生成 config/voicechat/voicechat-server.properties）");
+    const before = mi.voiceHost, changed = before !== value, restart = changed && i.status !== "stopped";
+    mi.voiceHost = value;
+    if (restart && !mi.restart.includes("voice_host")) mi.restart.push("voice_host");
+    return ok(res, { before, after: value, changed, restart });
+  }
+  return err(res, 404, "not found");
+}
+// ==================== 第五阶段结束 ====================
+
 const VERSIONS = ["26.2", "26.1", "1.21.4", "1.21.3", "1.21.1", "1.21", "1.20.6", "1.20.4", "1.20.2", "1.20.1", "1.19.4", "1.19.2", "1.18.2", "1.17.1", "1.16.5", "1.12.2"];
 const SNAPS = ["26.3-snapshot-2", "26.3-snapshot-1", "26.2-rc1"];
 
@@ -319,6 +481,7 @@ function handler(state, ui, portOf) {
     //   cfKey: 已存的 CurseForge API Key（空串 = 未设置）；cfKeyBroken: true 模拟「Key 解不开」（换了电脑或 Windows 用户）
     //   credBroken: 隧道编号（如 "t2"），模拟这条隧道的凭据解不开；空串还原
     //   ai: { reset: true 回到没配置, local: false 模拟局域网打开（只能看）, keyBroken, testFail, priceUpdated, 以及 preset/baseUrl/model/key 等直接写入 }
+    //   music（第五阶段）: { reset, cap: "win11" | "win10", local, systemConfirmed, voiceTunnel: true 多一条语音隧道, inst: { 名称: { svc, bridge, voiceHost, … } } }
     if (p === "/__mock/state" && m === "POST") {
       const b = await readBody(req);
       if ("empty" in b) state.empty = !!b.empty;
@@ -331,6 +494,7 @@ function handler(state, ui, portOf) {
       if ("cfKeyBroken" in b) state.cfKeyBroken = !!b.cfKeyBroken;
       if ("credBroken" in b) for (const t of state.tunnels) t.credBroken = t.id === b.credBroken;
       if (b.ai) { if (b.ai.reset) state.ai = newAIState(); const { reset, ...rest } = b.ai; Object.assign(state.ai, rest); }
+      if (b.music) musicMockState(state, b.music); // 第五阶段
       if (b.status) for (const [n, st] of Object.entries(b.status)) { const i = state.instances.find(x => x.name === n); if (i) { i.status = st; i.uptimeSec = st === "stopped" ? 0 : st === "starting" ? 9 : i.uptimeSec; i.onlineCount = st === "running" ? i.onlineCount : 0; } }
       return ok(res, state);
     }
@@ -353,6 +517,7 @@ function handler(state, ui, portOf) {
         return ok(res, OPLOG.filter(r => (!q.get("inst") || r.inst === q.get("inst")) && (!q.get("src") || r.src === q.get("src")) && (!q.get("op") || r.op.startsWith(q.get("op")))).slice(0, lim));
       }
       if (p.startsWith("/api/ai/")) return aiHandler(state, req, res, p, m);
+      if (p.startsWith("/api/music/") || (seg[2] === "instances" && seg[4] === "music") || (p === "/api/tunnels" && m === "POST")) return musicHandler(state, req, res, p, m, seg); // 第五阶段
       if (p === "/api/cores") return ok(res, CORES);
       if (p === "/api/config" && m === "PUT") {
         const b = await readBody(req);

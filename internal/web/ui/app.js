@@ -1491,6 +1491,7 @@ async function renderDetail(name, tab = "console") {
       if (!isProxy) tabs.push(["players", "玩家"], ["backups", "备份"]);
       tabs.push(["tasks", "定时任务"]);
       if (info.core !== "vanilla") tabs.push(["res", "资源"]);
+      if (window.MDMusic && MDMusic.applies(info.core)) tabs.push(["music", "音乐共享"]); // 第五阶段，见 music.js
       if (!isProxy) tabs.push(["common", "常用设置"], ["raw", "全部配置"]);
       tabs.push(["jvm", "内存 / 启动"]);
       const base = "#/inst/" + encodeURIComponent(name) + "/";
@@ -2003,6 +2004,9 @@ async function renderDetail(name, tab = "console") {
         toast("已保存 server.properties" + (data.running ? "（重启后生效）" : ""));
       });
 
+  } else if (tab === "music" && window.MDMusic) { // 音乐共享（第五阶段）：整块在 music.js
+    await MDMusic.render(body, info, gen, refreshHead);
+
   } else if (tab === "jvm") {
     const appInfo = await api("/api/app").catch(() => ({ ramMb: 8192, availRamMb: 4096 }));
     const maxMem = Math.max(2048, appInfo.ramMb - 2048);
@@ -2110,6 +2114,7 @@ async function renderTunnels() {
   };
   provSel.onchange = applyFields;
   applyFields();
+  if (window.MDMusic) MDMusic.tunnelForm(insts, provSel); // 第五阶段：用途（游戏 / 语音）、自定义 frps 的协议
   $("#tn-toggle").onclick = () => {
     const f = $("#tn-form");
     f.hidden = !f.hidden;
@@ -2130,7 +2135,7 @@ async function renderTunnels() {
       <div class="java-row" style="max-width:980px">
         ${stPill(t.running ? "running" : "stopped")}
         <b style="min-width:110px">${esc(t.name)}</b>
-        <span class="badge core">${esc(PROV_NAMES[t.provider] || t.provider)}</span>
+        <span class="badge core">${esc(PROV_NAMES[t.provider] || t.provider)}</span>${window.MDMusic ? MDMusic.tunnelBadge(t) : ""}
         ${t.boundInstance ? `<span class="badge">${icon("link")} ${esc(t.boundInstance)}${t.autoStart ? " · 跟随" : ""}</span>` : ""}
         ${t.credBroken ? `<span class="jp" style="color:var(--danger-text);display:inline-flex;align-items:center;gap:5px" title="凭据加密绑定当前电脑和 Windows 用户，换了就解不开">${icon("warn")} 凭据无法解开，请删除后重新添加</span>`
           : t.publicAddr ? `<span class="jv" style="color:var(--accent-text);font-family:var(--mono)">${esc(t.publicAddr)}</span>
@@ -2199,6 +2204,7 @@ async function renderTunnels() {
       localPort: +$("#tn-lport").value || 25565,
       boundInstance: $("#tn-bound").value,
       autoStart: $("#tn-auto").checked,
+      ...(window.MDMusic ? MDMusic.tunnelExtra() : {}), // 第五阶段：purpose、proto
     };
     try {
       await api("/api/tunnels", { method: "POST", body });
