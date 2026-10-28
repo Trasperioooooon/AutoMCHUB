@@ -99,6 +99,20 @@ tools/ui-dev/  前端仿真后端 + 交互回归测试 + 截图（Node + Playwri
 
 *实际以 Mojang 版本元数据的 `javaVersion.majorVersion` 为准，上表仅为离线兜底。*
 
+## 🔤 第三方字体与许可
+
+界面内嵌三款开源字体（经 `go:embed` 打包进 exe，运行时不联网下载），均为 [SIL Open Font License 1.1](https://openfontlicense.org/)：
+
+| 字体 | 用途 | 版权 | 来源 |
+|---|---|---|---|
+| **Geist** | 西文正文、数字 | Copyright 2024 The Geist Project Authors | Vercel 官方 npm 包 `geist@1.8.2`（[vercel/geist-font](https://github.com/vercel/geist-font)） |
+| **Geist Mono** | 控制台、路径、端口等等宽文字 | 同上 | 同上 |
+| **Noto Sans SC** | 中文 | © 2014-2021 Adobe，保留字体名「Source」 | [google/fonts](https://github.com/google/fonts) 的 `ofl/notosanssc`（与思源黑体同源） |
+
+- 三款字体都是子集：西文保留拉丁字符与常用符号，中文保留 GB2312 全部 6763 个汉字、GB2312 符号区与界面用到的全部字符；字重轴限制在 400–600。子集之外的生僻字由系统字体（微软雅黑等）补上。
+- 子集化属于 OFL 允许的修改。子集保留了字体内的版权与许可信息，许可原文随字体放在 [`internal/web/ui/fonts/`](internal/web/ui/fonts/)（`OFL-Geist.txt`、`OFL-NotoSansSC.txt`）。字体不单独出售；修改后的字体名不含保留字体名「Source」。
+- 子集由 [`tools/fonts/build_fonts.py`](tools/fonts/) 从固定版本的源文件生成，来源、校验和与字符集构成见 [`tools/fonts/README.md`](tools/fonts/README.md)。
+
 ## ⚠️ 已知边界
 
 - Paper / Purpur 官方 API 无国内镜像（Cloudflare 直连一般可用）；Forge/NeoForge 安装器的部分依赖库下载仍需可访问官方 maven（已用 `--mirror` + 重试缓解）。

@@ -9,8 +9,9 @@
    ========================================================================== */
 
 :root {
-  --font: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
-  --mono: "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace;
+  /* 内嵌字体（fonts/fonts.css，tools/fonts 生成）：西文 Geist → 中文 Noto Sans SC → 系统字体（子集外的生僻字逐字回退） */
+  --font: "MD Geist", "MD Noto Sans SC", "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  --mono: "MD Geist Mono", "MD Noto Sans SC", "Cascadia Mono", Consolas, "Microsoft YaHei UI", "SF Mono", Menlo, monospace;
   /* 动效：统一时长 / 缓动（hover ≥ --dur-2） */
   --dur-1: 90ms; --dur-2: 160ms; --dur-3: 240ms;
   --ease-out: cubic-bezier(.22, 1, .36, 1);
@@ -49,6 +50,7 @@ body {
   font-size: 14px; line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  font-synthesis-weight: none; /* 内嵌字体只有 400–600：请求更粗时取 600，不做伪粗体 */
   overflow: hidden;
 }
 /* 正文里的链接带下划线（中性配色方案里强调色接近正文色，靠下划线区分） */

@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"mime"
 	"net"
 	"net/http"
 	"os"
@@ -69,6 +70,8 @@ func New(mgr *inst.Manager, tun *tunnel.Manager, port int) http.Handler {
 	sub, _ := fs.Sub(uiFS, "ui")
 	fileServer := http.FileServer(http.FS(sub))
 	mux.Handle("GET /", noCache(fileServer))
+	// 内嵌字体约 1.9 MB：带 ETag 可缓存，局域网手机再次打开只需一次 304
+	mux.Handle("GET /fonts/", revalidate(sub, fileServer))
 	mux.HandleFunc("GET /bg/{name}", s.handleBGImage) // 用户壁纸（程序旁 bg/ 目录），免 token 供 CSS url() 引用
 
 	mux.HandleFunc("GET /api/app", s.handleApp)
@@ -217,6 +220,35 @@ func splitHostPort(hp string) (string, string, error) {
 func noCache(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// Go 内置的扩展名表没有 .woff2（Windows 上还会去查注册表，结果因机器而异），显式登记。
+func init() { _ = mime.AddExtensionType(".woff2", "font/woff2") }
+
+// revalidate 给体积较大的内嵌静态文件（字体）加强 ETag（内容的 SHA-256）与 Cache-Control: no-cache：
+// 浏览器可以缓存，但每次使用前先带 If-None-Match 询问，内容没变就回 304，不重新下载；
+// 换了版本 ETag 随内容变化，不会用到旧字体。304 由 http.FileServer 按已设置的 ETag 头自动处理。
+func revalidate(fsys fs.FS, next http.Handler) http.Handler {
+	etags := map[string]string{}
+	_ = fs.WalkDir(fsys, "fonts", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if b, err := fs.ReadFile(fsys, p); err == nil {
+			sum := sha256.Sum256(b)
+			etags["/"+p] = `"` + hex.EncodeToString(sum[:16]) + `"`
+		}
+		return nil
+	})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if tag, ok := etags[r.URL.Path]; ok {
+			w.Header().Set("ETag", tag)
+			w.Header().Set("Cache-Control", "no-cache")
+		} else {
+			w.Header().Set("Cache-Control", "no-store")
+		}
 		next.ServeHTTP(w, r)
 	})
 }

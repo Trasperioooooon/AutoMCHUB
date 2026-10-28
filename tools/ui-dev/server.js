@@ -112,8 +112,8 @@ function handler(state, ui, portOf) {
       const f = p === "/" ? "index.html" : p.slice(1);
       const fp = path.resolve(ui, path.normalize(f));
       if (!fp.startsWith(ui + path.sep) || !fs.existsSync(fp) || !fs.statSync(fp).isFile()) { res.writeHead(404); return res.end("not found"); }
-      const type = { ".html": "text/html", ".js": "application/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png" }[path.extname(fp)] || "application/octet-stream";
-      res.writeHead(200, { "Content-Type": type + "; charset=utf-8", "Cache-Control": "no-store" });
+      const type = { ".html": "text/html", ".js": "application/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".txt": "text/plain", ".woff2": "font/woff2" }[path.extname(fp)] || "application/octet-stream";
+      res.writeHead(200, { "Content-Type": type + (/^(text|application)\//.test(type) ? "; charset=utf-8" : ""), "Cache-Control": "no-store" });
       return res.end(fs.readFileSync(fp));
     }
     const insts = () => state.empty ? [] : state.instances;
