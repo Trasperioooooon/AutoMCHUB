@@ -63,6 +63,15 @@ function newState(ui) {
   return state;
 }
 
+// 操作记录（同 GET /api/ops/log：新的在前，Key、密码、凭据写成 ***）
+const OPLOG = [
+  { t: "2026-10-26T04:00:12+08:00", op: "instance.backup.create", src: "schedule", actor: "定时任务", inst: "生存服 · 朋友", args: { at: "04:00", label: "定时" }, ok: true, ms: 8120 },
+  { t: "2026-10-25T22:10:03+08:00", op: "instance.whitelist.add", src: "lan", actor: "192.168.1.23", inst: "生存服 · 朋友", args: { player: "Alex" }, ok: true, ms: 4 },
+  { t: "2026-10-25T21:58:40+08:00", op: "instance.props.set", src: "ui", actor: "本机", inst: "生存服 · 朋友", args: { pairs: [{ key: "max-players", value: "10" }] }, ok: true, ms: 3 },
+  { t: "2026-10-25T21:30:00+08:00", op: "instance.start", src: "schedule", actor: "崩溃自动重启", inst: "机械动力整合包", args: { attempt: 1 }, ok: false, err: "Java 运行时缺失", ms: 1 },
+  { t: "2026-10-25T20:02:11+08:00", op: "app.config.set", src: "ui", actor: "本机", args: { cfApiKey: "***" }, ok: true, ms: 2 },
+];
+
 const VERSIONS = ["26.2", "26.1", "1.21.4", "1.21.3", "1.21.1", "1.21", "1.20.6", "1.20.4", "1.20.2", "1.20.1", "1.19.4", "1.19.2", "1.18.2", "1.17.1", "1.16.5", "1.12.2"];
 const SNAPS = ["26.3-snapshot-2", "26.3-snapshot-1", "26.2-rc1"];
 
@@ -130,6 +139,10 @@ function handler(state, ui, portOf) {
     try {
       if (p === "/api/app") return ok(res, { version: "2.6.1", base: "D:\\MineDeck", ramMb: 16384, availRamMb: 9216, port: portOf(), serversRoot: "D:\\MineDeck\\servers", backupsRoot: "D:\\MineDeck\\backups", config: state.config, lanSet: false, cfKeySet: !!state.cfKey && !state.cfKeyBroken, cfKeyBroken: state.cfKeyBroken, autoStart: state.autoStart, ips: ["172.22.48.1", "192.168.1.23", "10.0.0.5"] });
       if (p === "/api/bg") return ok(res, { images: [] });
+      if (p === "/api/ops/log") {
+        const q = u.searchParams, lim = Math.min(+q.get("limit") || 100, 1000);
+        return ok(res, OPLOG.filter(r => (!q.get("inst") || r.inst === q.get("inst")) && (!q.get("src") || r.src === q.get("src")) && (!q.get("op") || r.op.startsWith(q.get("op")))).slice(0, lim));
+      }
       if (p === "/api/cores") return ok(res, CORES);
       if (p === "/api/config" && m === "PUT") {
         const b = await readBody(req);
