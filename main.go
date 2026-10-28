@@ -20,6 +20,7 @@ import (
 	"minedeck/internal/autostart"
 	"minedeck/internal/inst"
 	"minedeck/internal/java"
+	"minedeck/internal/musicshare"
 	"minedeck/internal/ops/catalog"
 	"minedeck/internal/procutil"
 	"minedeck/internal/tunnel"
@@ -112,6 +113,7 @@ func main() {
 	}
 
 	log.Println("正在停止所有运行中的服务器与隧道...")
+	musicshare.ShutdownAll("MineDeck 已退出") // 音乐共享（第五阶段）：先停广播（给桥接模组发 END、停采集），再关服
 	tun.StopAll()
 	mgr.ShutdownAll(30 * time.Second)
 }

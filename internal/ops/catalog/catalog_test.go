@@ -64,6 +64,15 @@ func TestLevelsFollowDesign(t *testing.T) {
 			// AI 设置（第二阶段）：AI 永远看不到、也改不了自己的设置和 Key（§3.3）
 			"ai.settings.get", "ai.provider.set", "ai.models.list", "ai.test", "ai.quota.set", "ai.prices.set", "ai.prices.refresh"},
 	}
+
+	// 音乐共享（第五阶段）：开始、停止广播这类操作只能由人来（§8.6）
+	for level, names := range map[ops.Level][]string{
+		ops.Read: {"music.status"}, ops.Write: {"music.bridge.install", "music.voicehost.set"},
+		ops.HumanOnly: {"music.sources", "music.start", "music.stop", "music.settings.set", "music.system.confirm"},
+	} {
+		want[level] = append(want[level], names...)
+	}
+
 	n := 0
 	for level, names := range want {
 		for _, name := range names {
@@ -97,7 +106,8 @@ func TestLevelsFollowDesign(t *testing.T) {
 	}
 	slices.Sort(local)
 	if strings.Join(local, ",") != "ai.models.list,ai.prices.refresh,ai.prices.set,ai.provider.set,ai.quota.set,ai.test,"+
-		"host.openpath,host.pickdir,instance.opendir,java.add" {
+		"host.openpath,host.pickdir,instance.opendir,java.add"+
+		",music.sources,music.start,music.system.confirm" { // 第五阶段
 		t.Errorf("仅本机的操作：%v", local)
 	}
 }
@@ -110,8 +120,8 @@ func TestAIToolLists(t *testing.T) {
 			t.Errorf("助手的工具清单里有仅人工的操作 %s", op.Name)
 		}
 	}
-	if n := len(reg.Available(ops.Caller{Source: ops.SrcAssistant, Local: true})); n != 16+10+10 {
-		t.Errorf("助手能用 %d 个操作，应为读 16 + 写 10 + 危险 10", n)
+	if n := len(reg.Available(ops.Caller{Source: ops.SrcAssistant, Local: true})); n != 16+10+10+3 { // +3：音乐共享（第五阶段）的读 1 + 写 2
+		t.Errorf("助手能用 %d 个操作，应为读 16 + 写 10 + 危险 10 + 音乐共享 3", n)
 	}
 	if l := reg.Available(ops.Caller{Source: ops.SrcGameChat, Actor: "Steve"}); len(l) != 0 {
 		t.Errorf("游戏内 AI 不该有工具：%v", l)

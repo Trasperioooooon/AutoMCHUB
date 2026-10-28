@@ -307,7 +307,7 @@ func (b *broadcast) stop(reason string, kind int) {
 		s.mu.Unlock()
 		s.log(b.inst, "停止广播（%s）", reason)
 		if kind != endUser && s.d.OnAutoStop != nil {
-			s.d.OnAutoStop(b.inst, reason)
+			s.d.OnAutoStop(b.inst, reason, kind == endFail)
 		}
 		close(b.done)
 	})

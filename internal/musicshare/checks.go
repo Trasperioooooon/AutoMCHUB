@@ -506,45 +506,68 @@ type InstallResult struct {
 	Restart bool     `json:"restart"` // 服务器运行中装的：重启后生效
 }
 
-// InstallPlan 安装前看一眼：要删掉哪些旧版本，服务器在不在运行（给操作层的预览用）。
-func (s *Service) InstallPlan(name string, v bridge.Variant) (bridge.JarStatus, InstInfo, error) {
-	info, err := s.d.Instances.Info(name)
-	if err != nil {
-		return bridge.JarStatus{}, info, &Error{Code: 404, Err: err}
-	}
-	if ok, why := supportOf(info.Core, info.MC); !ok {
-		return bridge.JarStatus{}, info, errorf(400, "%s", why)
-	}
-	if v != bridge.VariantMain && v != bridge.VariantFallback {
-		return bridge.JarStatus{}, info, errorf(400, "加载方式只能是 main（默认）或 javafml（备用）")
-	}
-	st, err := bridge.InspectJar(modsDir(info.Dir))
-	if err != nil {
-		return st, info, errorf(500, "读 mods 目录失败：%v", err)
-	}
-	return st, info, nil
+// InstallPreview 装之前算出来的：现在装着什么、要装哪个文件、要删掉哪些（给操作层的预览用，InstallBridge 也按它装）。
+type InstallPreview struct {
+	Current bridge.JarStatus
+	File    string   // 要装的文件
+	Remove  []string // 要删掉的别的版本
+	Noop    bool     // 已经装着同一个、也没有别的版本：什么都不用改
+	Running bool     // 服务器没停：装好后重启才生效
+	Status  string   // 实例的状态
 }
 
-// InstallBridge 把内置的桥接模组装进实例的 mods，删掉别的版本，写好它的配置。
-// 没有 SVC 时不装：桥接模组声明了必须有 SVC，装了服务器会起不来。服务器运行中不能替换旧版本（Windows 上
-// 加载器占着旧 jar），只能装新的，重启后生效。
-func (s *Service) InstallBridge(name string, v bridge.Variant) (*InstallResult, error) {
+// PreviewInstall 检查能不能装：核心和版本、加载方式、有没有 SVC（桥接模组声明了必须有它，没有的话服务器会起不来）、
+// 服务器运行中要不要替换已经装着的（Windows 上加载器占着旧 jar，删不掉）。不改任何文件。
+func (s *Service) PreviewInstall(name string, v bridge.Variant) (*InstallPreview, error) {
 	if v == "" {
 		v = bridge.VariantMain
 	}
-	st, info, err := s.InstallPlan(name, v)
+	info, err := s.d.Instances.Info(name)
 	if err != nil {
-		return nil, err
+		return nil, &Error{Code: 404, Err: err}
+	}
+	if ok, why := supportOf(info.Core, info.MC); !ok {
+		return nil, errorf(400, "%s", why)
+	}
+	if v != bridge.VariantMain && v != bridge.VariantFallback {
+		return nil, errorf(400, "加载方式只能是 main（默认）或 javafml（备用）")
+	}
+	st, err := bridge.InspectJar(modsDir(info.Dir))
+	if err != nil {
+		return nil, errorf(500, "读 mods 目录失败：%v", err)
 	}
 	if svc := s.detectSVC(info.Dir); !svc.Installed {
 		return nil, errorf(400, "先装 Simple Voice Chat：桥接模组声明了必须有它，没有的话服务器会起不来")
 	}
-	running := info.Status != "stopped"
-	if running && (len(st.Others) > 0 || (st.File != "" && st.Variant != v)) {
+	p := &InstallPreview{Current: st, File: bridge.JarName(v), Running: info.Status != "stopped", Status: info.Status}
+	p.Remove = append(p.Remove, st.Others...)
+	if st.File != "" && st.File != p.File {
+		p.Remove = append(p.Remove, st.File)
+	}
+	sort.Strings(p.Remove)
+	p.Noop = st.File == p.File && len(p.Remove) == 0
+	if p.Running && len(p.Remove) > 0 {
 		return nil, errorf(409, "服务器运行中不能替换已经装着的桥接模组（文件被服务器占用）：先停服再安装")
 	}
-	if running && st.Current && st.Variant == v {
-		return &InstallResult{JarStatus: st}, nil
+	return p, nil
+}
+
+// InstallBridge 把内置的桥接模组装进实例的 mods，删掉别的版本，写好它的配置。
+// 没有 SVC 时不装；服务器运行中不能替换旧版本，只能装新的，重启后生效（见 PreviewInstall）。
+func (s *Service) InstallBridge(name string, v bridge.Variant) (*InstallResult, error) {
+	if v == "" {
+		v = bridge.VariantMain
+	}
+	p, err := s.PreviewInstall(name, v)
+	if err != nil {
+		return nil, err
+	}
+	if p.Running && p.Noop {
+		return &InstallResult{JarStatus: p.Current}, nil
+	}
+	info, err := s.d.Instances.Info(name)
+	if err != nil {
+		return nil, &Error{Code: 404, Err: err}
 	}
 	nst, removed, err := bridge.InstallJar(modsDir(info.Dir), v)
 	if err != nil {
@@ -553,11 +576,11 @@ func (s *Service) InstallBridge(name string, v bridge.Variant) (*InstallResult, 
 	if _, _, err := bridge.EnsureConfig(info.Dir, bridge.EnsureOptions{Avoid: s.portsInUse(name)}); err != nil {
 		return nil, errorf(500, "写桥接模组的配置失败：%v", err)
 	}
-	res := &InstallResult{JarStatus: nst, Removed: removed, Restart: running}
-	if running {
+	res := &InstallResult{JarStatus: nst, Removed: removed, Restart: p.Running}
+	if p.Running {
 		s.markRestart(name, restartBridge)
 	}
-	s.log(name, "已安装桥接模组 %s%s", nst.File, map[bool]string{true: "，重启服务器后生效", false: ""}[running])
+	s.log(name, "已安装桥接模组 %s%s", nst.File, map[bool]string{true: "，重启服务器后生效", false: ""}[p.Running])
 	return res, nil
 }
 

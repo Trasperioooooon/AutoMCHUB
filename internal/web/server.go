@@ -90,6 +90,8 @@ func New(mgr *inst.Manager, tun *tunnel.Manager, aiSvc *ai.Service, port int) ht
 	mux.HandleFunc("POST /api/tunnels/{id}/stop", s.handleTunnelStop)
 	mux.HandleFunc("GET /api/tunnels/{id}/console", s.handleTunnelConsole)
 
+	s.musicRoutes(mux) // 音乐共享（第五阶段），见 music.go
+
 	mux.HandleFunc("POST /api/instances/{name}/start", s.handleInstStart)
 	mux.HandleFunc("POST /api/instances/{name}/stop", s.instOp("instance.stop"))
 	mux.HandleFunc("POST /api/instances/{name}/kill", s.instOp("instance.kill"))

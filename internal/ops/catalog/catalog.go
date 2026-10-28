@@ -6,6 +6,7 @@ package catalog
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"minedeck/internal/app"
 	"minedeck/internal/dl"
 	"minedeck/internal/inst"
+	"minedeck/internal/musicshare"
 	"minedeck/internal/ops"
 	"minedeck/internal/tunnel"
 )
@@ -26,6 +28,9 @@ type Env struct {
 	AI       *ai.Service // nil 时按程序目录建一个（main 自己建好传进来，好在启动时调 Start）
 	Port     int         // 实际监听端口
 	Shutdown func()      // 退出程序（「退出 MineDeck」和自动更新用）
+
+	// Music 音乐共享（第五阶段）；nil 时按程序目录建一个（Mgr、Tun 都有时）
+	Music *musicshare.Service
 }
 
 // NewAI 按程序目录建 AI 接入层：设置、价格缓存和用量放在 <程序目录>/data/ai/，Key 用 DPAPI 加密存进
@@ -46,6 +51,20 @@ func New(env Env) *ops.Registry {
 	if env.AI == nil {
 		env.AI = NewAI()
 	}
+	// 音乐共享（第五阶段）：广播自己停下时记一条操作记录（来源 schedule）；开服前由它写好桥接模组的配置和 voice_host
+	if env.Music == nil && env.Mgr != nil && env.Tun != nil {
+		env.Music = NewMusic(env.Mgr, env.Tun, func(name, reason string, failed bool) {
+			var err error
+			if failed {
+				err = errors.New(reason)
+			}
+			reg.Record(ops.Caller{Source: ops.SrcSchedule, Actor: "自动停止", Local: true}, "music.stop",
+				ops.ArgsOf(map[string]string{"inst": name, "reason": reason}), err, 0)
+		})
+	}
+	if env.Music != nil && env.Mgr != nil {
+		env.Mgr.SetStartHook(env.Music.BeforeStart)
+	}
 	c := &cat{Env: env, reg: reg}
 	c.appOps()
 	c.instanceOps()
@@ -56,6 +75,7 @@ func New(env Env) *ops.Registry {
 	c.tunnelOps()
 	c.logOps()
 	c.aiOps()
+	c.musicOps()
 	if env.Mgr != nil {
 		env.Mgr.SetAutoHook(func(a inst.AutoAction) {
 			reg.Record(ops.Caller{Source: ops.SrcSchedule, Actor: a.Actor, Local: true}, a.Op, ops.ArgsOf(a.Args), a.Err, a.Dur)

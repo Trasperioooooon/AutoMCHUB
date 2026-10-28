@@ -252,7 +252,7 @@ func (e *env) newService() *Service {
 			return []music.Device{{ID: "{dev-1}", Name: "扬声器", Default: true}, {ID: "{dev-2}", Name: "虚拟声卡"}}, nil
 		},
 		StartCapture: e.caps.start,
-		OnAutoStop:   func(inst, reason string) { e.auto <- inst + "：" + reason },
+		OnAutoStop:   func(inst, reason string, _ bool) { e.auto <- inst + "：" + reason },
 		Subscribe:    func(func(events.Event)) {},
 		clientOpts: func(o *bridge.Options) {
 			o.RetryDelay = 100 * time.Millisecond

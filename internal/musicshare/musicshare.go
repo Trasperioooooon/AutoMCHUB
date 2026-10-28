@@ -81,8 +81,9 @@ type Deps struct {
 	ListDevices  func() ([]music.Device, error)
 	StartCapture func(music.Options) (Capturer, error)
 
-	// OnAutoStop 广播自己停了（关服、音乐软件退出、连不上桥接模组、退出 MineDeck），给操作记录用。
-	OnAutoStop func(inst, reason string)
+	// OnAutoStop 广播自己停了（关服、音乐软件退出、连不上桥接模组、退出 MineDeck），给操作记录用；
+	// failed 为 true 表示是出错停下的（连不上桥接模组、采集出错）。
+	OnAutoStop func(inst, reason string, failed bool)
 	// Subscribe 订阅事件（实例启停、隧道拿到公网地址）；nil 用 events.Subscribe。
 	Subscribe func(func(events.Event))
 
