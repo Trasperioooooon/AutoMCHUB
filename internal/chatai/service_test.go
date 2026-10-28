@@ -356,7 +356,7 @@ func TestLimits(t *testing.T) {
 		t.Errorf("第二天应清零：%s", r)
 	}
 	// 全服每天的 token：一次请求 150 个，上限 200，第二个问题就不受理了
-	f.set(Patch{PerServer: ptr(0), PerPlayer: ptr(0), Tokens: ptr(int64(200))})
+	f.set(Patch{PerServer: ptr(0), PerPlayer: ptr(0), Budget: ptr(int64(200))})
 	f.advance(24 * time.Hour)
 	f.advance(time.Minute)
 	if r := answer("Alex", "甲"); r != "答。" {
@@ -520,7 +520,7 @@ func TestSettingsPatch(t *testing.T) {
 	for _, p := range []Patch{
 		{Prefix: ptr("")}, {Prefix: ptr("@A I")}, {Prefix: ptr("/ai")}, {Prefix: ptr("@AI:")}, {Aliases: &[]string{"@a/b"}},
 		{Allowed: &[]string{"@a"}}, {Allowed: &[]string{"史蒂夫"}}, {Templates: map[string]bool{"op": true}},
-		{Cooldown: ptr(-1)}, {Tokens: ptr(int64(-5))}, {Pattern: ptr(`(?P<name>\w+)`)}, {Pattern: ptr(`(`)},
+		{Cooldown: ptr(-1)}, {Budget: ptr(int64(-5))}, {Pattern: ptr(`(?P<name>\w+)`)}, {Pattern: ptr(`(`)},
 	} {
 		if _, err := f.gc.Update(instName, p); err == nil {
 			t.Errorf("应拒绝：%+v", p)
@@ -537,7 +537,7 @@ func TestSettingsPatch(t *testing.T) {
 	}
 	b, _ := json.Marshal(Defaults())
 	if !strings.Contains(string(b), `"cooldown":15`) || !strings.Contains(string(b), `"perPlayer":30`) || !strings.Contains(string(b), `"perServer":300`) ||
-		!strings.Contains(string(b), `"tokens":500000`) || !strings.Contains(string(b), `"gamemode":false`) || !strings.Contains(string(b), `"give":false`) {
+		!strings.Contains(string(b), `"budget":500000`) || !strings.Contains(string(b), `"gamemode":false`) || !strings.Contains(string(b), `"give":false`) {
 		t.Errorf("默认值（§6.6、§6.7）：%s", b)
 	}
 }

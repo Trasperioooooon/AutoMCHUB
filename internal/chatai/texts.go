@@ -68,11 +68,11 @@ func (r *room) quotaText(set Settings, player string, now time.Time) string {
 			text += fmt.Sprintf("全服今天只剩 %d 次了。", left)
 		}
 	}
-	if set.Tokens > 0 {
-		if tokens >= set.Tokens {
+	if set.Budget > 0 {
+		if tokens >= set.Budget {
 			text += "全服今天的 AI 额度已经用完了。"
-		} else if tokens*5 >= set.Tokens*4 {
-			text += fmt.Sprintf("全服今天的 AI 额度已经用了 %d%%。", tokens*100/set.Tokens)
+		} else if tokens*5 >= set.Budget*4 {
+			text += fmt.Sprintf("全服今天的 AI 额度已经用了 %d%%。", tokens*100/set.Budget)
 		}
 	}
 	if used, limit := r.s.ai.Usage(ai.FeatGameChat); limit > 0 {

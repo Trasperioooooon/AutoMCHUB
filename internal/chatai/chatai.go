@@ -349,7 +349,7 @@ func (r *room) limit(set Settings, player string, now time.Time) string {
 		return "你今天的 " + itoa(set.PerPlayer) + " 次已经用完了，明天再来吧。"
 	case set.PerServer > 0 && c.Count >= set.PerServer:
 		return "全服今天的 " + itoa(set.PerServer) + " 次已经用完了，明天再来吧。"
-	case set.Tokens > 0 && c.Tokens >= set.Tokens:
+	case set.Budget > 0 && c.Tokens >= set.Budget:
 		return "全服今天的 AI 额度用完了，明天再来吧。"
 	}
 	return ""

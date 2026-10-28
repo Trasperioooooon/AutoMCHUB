@@ -25,7 +25,7 @@ const (
 	DefaultCooldown  = 15      // 每人冷却（秒）
 	DefaultPerPlayer = 30      // 每人每天几次
 	DefaultPerServer = 300     // 全服每天几次
-	DefaultTokens    = 500_000 // 全服每天多少 token
+	DefaultBudget    = 500_000 // 全服每天多少 token
 )
 
 // Settings 一个实例的游戏内 AI 设置。
@@ -38,7 +38,7 @@ type Settings struct {
 	Cooldown  int             `json:"cooldown"`          // 每人冷却（秒），0 = 不冷却
 	PerPlayer int             `json:"perPlayer"`         // 每人每天几次，0 = 不限
 	PerServer int             `json:"perServer"`         // 全服每天几次，0 = 不限
-	Tokens    int64           `json:"tokens"`            // 全服每天多少 token，0 = 不限（另有「设置 → AI」里游戏内 AI 的总额度）
+	Budget    int64           `json:"budget"`            // 全服每天多少 token，0 = 不限（另有「设置 → AI」里游戏内 AI 的总额度）。键名不带 token：操作记录会把带 token 的键当密钥写成 ***
 	Loose     bool            `json:"looseNames"`        // 放宽名字规则
 	AnyThread bool            `json:"anyThread"`         // 不看线程名
 	Pattern   string          `json:"pattern,omitempty"` // 自定义正则（命名分组 name、msg）
@@ -47,7 +47,7 @@ type Settings struct {
 // Defaults 没设置过的实例：关着，前缀 @AI，没人能执行命令，模板和限流按 §6.6、§6.7 的默认值。
 func Defaults() Settings {
 	s := Settings{Prefix: DefaultPrefix, Aliases: []string{}, Allowed: []string{}, Templates: map[string]bool{},
-		Cooldown: DefaultCooldown, PerPlayer: DefaultPerPlayer, PerServer: DefaultPerServer, Tokens: DefaultTokens}
+		Cooldown: DefaultCooldown, PerPlayer: DefaultPerPlayer, PerServer: DefaultPerServer, Budget: DefaultBudget}
 	for _, t := range Templates {
 		s.Templates[t.ID] = t.Default
 	}
@@ -102,7 +102,7 @@ type Patch struct {
 	Cooldown  *int            `json:"cooldown"`
 	PerPlayer *int            `json:"perPlayer"`
 	PerServer *int            `json:"perServer"`
-	Tokens    *int64          `json:"tokens"`
+	Budget    *int64          `json:"budget"`
 	Loose     *bool           `json:"looseNames"`
 	AnyThread *bool           `json:"anyThread"`
 	Pattern   *string         `json:"pattern"`
@@ -176,11 +176,11 @@ func (p Patch) Apply(s Settings) (Settings, error) {
 		}
 		*x.dst = *x.v
 	}
-	if p.Tokens != nil {
-		if *p.Tokens < 0 || *p.Tokens > 1e11 {
+	if p.Budget != nil {
+		if *p.Budget < 0 || *p.Budget > 1e11 {
 			return s, fmt.Errorf("全服每天的 token 要在 0 到 1000 亿之间（0 表示不限）")
 		}
-		s.Tokens = *p.Tokens
+		s.Budget = *p.Budget
 	}
 	if p.Loose != nil {
 		s.Loose = *p.Loose
@@ -248,8 +248,8 @@ func loadSettings(dir string) Settings {
 	if f.PerServer >= 0 {
 		s.PerServer = f.PerServer
 	}
-	if f.Tokens >= 0 {
-		s.Tokens = f.Tokens
+	if f.Budget >= 0 {
+		s.Budget = f.Budget
 	}
 	s.Loose, s.AnyThread = f.Loose, f.AnyThread
 	if _, err := compilePattern(f.Pattern); err == nil {

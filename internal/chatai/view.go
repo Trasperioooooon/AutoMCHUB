@@ -28,7 +28,7 @@ type Limits struct {
 	Cooldown  int   `json:"cooldown"`
 	PerPlayer int   `json:"perPlayer"`
 	PerServer int   `json:"perServer"`
-	Tokens    int64 `json:"tokens"`
+	Budget    int64 `json:"budget"`
 }
 
 // AIStatus AI 接入层的情况。
@@ -101,7 +101,7 @@ func (s *Service) View(inst string) (*View, error) {
 
 	v := &View{Supported: !info.Proxy, Settings: set, Templates: Templates, Today: today, WhitelistOn: pl.WhitelistOn,
 		Running:  info.Status == "running",
-		Defaults: Limits{Cooldown: DefaultCooldown, PerPlayer: DefaultPerPlayer, PerServer: DefaultPerServer, Tokens: DefaultTokens}}
+		Defaults: Limits{Cooldown: DefaultCooldown, PerPlayer: DefaultPerPlayer, PerServer: DefaultPerServer, Budget: DefaultBudget}}
 	av := s.ai.View()
 	v.AI = AIStatus{Enabled: av.Enabled, Missing: av.Missing}
 	if av.Enabled {
