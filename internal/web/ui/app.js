@@ -32,7 +32,7 @@ function showLogin() {
   const d = document.createElement("div");
   d.className = "modal-mask";
   d.id = "login-mask";
-  d.innerHTML = `<div class="modal"><h3>${icon("lock")} MineDeck 远程访问</h3>
+  d.innerHTML = `<div class="modal"><div class="brand-head">${logoImg()}<h3>MineDeck 远程访问</h3></div>
     <div class="m-body">请输入访问密码（在主机的「设置 → 远程访问」中配置）</div>
     <input type="password" id="login-pw" style="width:100%;margin-bottom:16px" autofocus>
     <div class="m-actions"><button class="btn primary" id="login-go">登录</button></div></div>`;
@@ -142,6 +142,11 @@ const pageHead = (title, sub = "", actions = "", crumbs = "") =>
   (crumbs ? `<nav class="crumbs" aria-label="位置">${crumbs}</nav>` : "") +
   `<div class="page-head"><div class="ph-text"><h1>${esc(title)}</h1>${sub ? `<div class="sub">${sub}</div>` : ""}</div>` +
   (actions ? `<div class="ph-actions">${actions}</div>` : "") + `</div>`;
+
+/* 应用 Logo：与 exe / 任务栏图标同一套逐尺寸绘制的像素画（img/logo-*.png）。
+   48px 版用于引导卡、关于页、登录框；按屏幕缩放挑原生网格的那一张，pixelated 保持像素锐利 */
+const logoImg = (cls = "logo-lg") =>
+  `<img class="${cls}" src="img/logo-48.png" srcset="img/logo-48.png 1x, img/logo-72.png 1.5x, img/logo-96.png 2x, img/logo-144.png 3x" width="48" height="48" alt="">`;
 
 /* ---------- 内联 SVG 图标 ----------
    对齐 win-ctrls 风格：16 视框、细线 currentColor、圆角端点。icon(name) 返回字符串供模板拼接；
@@ -2234,7 +2239,8 @@ function setNotify(body, info) {
 
 /* — 更新与关于 — */
 function setAbout(body, info) {
-  body.innerHTML = settingsHead("版本与更新", "") +
+  body.innerHTML = `<div class="brand-head about-head">${logoImg()}<div><h2>MineDeck</h2><div class="sub">Windows 本地 Minecraft 开服工具 · v${esc(info.version)}</div></div></div>` +
+    settingsHead("版本与更新", "") +
     `<div class="row-list" style="margin-bottom:14px">
       <div class="row-item"><div class="ri-head"><div class="ri-main"><div class="ri-title">当前版本</div><div class="ri-sub">MineDeck · Windows 本地 Minecraft 开服工具</div></div><div class="ri-right"><span class="badge core">v${esc(info.version)}</span></div></div></div>
     </div>
@@ -2302,7 +2308,7 @@ function showOnboarding(info) {
   const SRC = { auto: "自动（推荐）— 国内镜像优先，失败自动回退官方源", mirror: "镜像优先 — 国内下载更快", official: "仅官方源 — 网络直连国外" };
   const cur = (info.config && info.config.source) || "auto";
   root.innerHTML = `<div class="modal-mask"><div class="modal onboard">
-    <h3>欢迎使用 MineDeck</h3>
+    <div class="brand-head">${logoImg()}<div><h3>欢迎使用 MineDeck</h3><div class="sub">Minecraft 一键开服工具</div></div></div>
     <div class="m-body">
       <div class="ob-sec" style="margin-top:0"><div class="ob-label">用户协议与免责声明</div>
         <div class="ob-terms">

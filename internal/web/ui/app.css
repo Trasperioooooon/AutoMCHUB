@@ -86,7 +86,13 @@ h3 { font-size: 15px; font-weight: 600; }
   -webkit-user-select: none; user-select: none;
 }
 .tb-brand { display: flex; align-items: center; gap: 9px; font-size: 13px; font-weight: 600; }
-.logo-mark { width: 20px; height: 20px; color: var(--accent); flex: none; }
+/* Logo：应用图标同款像素画（img/logo-*.png，逐尺寸绘制），固定配色、不随强调色；像素按最近邻缩放保持锐利 */
+.logo-mark { width: 16px; height: 16px; flex: none; image-rendering: pixelated; }
+.logo-lg { width: 48px; height: 48px; flex: none; image-rendering: pixelated; }
+.brand-head { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+.brand-head h3, .brand-head h2 { margin: 0; }
+.brand-head .sub { margin: 2px 0 0; }
+.about-head { margin-bottom: 24px; }
 #shell { flex: 1; min-height: 0; display: flex; }
 
 #sidebar {
