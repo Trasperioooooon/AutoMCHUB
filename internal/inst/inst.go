@@ -83,8 +83,9 @@ type Manager struct {
 	Tasks    *tasks.Manager
 
 	autoMu    sync.Mutex
-	autoHook  func(AutoAction) // 定时任务、崩溃自动重启执行后的回调（操作层用它写操作记录）
-	startHook func(string)     // 起服务器进程之前的回调（音乐共享在这里写好桥接模组的配置和 voice_host），见 hooks.go
+	autoHook  func(AutoAction)     // 定时任务、崩溃自动重启执行后的回调（操作层用它写操作记录）
+	startHook func(string)         // 起服务器进程之前的回调（音乐共享在这里写好桥接模组的配置和 voice_host），见 hooks.go
+	lineHook  func(string, string) // 服务器每输出一行的回调（游戏内 AI 认聊天），见 hooks.go
 }
 
 func NewManager() (*Manager, error) {

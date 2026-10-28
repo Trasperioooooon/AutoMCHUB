@@ -14,6 +14,7 @@ import (
 
 	"minedeck/internal/ai"
 	"minedeck/internal/app"
+	"minedeck/internal/chatai"
 	"minedeck/internal/dl"
 	"minedeck/internal/inst"
 	"minedeck/internal/musicshare"
@@ -31,6 +32,11 @@ type Env struct {
 
 	// Music 音乐共享（第五阶段）；nil 时按程序目录建一个（Mgr、Tun 都有时）
 	Music *musicshare.Service
+
+	// GameChat 游戏内聊天 AI（第四阶段）；nil 时建一个（有 Mgr 时），服务器每输出一行都交给它认聊天。
+	// Token 是 MineDeck 这次启动的访问令牌：和应用内助手一样，原样出现在要发给 AI 的内容里就换成 ***。
+	GameChat *chatai.Service
+	Token    string
 }
 
 // NewAI 按程序目录建 AI 接入层：设置、价格缓存和用量放在 <程序目录>/data/ai/，Key 用 DPAPI 加密存进
@@ -65,6 +71,9 @@ func New(env Env) *ops.Registry {
 	if env.Music != nil && env.Mgr != nil {
 		env.Mgr.SetStartHook(env.Music.BeforeStart)
 	}
+	if env.GameChat == nil && env.Mgr != nil { // 游戏内 AI（第四阶段）
+		env.GameChat = NewGameChat(env.Mgr, reg, env.AI, env.Token)
+	}
 	c := &cat{Env: env, reg: reg}
 	c.appOps()
 	c.instanceOps()
@@ -79,6 +88,7 @@ func New(env Env) *ops.Registry {
 	c.fileOps()
 	c.portOps()
 	c.musicOps()
+	c.gameChatOps() // 第四阶段
 	if env.Mgr != nil {
 		env.Mgr.SetAutoHook(func(a inst.AutoAction) {
 			reg.Record(ops.Caller{Source: ops.SrcSchedule, Actor: a.Actor, Local: true}, a.Op, ops.ArgsOf(a.Args), a.Err, a.Dur)

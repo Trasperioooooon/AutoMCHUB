@@ -107,6 +107,7 @@ func (m *Manager) Start(name string) error {
 			line := strings.TrimRight(decodeConsole(sc.Bytes(), i.consoleEnc()), "\r")
 			i.Console.Append(line)
 			i.trackPlayers(line)
+			m.noteLine(i, line) // 游戏内 AI：在线名单更新过了再认聊天
 			if serverReady(line) {
 				i.procMu.Lock()
 				if i.state == "starting" {
@@ -203,8 +204,13 @@ func (m *Manager) Kill(name string) error {
 	return i.proc.cmd.Process.Kill()
 }
 
-// Command 向服务器控制台发送命令。
-func (m *Manager) Command(name, cmd string) error {
+// Command 向服务器控制台发送命令。命令原样写进服务器的标准输入（Go 的字符串，也就是 UTF-8，不按实例的控制台编码转码），
+// 控制台里显示「> 命令」。
+func (m *Manager) Command(name, cmd string) error { return m.CommandEcho(name, cmd, "") }
+
+// CommandEcho 同 Command，控制台里显示 echo（空串时照常显示「> 命令」）。游戏内 AI 用它：tellraw 的文字写成了 \uXXXX，
+// 原样显示没法看，换成一行「[MineDeck] 游戏内 AI 回复……」。
+func (m *Manager) CommandEcho(name, cmd, echo string) error {
 	i, err := m.Get(name)
 	if err != nil {
 		return err
@@ -219,7 +225,10 @@ func (m *Manager) Command(name, cmd string) error {
 	if cmd == "" {
 		return nil
 	}
-	i.Console.Append("> " + cmd)
+	if echo == "" {
+		echo = "> " + cmd
+	}
+	i.Console.Append(echo)
 	return writeLine(p, cmd)
 }
 

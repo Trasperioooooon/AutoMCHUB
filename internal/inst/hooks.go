@@ -20,6 +20,23 @@ func (m *Manager) beforeStart(i *Instance) {
 	}
 }
 
+// SetLineHook 登记「服务器每输出一行」的回调（游戏内 AI 在这里认聊天）。在读输出的协程里同步调用，
+// 在线名单已经按这一行更新过；回调要很快、不能阻塞，慢的事自己交给别的协程。
+func (m *Manager) SetLineHook(fn func(name, line string)) {
+	m.autoMu.Lock()
+	m.lineHook = fn
+	m.autoMu.Unlock()
+}
+
+func (m *Manager) noteLine(i *Instance, line string) {
+	m.autoMu.Lock()
+	fn := m.lineHook
+	m.autoMu.Unlock()
+	if fn != nil {
+		fn(i.Name, line)
+	}
+}
+
 // OnlinePlayers 当前在线的玩家（按名字排序）。
 func (i *Instance) OnlinePlayers() []string {
 	i.onlineMu.Lock()

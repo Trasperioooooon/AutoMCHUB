@@ -77,6 +77,9 @@ func TestLevelsFollowDesign(t *testing.T) {
 	} {
 		want[level] = append(want[level], names...)
 	}
+	// 游戏内 AI（第四阶段）：游戏里只能调 game.info；「游戏内 AI」标签的操作 AI 永远看不到、也改不了
+	want[ops.Read] = append(want[ops.Read], "game.info")
+	want[ops.HumanOnly] = append(want[ops.HumanOnly], "gameai.get", "gameai.set", "gameai.test", "gameai.log", "gameai.whitelist")
 
 	n := 0
 	for level, names := range want {
@@ -111,13 +114,14 @@ func TestLevelsFollowDesign(t *testing.T) {
 	}
 	slices.Sort(local)
 	if strings.Join(local, ",") != "ai.assistant.set,ai.models.list,ai.prices.refresh,ai.prices.set,ai.provider.set,ai.quota.set,ai.test,"+
+		"gameai.set,gameai.whitelist,"+ // 第四阶段：授权名单和命令模板只能在本机改（§3.3）
 		"host.openpath,host.pickdir,instance.opendir,java.add"+
 		",music.sources,music.start,music.system.confirm" { // 第五阶段
 		t.Errorf("仅本机的操作：%v", local)
 	}
 }
 
-// AI 的工具清单里没有仅人工的操作；游戏内 AI 现在一个工具都没有（game_info 等到第四阶段再开放）。
+// AI 的工具清单里没有仅人工的操作；游戏内 AI 只能调 game.info（第四阶段开放的唯一一个，§6.4）。
 func TestAIToolLists(t *testing.T) {
 	reg, _ := newCatalog(t)
 	for _, op := range reg.Available(ops.Caller{Source: ops.SrcAssistant, Local: true}) {
@@ -125,11 +129,14 @@ func TestAIToolLists(t *testing.T) {
 			t.Errorf("助手的工具清单里有仅人工的操作 %s", op.Name)
 		}
 	}
-	if n := len(reg.Available(ops.Caller{Source: ops.SrcAssistant, Local: true})); n != 23+13+11+3 { // +3：音乐共享（第五阶段）的读 1 + 写 2
-		t.Errorf("助手能用 %d 个操作，应为读 23 + 写 13 + 危险 11 + 音乐共享 3", n)
+	if n := len(reg.Available(ops.Caller{Source: ops.SrcAssistant, Local: true})); n != 23+13+11+3+1 { // +3：音乐共享（第五阶段）的读 1 + 写 2；+1：game.info（第四阶段，助手的工具清单里另外去掉了）
+		t.Errorf("助手能用 %d 个操作，应为读 23 + 写 13 + 危险 11 + 音乐共享 3 + game.info 1", n)
 	}
-	if l := reg.Available(ops.Caller{Source: ops.SrcGameChat, Actor: "Steve"}); len(l) != 0 {
-		t.Errorf("游戏内 AI 不该有工具：%v", l)
+	if l := reg.Available(ops.Caller{Source: ops.SrcGameChat, Actor: "Steve"}); len(l) != 1 || l[0].Name != "game.info" {
+		t.Errorf("游戏内 AI 只能调 game.info：%v", l)
+	}
+	if l := reg.Available(ops.Caller{Source: ops.SrcCompanion, Actor: "伙伴"}); len(l) != 1 || l[0].Name != "game.info" {
+		t.Errorf("AI 伙伴也只放行 InGame 的读操作：%v", l)
 	}
 }
 

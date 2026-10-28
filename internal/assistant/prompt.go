@@ -28,8 +28,9 @@ func sessionPrompt(inst string) string {
 	return systemPrompt + fmt.Sprintf("\n\n这个会话关联的实例是「%s」：用户说「服务器」时，默认指它。", inst)
 }
 
-// skipTools 不给 AI 的读操作：检查更新、重新扫描本机 Java（会运行找到的 java.exe）、操作记录，排错用不上。
-var skipTools = map[string]bool{"app.update.check": true, "java.scan": true, "ops.log": true}
+// skipTools 不给 AI 的读操作：检查更新、重新扫描本机 Java（会运行找到的 java.exe）、操作记录，排错用不上；
+// game.info 是给游戏内 AI 的（实例信息助手另有 instance.list）。
+var skipTools = map[string]bool{"app.update.check": true, "java.scan": true, "ops.log": true, "game.info": true}
 
 // tools 按调用方从操作层取工具清单（仅人工的永远不在里面），和工具名到操作名的对照。
 func tools(reg *ops.Registry, c ops.Caller) ([]ai.Tool, map[string]string) {
