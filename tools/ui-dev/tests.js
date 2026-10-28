@@ -73,7 +73,10 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
     assert((await page.$(".dropmenu")) !== null, "菜单未弹出");
     assert(page.url().includes("#/instances"), "点「···」后发生了跳转");
     await page.keyboard.press("Escape");
-    assert((await page.$(".dropmenu")) === null, "Esc 未关闭菜单");
+    // 菜单离场有 120ms 动画：按下 Esc 立即进入离场（不再可点），动画结束后从页面移除
+    assert((await page.$(".dropmenu:not(.leave)")) === null, "Esc 未关闭菜单");
+    await page.waitForSelector(".dropmenu", { state: "detached", timeout: 1000 }).catch(() => {});
+    assert((await page.$(".dropmenu")) === null, "菜单离场后未移除");
     await page.click('.card[data-name="机械动力整合包"] .inst-config');
     await settle();
     assert(decodeURIComponent(page.url()).includes("#/inst/机械动力整合包"), "点卡片未进入详情：" + page.url());
@@ -360,6 +363,130 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
     assert((await page.$eval(".sb-state", el => el.textContent)).includes("已保存"), "回显后仍标记未保存");
     const toasts = await page.$$eval(".toast", ts => ts.map(t => t.textContent).join("|"));
     assert(toasts.includes("已自动补回"), "缺少补回提示：" + toasts);
+  });
+
+  // ---- v5：启动画面 / 设置分组列表 / 减少动态 ----
+  // 模拟原生 WebView2 宿主：窗口桥接函数 + 每次进程启动生成的 ID（真机由 main.go 用 WebView2 的文档创建脚本注入）
+  const hostCtx = async (boot, opts = {}) => {
+    const c = await browser.newContext({ viewport: { width: 1280, height: 850 }, locale: "zh-CN", ...opts });
+    await c.addInitScript(b => {
+      localStorage.setItem("amh_token", "mock");
+      if (b.host) { window.hostWinClose = () => {}; window.hostWinMin = () => {}; window.hostWinMaxToggle = () => {}; window.hostWinDrag = () => {}; window.hostWinIsMax = async () => false; }
+      if (b.boot) window.__MD_BOOT = b.boot;
+    }, boot);
+    return c;
+  };
+  const splashState = p => p.evaluate(() => ({ attr: document.documentElement.dataset.splash || "", el: !!document.getElementById("splash") }));
+
+  await run("启动画面：原生窗口冷启动时播一次、约 1 秒内自动淡出；刷新不再播；局域网浏览器与「减少动态」不播", async () => {
+    const c = await hostCtx({ host: true, boot: "boot-1" });
+    try {
+      const p = await c.newPage();
+      p.on("pageerror", e => errors.push(e.message));
+      await p.goto(ORIGIN + "#/instances");
+      let st = await splashState(p);
+      assert(st.attr === "play" && st.el, "冷启动未播放启动画面：" + JSON.stringify(st));
+      assert((await p.$$eval("#splash-logo i[style]", els => els.length)) > 100, "像素方块没有画出来");
+      await p.waitForFunction(() => !document.getElementById("splash"), null, { timeout: 2000 });
+      assert((await p.evaluate(() => document.documentElement.dataset.splash)) === undefined, "淡出后未清除 data-splash");
+      await p.reload(); await p.waitForTimeout(150);
+      st = await splashState(p);
+      assert(!st.attr && !st.el, "刷新后又播了启动画面：" + JSON.stringify(st));
+    } finally { await c.close(); }
+    for (const [what, boot, opts] of [["局域网浏览器（无宿主函数）", { host: false, boot: "boot-2" }, {}], ["减少动态", { host: true, boot: "boot-3" }, { reducedMotion: "reduce" }]]) {
+      const c2 = await hostCtx(boot, opts);
+      try {
+        const p = await c2.newPage();
+        await p.goto(ORIGIN + "#/instances"); await p.waitForTimeout(100);
+        const st = await splashState(p);
+        assert(!st.attr && !st.el, `${what}不应播放启动画面：` + JSON.stringify(st));
+      } finally { await c2.close(); }
+    }
+  });
+
+  await run("启动画面：点击或按任意键立即跳过，按键不会触发 1–4 快捷键", async () => {
+    for (const how of ["click", "key"]) {
+      const c = await hostCtx({ host: true, boot: "boot-skip-" + how });
+      try {
+        const p = await c.newPage();
+        await p.goto(ORIGIN + "#/instances");
+        await p.waitForSelector("#splash");
+        const t0 = Date.now();
+        if (how === "click") await p.click("#splash", { force: true }); else await p.keyboard.press("2");
+        await p.waitForFunction(() => !document.getElementById("splash"), null, { timeout: 2000 });
+        const ms = Date.now() - t0;
+        assert(ms < 500, `${how} 跳过太慢：${ms}ms`);
+        assert(p.url().endsWith("#/instances"), "跳过用的按键触发了切页：" + p.url());
+      } finally { await c.close(); }
+    }
+  });
+
+  await run("设置：分组列表——下载源单选行点选即时生效（打勾跟随、发 PUT），键盘可选；存储位置为带图标的分组", async () => {
+    await page.goto(url("#/settings/download")); await settle();
+    const rows = () => page.$$eval("#src-cards .row-item", els => els.map(e => e.dataset.v + ":" + e.getAttribute("aria-checked") + ":" + e.querySelector(".ri-check").classList.contains("on")));
+    assert((await rows()).join() === "auto:true:true,mirror:false:false,official:false:false", "初始选中不对：" + await rows());
+    let before = reqs.length;
+    await page.click('#src-cards .row-item[data-v="mirror"]'); await settle(250);
+    assert(reqs.slice(before).some(r => r.m === "PUT" && r.u === "/api/config"), "点选未保存");
+    assert((await rows()).join() === "auto:false:false,mirror:true:true,official:false:false", "点选后选中不对：" + await rows());
+    await page.focus('#src-cards .row-item[data-v="official"]');
+    before = reqs.length;
+    await page.keyboard.press("Enter"); await settle(250);
+    assert(reqs.slice(before).some(r => r.m === "PUT" && r.u === "/api/config") && (await rows())[2] === "official:true:true", "键盘未选中：" + await rows());
+    await page.click('#src-cards .row-item[data-v="auto"]'); await settle(250); // 复原
+    await page.click('.set-nav[data-sec="storage"]'); await settle();
+    const g = await page.$eval("#set-body .group", el => [el.classList.contains("has-ico"), el.querySelectorAll(".row-item").length, el.querySelectorAll(".ri-ico").length]);
+    assert(g.join() === "true,3,3", "存储位置分组不对：" + g);
+    assert((await page.$eval('.set-nav.cur', a => a.dataset.sec)) === "storage" && (await page.$eval("#set-eyebrow", el => el.textContent)) === "设置/存储位置", "导航当前项或眉标未更新");
+    await page.click('.set-nav[data-sec="startup"]'); await settle();
+    before = reqs.length;
+    await page.click('.row-item:has([data-cfg="minimizeToTray"]) .sw'); await settle(250);
+    assert(reqs.slice(before).some(r => r.m === "PUT" && r.u === "/api/config"), "开关未即时保存");
+    await page.click('.row-item:has([data-cfg="minimizeToTray"]) .sw'); await settle(250); // 复原
+  });
+
+  await run("状态切换：卡片胶囊换成新状态并播换场，状态行随之展开 / 收起，操作按钮随状态切换", async () => {
+    const setStatus = st => page.evaluate(s => fetch("/__mock/state", { method: "POST", body: JSON.stringify({ status: { "机械动力整合包": s } }) }), st);
+    try {
+      await page.goto(url("#/instances")); await settle(600);
+      const card = '.card[data-name="机械动力整合包"]';
+      assert(await page.$eval(card + " [data-stat]", el => el.classList.contains("closed")), "已停止的卡片不应显示状态行");
+      await setStatus("starting");
+      await page.dispatchEvent("#inst-q", "input"); // 触发重绘（等同下一轮轮询）
+      await page.waitForSelector(card + " .st-pill.starting");
+      const mid = await page.$eval(card, c => ({ out: !!c.querySelector(".st-label.out"), inl: c.querySelector(".st-label:not(.out)").classList.contains("in"), stop: !!c.querySelector('[data-act="stop"]') }));
+      assert(mid.out && mid.inl, "胶囊文字没有换场：" + JSON.stringify(mid));
+      assert(mid.stop, "启动中应显示「停止」");
+      await page.waitForTimeout(400);
+      const open = await page.$eval(card + " [data-stat]", el => [el.classList.contains("closed"), !!el.querySelector(".xp.warn.run")]);
+      assert(!open[0] && open[1], "启动中状态行未展开：" + open);
+      await setStatus("stopped");
+      await page.dispatchEvent("#inst-q", "input");
+      await page.waitForSelector(card + " .st-pill.stopped");
+      await page.waitForTimeout(400);
+      assert(await page.$eval(card + " [data-stat]", el => el.classList.contains("closed")), "停止后状态行未收起");
+      assert((await page.$(card + ' [data-act="start"]')) !== null, "停止后应显示「启动」");
+    } finally { await setStatus("stopped"); }
+  });
+
+  await run("减少动态：切页、菜单、弹窗、提示都不播动画（状态直接切换）", async () => {
+    const c = await hostCtx({ host: true }, { reducedMotion: "reduce" });
+    try {
+      const p = await c.newPage();
+      p.on("pageerror", e => errors.push(e.message));
+      const running = () => p.evaluate(() => document.getAnimations().filter(a => a.playState === "running").length);
+      await p.goto(ORIGIN + "#/instances"); await p.waitForTimeout(400);
+      await p.click('.card[data-name="机械动力整合包"] [data-act="more"]');
+      assert((await running()) === 0, "菜单进场仍有动画");
+      await p.click(".dropmenu button.danger");
+      assert((await running()) === 0, "弹窗进场仍有动画");
+      await p.keyboard.press("Escape");
+      assert((await p.$(".modal")) === null, "减少动态下弹窗应立即移除");
+      await p.click('#sidebar a[data-nav="settings"]'); await p.waitForTimeout(300);
+      await p.click('.set-nav[data-sec="appearance"]'); await p.waitForTimeout(300);
+      await p.click('[data-mode="light"]');
+      assert((await running()) === 0, "切页 / 键帽滑动仍有动画");
+    } finally { await c.close(); }
   });
 
   await run("全程无页面报错", async () => { assert(errors.length === 0, errors.slice(0, 3).join(" | ")); });
