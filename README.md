@@ -2,7 +2,7 @@
 
 [![Release](https://img.shields.io/github/v/release/Trasperioooooon/MineDeck?color=6fd24b)](https://github.com/Trasperioooooon/MineDeck/releases/latest) [![Downloads](https://img.shields.io/github/downloads/Trasperioooooon/MineDeck/total?color=6fd24b)](https://github.com/Trasperioooooon/MineDeck/releases) [![License](https://img.shields.io/github/license/Trasperioooooon/MineDeck?color=6fd24b)](LICENSE) ![Platform](https://img.shields.io/badge/platform-Windows-2b6cb0) ![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)
 
-Windows 本地运行的 **MC 多人联机服务器自动部署工具**（单文件 `MineDeck.exe`，约 8 MB，零依赖）。
+Windows 本地运行的 **MC 多人联机服务器自动部署工具**（单文件 `MineDeck.exe`，约 10.5 MB，零依赖）。
 
 选好版本点创建，自动完成：**匹配并下载便携式 Java → 下载服务端核心 → 运行安装器 → 同意 EULA → 生成配置与启动脚本 → 图形界面管理开服**。全程使用国内镜像加速（BMCLAPI / 清华 TUNA），官方源自动兜底。
 
@@ -22,7 +22,7 @@ Windows 本地运行的 **MC 多人联机服务器自动部署工具**（单文�
 | **Java 全自动** | 读取 Mojang 官方 `javaVersion` 元数据精确匹配（8/16/17/21/25...），便携部署于 `runtimes/`，**不碰系统环境变量、不与已装 Java 冲突** |
 | **下载三级加速** | BMCLAPI / 清华 TUNA 优先 → Adoptium/官方源 → Mojang 官方运行时，逐源故障转移 + 3 轮重试 + SHA 校验 |
 | **安装器加固** | Forge/NeoForge 官方安装器自动附加 `--mirror`（BMCLAPI）、预放置原版 server.jar 跳过其直连 Mojang 的下载、失败自动重试 3 次 |
-| **图形界面** | WebView2 原生窗口（缺失时自动用浏览器打开），Windows 11 风格的侧栏布局：创建向导 / 实时控制台 / 命令下发 / 配置面板；**7 套配色方案**（默认「方块」暖沙纸底 + 草绿，另有 Fluent / GitHub / 石墨 / Nord / Catppuccin / Solarized）× 浅色 · 深色 · 跟随系统，另有 8 种强调色可选，文字对比度均过 WCAG AA；高 DPI 屏清晰渲染 |
+| **图形界面** | WebView2 原生窗口（缺失时自动用浏览器打开），Windows 11 风格的侧栏布局：创建向导 / 实时控制台 / 命令下发 / 配置面板；**7 套配色方案**（默认「方块」暖沙纸底 + 草绿，另有 Fluent / GitHub / 石墨 / Nord / Catppuccin / Solarized）× 浅色 · 深色 · 跟随系统，另有 8 种强调色可选，文字对比度均过 WCAG AA；界面字体随 exe 内嵌（Geist + Noto Sans SC，见下文「第三方字体与许可」），任何电脑显示一致；像素风应用图标「体素机柜」与 12 种核心头像；冷启动不白闪；高 DPI 屏清晰渲染 |
 | **系统托盘与自启** | 关窗最小化到托盘（服务器不停）、托盘右键「打开面板 / 全部停止并退出」、开机自动启动（静默进托盘）——均可在「设置 → 启动与托盘」开关 |
 | **存储位置自选** | 实例/备份存放目录可改到任意盘（系统文件夹选择框），多根扫描，中文实例名自动生成 ASCII 目录 |
 | **贴心细节** | 首次运行引导卡、控制台命令补全（常用命令 + 在线玩家名 Tab 补全）、备份保留份数可配、`bg/` 目录放图即成个性化壁纸 |
@@ -62,11 +62,13 @@ go build -trimpath -ldflags="-s -w -H windowsgui" -o MineDeck.exe .
 
 调试版（带控制台日志）：`go build -o minedeck-cli.exe .` 后运行 `minedeck-cli.exe -nogui`。
 
+界面字体子集（`internal/web/ui/fonts/`）和 exe 图标资源（`rsrc_windows_amd64.syso`）都已入库，构建时不需要 Python 或其他工具。改了界面文案要检查字体子集（见 [`tools/fonts/README.md`](tools/fonts/README.md)），换了 `assets/icon.ico` 要重新生成 syso（命令见 `design-system/MASTER.md` §7）。
+
 ## 🏗️ 架构
 
 ```
-main.go / tray_windows.go / dpi_windows.go
-            入口：HTTP 服务 + WebView2 窗口/浏览器回退 + 系统托盘（关窗最小化）+ DPI 感知 + 优雅退出
+main.go / tray_windows.go / dpi_windows.go / webviewbg_windows.go
+            入口：HTTP 服务 + WebView2 窗口/浏览器回退 + 系统托盘（关窗最小化）+ DPI 感知 + 冷启动底色 + 优雅退出
 internal/
 ├── app/       基础目录与全局配置（下载源策略、内存探测、多存储根）
 ├── autostart/ 开机自启（读写 HKCU\...\Run，每用户免管理员）
@@ -80,9 +82,11 @@ internal/
 ├── tunnel/    内网穿透（OpenFrp / 樱花frp / 自定义 frps，frpc 托管）
 ├── tasks/     后台任务进度 + 结构化告警（供前端轮询）
 ├── events/ webhook/ update/   事件总线、Webhook 推送、GitHub 自动更新
-├── web/       REST API + SSE 控制台流 + go:embed 前端（ui/ 多配色 SPA，配色令牌见 themes.css）
+├── web/       REST API + SSE 控制台流 + go:embed 前端（ui/ 多配色 SPA，配色令牌见 themes.css，内嵌字体在 ui/fonts/）
 └── themes/    配色方案对比度测试（go test ./internal/themes/，校验 themes.css）
 tools/ui-dev/  前端仿真后端 + 交互回归测试 + 截图（Node + Playwright，不需要 Windows，见其 README）
+tools/fonts/   内嵌字体的子集生成脚本（Python + fontTools，手动运行，产物入库）
+assets/        应用图标 icon.ico（像素画逐尺寸绘制）；界面设计规范见 design-system/MASTER.md
 ```
 
 关键设计决策见 `docs/MC自动化开服技术实现方案与版本映射表.md`（含实测验证过的版本映射与下载源矩阵）。
