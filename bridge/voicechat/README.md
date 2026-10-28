@@ -7,7 +7,8 @@ MineDeck 在主机上采集音乐，通过本机 TCP 把 PCM 发给这个模组�
 - **不引用 Minecraft 的类**：只依赖 `java.*` 和 SVC 的插件 API，字节码是 Java 8（class 版本 52）。
 - **不包含 SVC 的任何文件**：SVC 的许可是"保留所有权利"，它的 API 只在编译时引用。
 
-Go 这一侧的客户端在 MineDeck 的 `internal/bridge`。协议、模组逻辑都已在 devtest（假 SVC）里跑通，**还没有在真的 Minecraft
+MineDeck 已经接入（第五阶段）：jar 打进 exe（`internal/bridge/jar/`），在实例的「音乐共享」页一键装进 `mods/`；
+Go 这一侧的客户端在 `internal/bridge`。协议、模组逻辑都已在 devtest（假 SVC）里跑通，**还没有在真的 Minecraft
 服务端和客户端上测过**，见文末「验证情况」。
 
 ## 目录
@@ -18,6 +19,7 @@ bridge/voicechat/
   src/main/resources/                   META-INF/mods.toml（Forge）、META-INF/neoforge.mods.toml（NeoForge）、pack.mcmeta
   src/fallback/                         备用方案：javafml + 两个空入口类（编译用的 @Mod 注解桩不打包）
   build.sh / build.ps1                  构建脚本（javac --release 8 + jar，不用 Gradle）
+  update-embedded.sh                    更新 / 检查打进 MineDeck exe 的 jar（internal/bridge/jar/）
   api-from-source.sh                    从 SVC 官方源码编译 API（只在下载不了时用，只用于本地编译）
   testsend/                             测试发送端（Go，协议用 MineDeck 的 internal/bridge）：发测试音或 WAV
   devtest/                              不装 Minecraft 的自动测试：假 SVC + TOML 校验
@@ -42,6 +44,20 @@ Windows：`.\build.ps1`、`.\build.ps1 -Fallback`（步骤和产物与 build.sh 
 4. 下载不了时运行 `./api-from-source.sh`：从 `github.com/henkelmax/simple-voice-chat` 取 1.21.1 分支 2026-10-25 的提交（API 2.6.27，和 1.20.1 分支的 `api/` 目录逐字节相同），用 `javac --release 8` 编出一份放进缓存目录。
 
 构建脚本最后会检查：两份 toml 和 `pack.mcmeta` 都在；jar 里没有 `de/maxhenkel/` 下的文件；每个 class 的版本号都是 52；`jdeps` 显示依赖只有 `java.*` 和 `de.maxhenkel.voicechat.api.*`；`BridgePlugin` 带 `@ForgeVoicechatPlugin`。jar 里的时间戳固定、文件按顺序打包、清单里的 `Created-By` 自己写（不让 jar 填 JDK 的版本号），同样的源码和 JDK 构建出的 jar 逐字节相同。
+
+### 打进 MineDeck 的 jar
+
+MineDeck 不在运行时下载这个模组：`build.sh --fallback` 构建出的两个 jar 原样入库在 `internal/bridge/jar/`，
+用 `go:embed` 打进 exe，`internal/bridge/jar.go` 里登记了版本号和两个 jar 的 sha256。安装时先核对 sha256，
+写进 `mods/` 后再读回来核对一次。
+
+- 改了模组源码以后运行 `./update-embedded.sh`：重新构建，把两个 jar 复制进 `internal/bridge/jar/`，并改好 `jar.go` 里的版本号和 sha256。
+- `./update-embedded.sh --check` 只检查：重新构建，和入库的 jar 逐字节比较、和 `jar.go` 登记的 sha256 比较，不一样时退出码 1。
+- 用 JDK 21 构建（入库的是 OpenJDK 21.0.12 构建的）。SVC API 不管是从 Maven 下载的还是 `api-from-source.sh` 编的，编出的 class 都一样（只用来编译，不进 jar）。
+- 当前入库：版本 0.2.0，`minedeck-voicebridge.jar` 的 sha256 是 `11a4e360f1ab879421e17c2f4fad921d5e5b7ef20d0f691c45d5c5f57e891e69`，`minedeck-voicebridge-javafml.jar` 是 `b1af78b47de389abf0e7311138eacd192a1267bb407e84d74621967107e28db3`。
+
+装进实例时文件名带版本号：`minedeck-voicebridge-0.2.0.jar`（备用加载方式是 `minedeck-voicebridge-javafml-0.2.0.jar`），
+`mods/` 里别的版本（包括原型阶段不带版本号的 `minedeck-voicebridge.jar`）会被删掉：同一个模组装两份，加载器会报重复模组。
 
 ## 安装
 
