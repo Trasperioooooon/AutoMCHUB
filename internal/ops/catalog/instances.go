@@ -24,6 +24,7 @@ type instSummary struct {
 	MC              string   `json:"mc"`
 	Build           string   `json:"build"`
 	JavaMajor       int      `json:"javaMajor"`
+	JavaSource      string   `json:"javaSource"` // portable：MineDeck 的便携版；local：本机装的 Java
 	XmxMB           int      `json:"xmxMb"`
 	XmsMB           int      `json:"xmsMb"`
 	Port            int      `json:"port"`
@@ -50,13 +51,18 @@ func summarize(i *inst.Instance) instSummary {
 		}
 	}
 	xmx, xms, enc := i.MemSnapshot() // 加锁快照，避免与并发的 UpdateSettings 写入构成数据竞争
+	javaMajor, javaPath := i.JavaSnapshot()
+	javaSource := "local"
+	if rel, err := filepath.Rel(app.RuntimesDir, javaPath); err == nil && !strings.HasPrefix(rel, "..") {
+		javaSource = "portable"
+	}
 	if enc == "" {
 		enc = "auto"
 	}
 	return instSummary{
 		Name: i.Name, Core: string(i.Core), Kind: string(mcsrc.KindOf(i.Core)),
 		MC: i.MC, Build: i.Build,
-		JavaMajor: i.JavaMajor, XmxMB: xmx, XmsMB: xms,
+		JavaMajor: javaMajor, JavaSource: javaSource, XmxMB: xmx, XmsMB: xms,
 		Port: i.Port(), Status: i.Status(), MOTD: motd, Dir: i.Dir,
 		CreatedAt:       i.CreatedAt.Format("2006-01-02 15:04"),
 		ConsoleEncoding: enc,

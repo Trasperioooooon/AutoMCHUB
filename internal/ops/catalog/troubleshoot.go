@@ -31,7 +31,7 @@ func (c *cat) troubleshootOps() {
 		Name: "instance.console.tail", Title: "查看控制台输出", Level: ops.Read,
 		Desc: "实例控制台最近的输出（MineDeck 内存里最多保留 3000 行）。可以只看 WARN / ERROR，按关键字过滤，或只看最近一次启动以来的。",
 		Params: withInst(map[string]*ops.Schema{
-			"lines": ops.Integer("最多返回几行，默认 100").Range(1, 500),
+			"lines": ops.Integer("最多返回几行，默认 100（结果超过 16 KB 会被截断）").Range(1, 3000),
 			"level": ops.String("只看这一级及更严重的：warn（WARN 和 ERROR）、error（ERROR、异常和堆栈）；空串不过滤").OneOf("", "warn", "error"),
 			"q":     ops.String("关键字（不分大小写）").Len(0, 100),
 			"since": ops.String("start：只看最近一次启动以来的；空串看全部").OneOf("", "start"),
