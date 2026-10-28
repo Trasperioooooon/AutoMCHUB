@@ -58,6 +58,7 @@ function newState(ui) {
     props: null,
     empty: false,
     taskStage: 2,
+    ai: newAIState(),
   };
   state.props = catalog(ui).map(p => ({ key: p.key, value: p.key === "motd" ? "§a生存服 §7· §e一起来玩！" : String(p.def ?? "") }));
   return state;
@@ -71,6 +72,212 @@ const OPLOG = [
   { t: "2026-10-25T21:30:00+08:00", op: "instance.start", src: "schedule", actor: "崩溃自动重启", inst: "机械动力整合包", args: { attempt: 1 }, ok: false, err: "Java 运行时缺失", ms: 1 },
   { t: "2026-10-25T20:02:11+08:00", op: "app.config.set", src: "ui", actor: "本机", args: { cfApiKey: "***" }, ok: true, ms: 2 },
 ];
+
+// ---- AI 接入层（同 GET/PUT /api/ai/*）----
+// 预设照抄后端 ai.Presets()（只是填写模板，不预选、不推荐）。改了后端的预设要同步这里。
+const AI_PRESETS = [
+  {
+    "id": "deepseek",
+    "name": "DeepSeek",
+    "protocol": "openai",
+    "baseUrl": "https://api.deepseek.com",
+    "model": "deepseek-v4-flash",
+    "domestic": true,
+    "note": "官方文档写明 deepseek-chat、deepseek-reasoner 已于 2026-07-24 下线，换成 deepseek-v4-flash、deepseek-v4-pro（摘要）。思考模式下工具循环可能要把 reasoning_content 原样传回，这里默认传回（摘要，需实测）。",
+    "verified": "摘要"
+  },
+  {
+    "id": "qwen",
+    "name": "通义千问（阿里云百炼）",
+    "protocol": "openai",
+    "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "altUrls": [
+      {
+        "label": "新加坡",
+        "url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+      }
+    ],
+    "model": "qwen-plus",
+    "domestic": true,
+    "note": "默认是北京地域；Key 只能配对应地域的地址（摘要）。官方建议改用工作空间专属域名，可以在地址里改。",
+    "verified": "摘要"
+  },
+  {
+    "id": "kimi",
+    "name": "Kimi（月之暗面）",
+    "protocol": "openai",
+    "baseUrl": "https://api.moonshot.cn/v1",
+    "altUrls": [
+      {
+        "label": "国际站",
+        "url": "https://api.moonshot.ai/v1"
+      }
+    ],
+    "domestic": true,
+    "note": "国内站和国际站的 Key 不通用（摘要：第三方文档，官方页面未能抓取）。流式用量可能在 choices[0].usage，两处都读。",
+    "verified": "摘要"
+  },
+  {
+    "id": "zhipu",
+    "name": "智谱",
+    "protocol": "openai",
+    "baseUrl": "https://open.bigmodel.cn/api/paas/v4/",
+    "domestic": true,
+    "note": "地址末尾的斜杠原样保留。官方说兼容 OpenAI，但「部分场景仍有差异」（摘要）。",
+    "verified": "摘要"
+  },
+  {
+    "id": "openai",
+    "name": "OpenAI",
+    "protocol": "openai",
+    "baseUrl": "https://api.openai.com/v1",
+    "note": "国内一般要代理才能连上（推断）。MineDeck 走环境变量 HTTPS_PROXY 里的代理。",
+    "verified": "摘要"
+  },
+  {
+    "id": "ollama",
+    "name": "Ollama（本机）",
+    "protocol": "openai",
+    "baseUrl": "http://localhost:11434/v1/",
+    "noKey": true,
+    "local": true,
+    "note": "不用 Key，数据不出本机；模型从本机已下载的里面选。不估算费用。",
+    "verified": "核实"
+  },
+  {
+    "id": "claude",
+    "name": "Claude",
+    "protocol": "anthropic",
+    "baseUrl": "https://api.anthropic.com",
+    "model": "claude-opus-5-5",
+    "note": "支持地区不含中国大陆（摘要），国内一般也连不上（推断）。默认开启服务端回退（拒答时自动换模型，beta）。",
+    "verified": "核实"
+  },
+  {
+    "id": "custom",
+    "name": "自定义",
+    "protocol": "openai",
+    "baseUrl": "",
+    "note": "任意 OpenAI 兼容的地址，或者走 Claude 协议的中转。注意：中转方能看到全部对话和 Key。",
+    "verified": "—"
+  }
+];
+// 几个模型的公开价格（每百万 token，美元；只为显示「当前模型的单价」）
+const AI_MODEL_PRICES = {
+  "deepseek-v4-flash": { input: 0.3, output: 1.2, cacheRead: 0.006 },
+  "qwen-plus": { input: 0.4, output: 1.2, tiered: true },
+  "gpt-5": { input: 1.25, output: 10, cacheRead: 0.125 },
+  "claude-opus-5-5": { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 },
+};
+const AI_MODELS = {
+  deepseek: ["deepseek-v4-flash", "deepseek-v4-pro"], qwen: ["qwen-flash", "qwen-plus", "qwen3-max"], kimi: ["kimi-k2.6", "kimi-k3"],
+  zhipu: ["glm-4.5", "glm-5.3"], openai: ["gpt-5", "gpt-5.5"], ollama: ["qwen3:8b", "llama3.1"], custom: ["my-model"],
+  claude: [{ id: "claude-opus-5-5", name: "Claude Opus 5.5", maxOutput: 128000 }, { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", maxOutput: 128000 }, { id: "claude-haiku-5-5", name: "Claude Haiku 5.5", maxOutput: 128000 }],
+};
+const AI_LOCAL_MSG = "AI 设置仅支持在本机修改（含 Key 和接口地址）";
+const AI_DISABLED = "AI 未启用：先在「设置 → AI」里选择服务商，填好 Key 和模型";
+function newAIState() {
+  return {
+    preset: "", protocol: "", baseUrl: "", model: "", maxOutput: 0, effort: "", key: "", keyBroken: false,
+    quota: {}, prices: [], priceUpdated: "", local: true, testFail: false,
+    today: { assistant: { requests: 12, tokens: 123456, estimated: 1, cost: { USD: 0.0312 } }, gamechat: { requests: 3, tokens: 5600, cost: { USD: 0.002 } } },
+    month: { assistant: { requests: 80, tokens: 1234567, estimated: 2, unpriced: 1, cost: { USD: 0.42, CNY: 1.3 } }, gamechat: { requests: 20, tokens: 45000, cost: { USD: 0.01 } } },
+  };
+}
+function aiMissing(a) {
+  const p = AI_PRESETS.find(x => x.id === a.preset);
+  if (!p) return "选择服务商";
+  if (!a.baseUrl) return "填写接口地址";
+  if (!p.noKey && p.id !== "custom") { if (a.keyBroken) return "重新填写 Key（原来的 Key 解不开，可能换了电脑或 Windows 用户）"; if (!a.key) return "填写 Key"; }
+  if (!a.model) return "选择模型";
+  return "";
+}
+function aiView(a) {
+  const p = AI_PRESETS.find(x => x.id === a.preset);
+  const missing = aiMissing(a);
+  const official = a.protocol === "anthropic" && /^https:\/\/api\.anthropic\.com\/?(v1\/?)?$/.test(a.baseUrl);
+  let modelPrice;
+  if (p && a.model) {
+    const cp = a.prices.find(c => c.model === a.model);
+    const pub = AI_MODEL_PRICES[a.model];
+    if (p.local) modelPrice = { found: true, local: true };
+    else if (cp) modelPrice = { found: true, source: "custom", currency: cp.currency, input: cp.input, output: cp.output, cacheRead: cp.cacheRead };
+    else if (pub && a.priceUpdated) modelPrice = { found: true, source: "litellm", currency: "USD", ...pub, ...(p.domestic ? { note: "按国际站美元价估算，国内站按人民币计费，会有出入" } : {}) };
+    else modelPrice = { found: false };
+  }
+  const priceNeeded = !missing && !(p && p.local);
+  return {
+    presets: AI_PRESETS, provider: { preset: a.preset, protocol: a.protocol, baseUrl: a.baseUrl, model: a.model, maxOutput: a.maxOutput, effort: a.effort, eager: official, fallback: official },
+    keySet: !!a.key && !a.keyBroken, keyBroken: !!a.key && a.keyBroken, enabled: !missing, missing, quota: a.quota, today: a.today, month: a.month,
+    priceNeeded, prices: { source: "LiteLLM 公开价格", updated: priceNeeded ? a.priceUpdated : a.priceUpdated, count: a.priceUpdated ? 3203 : 0 },
+    modelPrice, customPrices: a.prices, local: a.local,
+  };
+}
+// 同 ai.Service.SetProvider：只改传了的字段；改了服务商、协议或地址，旧 Key 清掉（同一次请求给了新 Key 就用新的）
+function aiSetProvider(a, b) {
+  if ("preset" in b && b.preset === "") { Object.assign(a, { preset: "", protocol: "", baseUrl: "", model: "", maxOutput: 0, effort: "", key: "", keyBroken: false }); return null; }
+  const id = "preset" in b ? b.preset : a.preset;
+  const p = AI_PRESETS.find(x => x.id === id);
+  if (!p) return id ? `未知的服务商："${id}"` : "先选择服务商";
+  const changed = id !== a.preset;
+  const n = { ...a, preset: id };
+  n.protocol = p.id !== "custom" ? p.protocol : (b.protocol || (changed ? "openai" : a.protocol) || "openai");
+  if ("baseUrl" in b) n.baseUrl = String(b.baseUrl).trim(); else if (changed) n.baseUrl = p.baseUrl;
+  if (!n.baseUrl && p.id !== "custom") n.baseUrl = p.baseUrl;
+  if (!/^https?:\/\/[^/?#\s]+/.test(n.baseUrl) || /[?#]/.test(n.baseUrl)) return "接口地址要以 http:// 或 https:// 开头";
+  if ("model" in b) n.model = String(b.model).trim(); else if (changed) n.model = p.model || "";
+  if ("effort" in b) n.effort = b.effort;
+  if (n.protocol !== "anthropic") n.effort = "";
+  let key = "key" in b ? String(b.key).trim() : null;
+  if (key !== null && /\s/.test(key)) return "Key 的格式不对（不能有空格，最长 4096 个字符）";
+  if (changed || n.protocol !== a.protocol || n.baseUrl !== a.baseUrl) { if (key === null) key = ""; }
+  if (key !== null) { n.key = key; n.keyBroken = false; }
+  Object.assign(a, n);
+  return null;
+}
+async function aiHandler(state, req, res, p, m) {
+  const a = state.ai;
+  const local = a.local;
+  if (p === "/api/ai/settings" && m === "GET") return ok(res, aiView(a));
+  if (!local) return err(res, 403, AI_LOCAL_MSG); // 修改类的都仅本机
+  const b = await readBody(req);
+  if (p === "/api/ai/provider" && m === "PUT") { const e = aiSetProvider(a, b); return e ? err(res, 400, e) : ok(res, aiView(a)); }
+  if (p === "/api/ai/models" && m === "POST") {
+    const pr = AI_PRESETS.find(x => x.id === b.preset);
+    if (!pr) return err(res, 400, "先选择服务商");
+    const base = (b.baseUrl || pr.baseUrl).trim();
+    const key = (b.key || "").trim() || (a.preset === pr.id && a.baseUrl === base ? a.key : "");
+    if (!key && !pr.noKey && pr.id !== "custom") return err(res, 400, "先填写 Key");
+    return ok(res, (AI_MODELS[pr.id] || []).map(x => (typeof x === "string" ? { id: x } : x)));
+  }
+  if (p === "/api/ai/test" && m === "POST") {
+    if (aiMissing(a)) return err(res, 400, AI_DISABLED);
+    if (a.testFail) return ok(res, { ok: false, tools: "unknown", error: "Key 不对或已失效（HTTP 401，authentication_error）：invalid x-api-key", latencyMs: 0, totalMs: 0, usage: { input: 0, output: 0 } });
+    const pr = AI_PRESETS.find(x => x.id === a.preset);
+    return ok(res, { ok: true, latencyMs: 820, totalMs: 1310, model: a.model, tools: "yes", stop: "tool_use", usage: { input: 156, output: 12 },
+      cost: pr.local ? { amount: 0, currency: "USD", source: "local" } : { amount: 0.0001, currency: "USD", source: "litellm" } });
+  }
+  if (p === "/api/ai/quota" && m === "PUT") {
+    for (const [k, v] of Object.entries(b)) {
+      if (!["assistant", "gamechat"].includes(k)) return err(res, 400, `参数 ${k} 不认识`);
+      if (!(v >= 0)) return err(res, 400, "额度要在 0 到 1 万亿 token 之间（0 表示不限）");
+      if (v) a.quota[k] = v; else delete a.quota[k];
+    }
+    return ok(res, aiView(a));
+  }
+  if (p === "/api/ai/prices" && m === "PUT") {
+    if (!Array.isArray(b.prices)) return err(res, 400, "缺少参数 prices");
+    a.prices = b.prices;
+    return ok(res, aiView(a));
+  }
+  if (p === "/api/ai/prices/refresh" && m === "POST") {
+    if (aiMissing(a)) return err(res, 400, AI_DISABLED);
+    if ((AI_PRESETS.find(x => x.id === a.preset) || {}).local) return err(res, 400, "本机模型不花钱，不需要价格数据");
+    a.priceUpdated = "2026-10-28";
+    return ok(res, aiView(a));
+  }
+  return err(res, 404, "not found");
+}
 
 const VERSIONS = ["26.2", "26.1", "1.21.4", "1.21.3", "1.21.1", "1.21", "1.20.6", "1.20.4", "1.20.2", "1.20.1", "1.19.4", "1.19.2", "1.18.2", "1.17.1", "1.16.5", "1.12.2"];
 const SNAPS = ["26.3-snapshot-2", "26.3-snapshot-1", "26.2-rc1"];
@@ -111,6 +318,7 @@ function handler(state, ui, portOf) {
     //   status: { 名称: running | starting | stopping | stopped } 直接改某台服务器的运行状态（看状态切换的动效用）
     //   cfKey: 已存的 CurseForge API Key（空串 = 未设置）；cfKeyBroken: true 模拟「Key 解不开」（换了电脑或 Windows 用户）
     //   credBroken: 隧道编号（如 "t2"），模拟这条隧道的凭据解不开；空串还原
+    //   ai: { reset: true 回到没配置, local: false 模拟局域网打开（只能看）, keyBroken, testFail, priceUpdated, 以及 preset/baseUrl/model/key 等直接写入 }
     if (p === "/__mock/state" && m === "POST") {
       const b = await readBody(req);
       if ("empty" in b) state.empty = !!b.empty;
@@ -122,6 +330,7 @@ function handler(state, ui, portOf) {
       if ("cfKey" in b) state.cfKey = String(b.cfKey || "");
       if ("cfKeyBroken" in b) state.cfKeyBroken = !!b.cfKeyBroken;
       if ("credBroken" in b) for (const t of state.tunnels) t.credBroken = t.id === b.credBroken;
+      if (b.ai) { if (b.ai.reset) state.ai = newAIState(); const { reset, ...rest } = b.ai; Object.assign(state.ai, rest); }
       if (b.status) for (const [n, st] of Object.entries(b.status)) { const i = state.instances.find(x => x.name === n); if (i) { i.status = st; i.uptimeSec = st === "stopped" ? 0 : st === "starting" ? 9 : i.uptimeSec; i.onlineCount = st === "running" ? i.onlineCount : 0; } }
       return ok(res, state);
     }
@@ -143,6 +352,7 @@ function handler(state, ui, portOf) {
         const q = u.searchParams, lim = Math.min(+q.get("limit") || 100, 1000);
         return ok(res, OPLOG.filter(r => (!q.get("inst") || r.inst === q.get("inst")) && (!q.get("src") || r.src === q.get("src")) && (!q.get("op") || r.op.startsWith(q.get("op")))).slice(0, lim));
       }
+      if (p.startsWith("/api/ai/")) return aiHandler(state, req, res, p, m);
       if (p === "/api/cores") return ok(res, CORES);
       if (p === "/api/config" && m === "PUT") {
         const b = await readBody(req);

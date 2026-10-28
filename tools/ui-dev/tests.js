@@ -575,6 +575,201 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
     } finally { await mockState({ credBroken: "" }); }
   });
 
+  // ---- 设置 → AI（设计文档 §4）：仿真后端的 /api/ai/* 与 ai.Service 同一套规则 ----
+  const aiState = b => page.evaluate(x => fetch("/__mock/state", { method: "POST", body: JSON.stringify({ ai: x }) }), b);
+  const toastHas = (s, timeout = 2000) => page.waitForFunction(x => [...document.querySelectorAll(".toast")].some(t => t.textContent.includes(x)), s, { timeout }).then(() => true, () => false);
+  const aiForm = () => page.evaluate(() => {
+    const q = s => document.querySelector(s);
+    return { preset: q("#ai-preset").value, opts: [...q("#ai-preset").options].map(o => o.textContent), url: q("#ai-url").value, model: q("#ai-model").value,
+      key: q("#ai-key").value, keyPh: q("#ai-key").placeholder, keySub: q("#ai-key-sub").textContent, clear: !q("#ai-key-clear").hidden,
+      proto: !q(".ai-proto-row").hidden, effort: !q(".ai-effort-row").hidden, status: q("#ai-status").textContent,
+      dirty: !!q(".save-bar.dirty"), test: !q("#ai-test").disabled, priceSrc: q("#ai-price-src").textContent };
+  });
+  const putBody = (since, path) => { const r = reqs.slice(since).filter(x => x.m === "PUT" && x.u === path).pop(); return r ? JSON.parse(r.b || "{}") : null; };
+  const AI_DEEPSEEK = { preset: "deepseek", protocol: "openai", baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash" };
+  const AI_CLAUDE = { preset: "claude", protocol: "anthropic", baseUrl: "https://api.anthropic.com", model: "claude-opus-5-5" };
+
+  await run("AI：没配置时不预选、不推荐，打开页面只读设置不联网；选预设填好地址和建议模型；Key 只写不读（保存后留空、占位写「已设置」）", async () => {
+    await aiState({ reset: true });
+    try {
+      const t0 = reqs.length;
+      await page.goto(url("#/settings/ai")); await settle();
+      let f = await aiForm();
+      assert(f.preset === "" && f.opts[0] === "未选择" && !f.opts.some(o => o.includes("推荐")), "没配置时不应预选或推荐：" + f.opts);
+      assert(f.status.includes("未启用") && !f.test && !f.dirty && f.priceSrc.includes("才会下载"), "没配置时：" + JSON.stringify(f));
+      const aiReqs = reqs.slice(t0).filter(r => r.u.startsWith("/api/ai/")).map(r => r.m + " " + r.u);
+      assert(aiReqs.length > 0 && aiReqs.every(r => r === "GET /api/ai/settings"), "打开页面只应读设置：" + aiReqs);
+      await page.selectOption("#ai-preset", "deepseek"); await settle(150);
+      f = await aiForm();
+      assert(f.url === "https://api.deepseek.com" && f.model === "deepseek-v4-flash" && !f.proto && !f.effort && f.dirty, "选 DeepSeek 后：" + JSON.stringify(f));
+      const key = "sk-ai-test-" + Date.now();
+      await page.fill("#ai-key", key);
+      const t1 = reqs.length;
+      await page.click('[data-sb="save"]'); await settle(300);
+      const b = putBody(t1, "/api/ai/provider");
+      assert(b && b.key === key && b.preset === "deepseek" && b.baseUrl === "https://api.deepseek.com", "保存应带上新 Key：" + JSON.stringify(b));
+      f = await aiForm();
+      assert(f.key === "" && f.keyPh.includes("已设置") && f.clear && !f.dirty && f.status.includes("已启用") && f.test, "保存后：" + JSON.stringify(f));
+      assert(!f.opts.includes("未选择"), "配过之后不应再有「未选择」（停用走「停用 AI」）");
+      const view = await page.evaluate(() => fetch("/api/ai/settings", { headers: { "X-Token": "mock" } }).then(r => r.text()));
+      assert(!view.includes(key) && JSON.parse(view).data.keySet === true, "设置接口不应下发 Key：" + view.slice(0, 160));
+      await page.reload(); await settle();
+      f = await aiForm();
+      assert(f.key === "" && f.keyPh.includes("已设置") && f.preset === "deepseek" && !(await page.content()).includes(key), "重新打开后：" + JSON.stringify(f));
+    } finally { await aiState({ reset: true }); }
+  });
+
+  await run("AI：改了接口地址先提示旧 Key 会清掉，保存后要重填；清除 Key 要确认；停用 AI 清掉服务商设置", async () => {
+    await aiState({ reset: true, ...AI_DEEPSEEK, key: "sk-old" });
+    try {
+      await page.goto(url("#/settings/ai")); await settle();
+      let f = await aiForm();
+      assert(f.keyPh.includes("已设置") && f.clear, "已设置 Key：" + JSON.stringify(f));
+      await page.fill("#ai-url", "https://api.deepseek.com/v1"); await settle(100);
+      f = await aiForm();
+      assert(f.keySub.includes("原来的 Key 会清掉") && !f.clear && f.keyPh === "粘贴 API Key" && f.dirty, "改地址后应提示：" + JSON.stringify(f));
+      await page.click('[data-sb="save"]'); await settle(300);
+      f = await aiForm();
+      assert(f.status.includes("未启用") && f.status.includes("填写 Key") && f.keyPh === "粘贴 API Key" && !f.clear && !f.test, "保存后旧 Key 应清掉：" + JSON.stringify(f));
+      assert(await toastHas("还差：填写 Key"), "应提示还差什么");
+      await page.fill("#ai-key", "sk-new"); await page.click('[data-sb="save"]'); await settle(300);
+      f = await aiForm();
+      assert(f.status.includes("已启用") && f.keyPh.includes("已设置"), "重填后：" + JSON.stringify(f));
+      // 清除 Key：危险操作多一步，确认框默认聚焦「取消」
+      await page.click("#ai-key-clear"); await settle(200);
+      assert((await page.evaluate(() => document.activeElement && document.activeElement.textContent.trim())) === "取消", "清除确认框应默认聚焦「取消」");
+      let t1 = reqs.length;
+      await page.click('.modal [data-x="ok"]'); await settle(300);
+      assert((putBody(t1, "/api/ai/provider") || {}).key === "", "清除应发 key 空串");
+      f = await aiForm();
+      assert(f.keyPh === "粘贴 API Key" && !f.clear && f.status.includes("未启用"), "清除后：" + JSON.stringify(f));
+      // 停用 AI：清掉服务商设置，回到没配置
+      await page.click("#ai-off"); await settle(200);
+      t1 = reqs.length;
+      await page.click('.modal [data-x="ok"]'); await settle(500);
+      assert((putBody(t1, "/api/ai/provider") || {}).preset === "", "停用应发 preset 空串");
+      f = await aiForm();
+      assert(f.preset === "" && f.url === "" && !(await page.$eval("#ai-off-zone", z => !z.hidden)), "停用后：" + JSON.stringify(f));
+    } finally { await aiState({ reset: true }); }
+  });
+
+  await run("AI：获取模型列表填进可选列表；测试连接只认保存过的设置，显示延迟和能否调用工具；思考深度只对 Claude、协议只对自定义", async () => {
+    await aiState({ reset: true });
+    try {
+      await page.goto(url("#/settings/ai")); await settle();
+      await page.selectOption("#ai-preset", "custom"); await settle(100);
+      let f = await aiForm();
+      assert(f.proto && !f.effort && f.url === "" && f.keySub.includes("中转方能看到"), "自定义：" + JSON.stringify(f));
+      await page.selectOption("#ai-proto", "anthropic"); await settle(100);
+      assert((await aiForm()).effort, "自定义走 Claude 协议时应显示思考深度");
+      await page.selectOption("#ai-preset", "claude"); await settle(100);
+      f = await aiForm();
+      assert(!f.proto && f.effort && f.url === "https://api.anthropic.com" && f.model === "claude-opus-5-5", "选 Claude 后：" + JSON.stringify(f));
+      await page.click("#ai-list");
+      assert(await toastHas("先填写 Key"), "没填 Key 时获取模型列表应提示");
+      await page.fill("#ai-key", "sk-ant-test");
+      await page.click("#ai-list"); await settle(300);
+      const opts = await page.$$eval("#ai-models option", os => os.map(o => o.value));
+      assert(opts.length === 3 && opts.includes("claude-sonnet-5-5"), "模型列表：" + opts);
+      assert((await page.textContent("#ai-model-sub")).includes("取到 3 个模型"), "应提示取到几个模型");
+      await page.selectOption("#ai-effort", "high");
+      let t0 = reqs.length;
+      await page.click('[data-sb="save"]'); await settle(300);
+      const b = putBody(t0, "/api/ai/provider");
+      assert(b && b.preset === "claude" && b.effort === "high" && b.key === "sk-ant-test" && !("protocol" in b), "保存 Claude：" + JSON.stringify(b));
+      // 改了还没保存：不发测试请求，提示先保存
+      await page.fill("#ai-model", "claude-sonnet-5-5");
+      t0 = reqs.length;
+      await page.click("#ai-test");
+      assert(await toastHas("先保存服务商设置"), "未保存时应提示先保存");
+      assert(!reqs.slice(t0).some(r => r.u === "/api/ai/test"), "未保存时不应发测试请求");
+      await page.click('[data-sb="save"]'); await settle(300);
+      await page.click("#ai-test"); await settle(300);
+      let sub = await page.textContent("#ai-test-sub");
+      assert(sub.includes("连接正常") && sub.includes("820 ms") && sub.includes("能调用工具") && sub.includes("168 token"), "测试结果：" + sub);
+      await aiState({ testFail: true });
+      await page.click("#ai-test"); await settle(300);
+      sub = await page.textContent("#ai-test-sub");
+      assert(sub.includes("连接失败") && sub.includes("Key 不对"), "测试失败时：" + sub);
+    } finally { await aiState({ reset: true }); }
+  });
+
+  await run("AI：每日额度按万 token 保存，填错就近提示；自填单价可添加、删除，优先于公开价格；只配本机模型时不取价格", async () => {
+    await aiState({ reset: true, ...AI_CLAUDE, key: "sk-ant" });
+    try {
+      await page.goto(url("#/settings/ai")); await settle();
+      const qsub = await page.textContent("#q-sub-assistant");
+      assert(qsub.includes("今天已用 12.3 万 token（约 $0.03）") && qsub.includes("约 $0.42 + ¥1.30") && qsub.includes("1 次查不到价格"), "用量：" + qsub);
+      let t0 = reqs.length;
+      await page.fill("#q-assistant", "5"); await page.press("#q-assistant", "Enter"); await settle(300);
+      assert((putBody(t0, "/api/ai/quota") || {}).assistant === 50000, "额度应按万 token 换算");
+      assert(await toastHas("每天最多 5 万 token"), "应提示新额度");
+      t0 = reqs.length;
+      await page.fill("#q-assistant", "-1"); await page.press("#q-assistant", "Enter"); await settle(200);
+      assert((await page.textContent("#q-err-assistant")).includes("不小于 0") && await page.$eval("#q-assistant", e => e.classList.contains("invalid")), "填错应就近提示");
+      assert(!putBody(t0, "/api/ai/quota"), "填错不应保存");
+      await page.fill("#q-assistant", ""); await page.press("#q-assistant", "Enter"); await settle(300);
+      assert((putBody(t0, "/api/ai/quota") || {}).assistant === 0 && (await page.textContent("#q-err-assistant")) === "", "清空即不限");
+      // 公开价格：手动刷新后显示当前模型的单价
+      assert((await page.textContent("#ai-price-src")).includes("还没取到"), "还没取价格时：" + await page.textContent("#ai-price-src"));
+      await page.click("#ai-price-refresh"); await settle(300);
+      assert((await page.textContent("#ai-price-src")).includes("2026-10-28 更新"), "刷新后：" + await page.textContent("#ai-price-src"));
+      assert((await page.textContent("#ai-model-price")).startsWith("公开价格：输入 $4 · 输出 $20"), "公开价格：" + await page.textContent("#ai-model-price"));
+      // 自填单价（人民币，不做汇率换算）：缺输出单价时就近提示；填好后优先于公开价格
+      await page.selectOption("#cp-cur", "CNY");
+      await page.fill("#cp-in", "30");
+      await page.click("#cp-add"); await settle(150);
+      assert((await page.textContent("#cp-err")).includes("输入和输出单价都要填"), "缺输出单价应就近提示");
+      await page.fill("#cp-out", "150");
+      t0 = reqs.length;
+      await page.click("#cp-add"); await settle(300);
+      const pb = putBody(t0, "/api/ai/prices");
+      assert(pb && JSON.stringify(pb.prices) === JSON.stringify([{ model: "claude-opus-5-5", currency: "CNY", input: 30, output: 150 }]), "自填单价：" + JSON.stringify(pb));
+      assert((await page.textContent("#ai-model-price")).startsWith("自填：输入 ¥30 · 输出 ¥150"), "自填的应优先：" + await page.textContent("#ai-model-price"));
+      t0 = reqs.length;
+      await page.click('[data-del-price="0"]'); await settle(300);
+      assert((putBody(t0, "/api/ai/prices") || {}).prices.length === 0 && !(await page.$("[data-del-price]")), "删除自填单价");
+      assert((await page.textContent("#ai-model-price")).startsWith("公开价格"), "删掉后回到公开价格");
+      // 只配了 Ollama：不花钱，不取价格，不用 Key
+      await aiState({ preset: "ollama", protocol: "openai", baseUrl: "http://localhost:11434/v1/", model: "qwen3:8b", key: "" });
+      await page.goto(url("#/settings/ai")); await settle();
+      const f = await aiForm();
+      assert(f.priceSrc.includes("本机模型不花钱") && await page.$eval("#ai-price-refresh", e => e.disabled), "本机模型不应取价格：" + f.priceSrc);
+      assert((await page.textContent("#ai-model-price")).includes("本机模型，不计费") && f.keyPh === "不用 Key" && f.status.includes("已启用"), "本机模型：" + JSON.stringify(f));
+    } finally { await aiState({ reset: true }); }
+  });
+
+  await run("AI：局域网打开只能看——提示仅本机修改，控件全部禁用，没有保存条和「停用 AI」", async () => {
+    await aiState({ reset: true, ...AI_DEEPSEEK, key: "sk-x", local: false });
+    try {
+      const t0 = reqs.length;
+      await page.goto(url("#/settings/ai")); await settle();
+      const r = await page.evaluate(() => ({
+        warn: [...document.querySelectorAll("#set-body .warn-card")].map(w => w.textContent).join(""),
+        live: [...document.querySelectorAll("#set-body input, #set-body select, #set-body button")].filter(e => !e.disabled && !e.hidden).map(e => e.id || e.outerHTML.slice(0, 40)),
+        bar: !!document.querySelector("#set-body .save-bar"), off: !!document.querySelector("#ai-off-zone"),
+        ph: document.querySelector("#ai-key").placeholder, clear: !document.querySelector("#ai-key-clear").hidden }));
+      assert(r.warn.includes("仅支持在本机修改"), "应提示仅本机修改：" + r.warn);
+      assert(r.live.length === 0, "局域网下仍能操作：" + r.live);
+      assert(!r.bar && !r.off && r.ph === "已设置" && !r.clear, "局域网下：" + JSON.stringify(r));
+      assert(!reqs.slice(t0).some(x => x.u.startsWith("/api/ai/") && x.m !== "GET"), "局域网下不应发修改请求");
+    } finally { await aiState({ reset: true }); }
+  });
+
+  await run("AI：手机宽度（390px）下分区不横向溢出", async () => {
+    await aiState({ reset: true, preset: "custom", protocol: "anthropic", baseUrl: "https://relay.example.com", model: "claude-opus-5-5", key: "sk",
+      prices: [{ model: "claude-opus-5-5", currency: "CNY", input: 30, output: 150, cacheRead: 3 }] });
+    const c = await hostCtx({ host: false }, { viewport: { width: 390, height: 844 } });
+    try {
+      const p = await c.newPage();
+      p.on("pageerror", e => errors.push(e.message));
+      await p.goto(ORIGIN + "#/settings/ai"); await p.waitForTimeout(900);
+      const w = await p.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth,
+        wide: [...document.querySelectorAll("#set-body *")].filter(e => e.getClientRects().length && e.getBoundingClientRect().right > innerWidth + 1).map(e => e.id || e.className).slice(0, 5) }));
+      assert(w.sw <= w.cw && w.wide.length === 0, "横向溢出：" + JSON.stringify(w));
+    } finally { await c.close(); await aiState({ reset: true }); }
+  });
+
   await run("全程无页面报错", async () => { assert(errors.length === 0, errors.slice(0, 3).join(" | ")); });
 
   await browser.close();
