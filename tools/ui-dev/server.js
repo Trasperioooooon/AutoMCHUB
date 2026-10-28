@@ -41,8 +41,10 @@ const CORES = [
 // 每次 start() 都从这份初始数据开始：4 台服务器（运行中 / 已停止 / 启动中 / 代理端）、2 条隧道、已完成首启
 function newState(ui) {
   const state = {
-    config: { source: "auto", onboarded: true, tosAccepted: true, backupKeep: 10, listenLan: false, webhookUrl: "", updateRepo: "Trasperioooooon/MineDeck", checkUpdateOnStart: true, minimizeToTray: true, cfApiKey: "", chromeColor: "" },
+    config: { source: "auto", onboarded: true, tosAccepted: true, backupKeep: 10, listenLan: false, webhookUrl: "", updateRepo: "Trasperioooooon/MineDeck", checkUpdateOnStart: true, minimizeToTray: true, chromeColor: "" },
     autoStart: false,
+    cfKey: "", // 同 web：CurseForge API Key 只写不读，不放进 config，/api/app 只给 cfKeySet
+    cfKeyBroken: false,
     instances: [
       { name: "生存服 · 朋友", core: "paper", kind: "game", mc: "1.21.4", build: "232", javaMajor: 21, xmxMb: 4096, xmsMb: 0, port: 25565, status: "running", motd: "§a生存服 §7· §e一起来玩！", dir: "D:\\MineDeck\\servers\\server-20261020-2130", createdAt: "2026-10-20T21:30:00+08:00", consoleEncoding: "auto", onlineCount: 3, uptimeSec: 7980, maxPlayers: 20, extraJvm: [] },
       { name: "机械动力整合包", core: "forge", kind: "game", mc: "1.20.1", build: "47.3.0", javaMajor: 17, xmxMb: 8192, xmsMb: 0, port: 25566, status: "stopped", motd: "§6Create 机械动力 §f整合包", dir: "D:\\MineDeck\\servers\\create-pack", createdAt: "2026-10-18T10:00:00+08:00", consoleEncoding: "gbk", onlineCount: 0, uptimeSec: 0, maxPlayers: 20, extraJvm: ["-XX:+UseG1GC"] },
@@ -98,6 +100,7 @@ function handler(state, ui, portOf) {
     //   taskStage: 部署任务进行到第几步（0–4，4 = 完成），"error" = 第 2 步失败
     //   legacy: { name, extraJvm, forceFlags } 把某台服务器设成「老版本」，保存 JVM 参数时补回 forceFlags
     //   status: { 名称: running | starting | stopping | stopped } 直接改某台服务器的运行状态（看状态切换的动效用）
+    //   cfKey: 已存的 CurseForge API Key（空串 = 未设置）；cfKeyBroken: true 模拟「Key 解不开」（换了电脑或 Windows 用户）
     if (p === "/__mock/state" && m === "POST") {
       const b = await readBody(req);
       if ("empty" in b) state.empty = !!b.empty;
@@ -106,6 +109,8 @@ function handler(state, ui, portOf) {
       if ("listenLan" in b) state.config.listenLan = !!b.listenLan;
       // 模拟老版本实例：保存 JVM 参数时后端强制补回 log4shell 缓解参数（同 inst.UpdateSettings）
       if (b.legacy) { const i = state.instances.find(x => x.name === b.legacy.name); if (i) { i.extraJvm = b.legacy.extraJvm; i.forceFlags = b.legacy.forceFlags; } }
+      if ("cfKey" in b) state.cfKey = String(b.cfKey || "");
+      if ("cfKeyBroken" in b) state.cfKeyBroken = !!b.cfKeyBroken;
       if (b.status) for (const [n, st] of Object.entries(b.status)) { const i = state.instances.find(x => x.name === n); if (i) { i.status = st; i.uptimeSec = st === "stopped" ? 0 : st === "starting" ? 9 : i.uptimeSec; i.onlineCount = st === "running" ? i.onlineCount : 0; } }
       return ok(res, state);
     }
@@ -121,7 +126,7 @@ function handler(state, ui, portOf) {
     const insts = () => state.empty ? [] : state.instances;
     const seg = p.split("/").map(decodeURIComponent); // ["", "api", "instances", name, sub...]
     try {
-      if (p === "/api/app") return ok(res, { version: "2.6.1", base: "D:\\MineDeck", ramMb: 16384, availRamMb: 9216, port: portOf(), serversRoot: "D:\\MineDeck\\servers", backupsRoot: "D:\\MineDeck\\backups", config: state.config, lanSet: false, autoStart: state.autoStart, ips: ["172.22.48.1", "192.168.1.23", "10.0.0.5"] });
+      if (p === "/api/app") return ok(res, { version: "2.6.1", base: "D:\\MineDeck", ramMb: 16384, availRamMb: 9216, port: portOf(), serversRoot: "D:\\MineDeck\\servers", backupsRoot: "D:\\MineDeck\\backups", config: state.config, lanSet: false, cfKeySet: !!state.cfKey && !state.cfKeyBroken, cfKeyBroken: state.cfKeyBroken, autoStart: state.autoStart, ips: ["172.22.48.1", "192.168.1.23", "10.0.0.5"] });
       if (p === "/api/bg") return ok(res, { images: [] });
       if (p === "/api/cores") return ok(res, CORES);
       if (p === "/api/config" && m === "PUT") {
@@ -132,6 +137,8 @@ function handler(state, ui, portOf) {
           b.chromeColor = b.chromeColor.toLowerCase();
         }
         if ("autoStart" in b) state.autoStart = !!b.autoStart;
+        // 同 web：Key 加密另存、不进 config，传空串清除；响应里永远没有 Key
+        if ("cfApiKey" in b) { state.cfKey = String(b.cfApiKey || "").trim(); state.cfKeyBroken = false; delete b.cfApiKey; }
         Object.assign(state.config, b); delete state.config.autoStart; return ok(res, state.config);
       }
       if (p === "/api/mcversions") {

@@ -3,6 +3,7 @@ package app
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"minedeck/internal/secret"
 )
 
 const Version = "2.6.1"
@@ -24,7 +27,7 @@ var (
 
 type Config struct {
 	Source             string `json:"source"`                       // auto | mirror | official
-	CFApiKey           string `json:"cfApiKey,omitempty"`           // CurseForge API Key（导入 CF 整合包用，选填）
+	CFApiKey           string `json:"cfApiKey,omitempty"`           // 旧版明文 CurseForge API Key：启动时加密挪进 secrets.json 后清空，只有迁移失败时才留着（读写走 CFKey / SetCFKey）
 	WebhookURL         string `json:"webhookUrl,omitempty"`         // 事件推送地址（选填）
 	UpdateRepo         string `json:"updateRepo,omitempty"`         // GitHub 更新仓库，如 user/MineDeck
 	CheckUpdateOnStart bool   `json:"checkUpdateOnStart,omitempty"` // 启动时后台静默检查更新
@@ -93,6 +96,7 @@ func Init() error {
 		}
 	}
 	loadConfig()
+	migrateCFKey()
 	return nil
 }
 
@@ -149,6 +153,57 @@ func UpdateConfig(mutate func(*Config) error) (Config, error) {
 func saveLocked() {
 	b, _ := json.MarshalIndent(cfg, "", "  ")
 	_ = os.WriteFile(configPath(), b, 0o644)
+}
+
+// ---------- 密钥（secrets.json，DPAPI 加密） ----------
+
+const cfKeyName = "cf.key" // secrets.json 里 CurseForge API Key 的键名
+
+func secrets() *secret.Store { return secret.NewStore(filepath.Join(Base, "secrets.json")) }
+
+// CFKey 返回 CurseForge API Key 的明文；没设置或解不开时返回空串。
+// config.json 里的旧明文只在迁移没成功时才会还在，这时照旧用它。
+func CFKey() string {
+	if k := GetConfig().CFApiKey; k != "" {
+		return k
+	}
+	k, _ := secrets().Get(cfKeyName)
+	return k
+}
+
+// CFKeyState 返回 CurseForge API Key 是否已设置，以及是否解不开（换了电脑或 Windows 用户，需要重填）。
+func CFKeyState() (set, unreadable bool) {
+	if GetConfig().CFApiKey != "" {
+		return true, false
+	}
+	return secrets().State(cfKeyName)
+}
+
+// SetCFKey 加密保存 CurseForge API Key（空串表示清除），并清掉 config.json 里可能残留的旧明文。
+func SetCFKey(k string) error {
+	if err := secrets().Set(cfKeyName, strings.TrimSpace(k)); err != nil {
+		return err
+	}
+	if GetConfig().CFApiKey != "" {
+		_, err := UpdateConfig(func(c *Config) error { c.CFApiKey = ""; return nil })
+		return err
+	}
+	return nil
+}
+
+// migrateCFKey 启动时把 config.json 里的明文 cfApiKey 加密挪进 secrets.json，再从 config.json 里删掉。
+// 加密失败就保持原样（CFKey 照旧读明文），只记日志。
+func migrateCFKey() {
+	k := GetConfig().CFApiKey
+	if k == "" {
+		return
+	}
+	if err := secrets().Set(cfKeyName, k); err != nil {
+		log.Println("CurseForge API Key 加密失败，暂时保留 config.json 里的明文:", err)
+		return
+	}
+	_, _ = UpdateConfig(func(c *Config) error { c.CFApiKey = ""; return nil })
+	log.Println("已把 config.json 里的 CurseForge API Key 加密挪进 secrets.json")
 }
 
 func MirrorFirst() bool  { return GetConfig().Source != "official" }

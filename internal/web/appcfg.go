@@ -20,15 +20,18 @@ import (
 // OnShutdown 由 main 注入：前端「退出程序」按钮触发（浏览器回退模式下唯一的退出途径）。
 var OnShutdown func()
 
-// publicConfig 返回可下发给前端的配置副本：抹去访问密码哈希（是否已设密码由 lanSet 告知）。
+// publicConfig 返回可下发给前端的配置副本：抹去访问密码哈希和 CurseForge API Key
+// （是否已设置由 /api/app 的 lanSet、cfKeySet 告知）。
 // 凡是把配置写进响应的处理器都必须经由此函数，不得直接下发 app.GetConfig()。
 func publicConfig() app.Config {
 	cfg := app.GetConfig()
 	cfg.AccessPasswordHash = "" // 不下发哈希
+	cfg.CFApiKey = ""           // Key 只能写、不能读（迁移没成功时这里还留着明文）
 	return cfg
 }
 
 func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
+	cfSet, cfBroken := app.CFKeyState()
 	writeJSON(w, map[string]any{
 		"version":     app.Version,
 		"base":        app.Base,
@@ -39,6 +42,8 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 		"backupsRoot": app.BackupsRoot(),
 		"config":      publicConfig(),
 		"lanSet":      app.GetConfig().AccessPasswordHash != "",
+		"cfKeySet":    cfSet,               // CurseForge API Key 是否已设置（Key 本身从不下发）
+		"cfKeyBroken": cfBroken,            // 已存的 Key 解不开（换了电脑或 Windows 用户），要重填
 		"autoStart":   autostart.Enabled(), // 开机自启真值以注册表为准
 		"ips":         localIPs(),
 	})
@@ -121,7 +126,7 @@ func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Source             *string `json:"source"`
-		CFApiKey           *string `json:"cfApiKey"`
+		CFApiKey           *string `json:"cfApiKey"` // 只写：DPAPI 加密存进 secrets.json；空串清除
 		WebhookURL         *string `json:"webhookUrl"`
 		UpdateRepo         *string `json:"updateRepo"`
 		CheckUpdateOnStart *bool   `json:"checkUpdateOnStart"`
@@ -193,9 +198,6 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 		if body.Source != nil {
 			c.Source = *body.Source
 		}
-		if body.CFApiKey != nil {
-			c.CFApiKey = strings.TrimSpace(*body.CFApiKey)
-		}
 		if body.WebhookURL != nil {
 			c.WebhookURL = strings.TrimSpace(*body.WebhookURL)
 		}
@@ -245,6 +247,13 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		writeErr(w, 400, err)
 		return
+	}
+	// CurseForge API Key 存在 secrets.json（不落 config.json），和开机自启一样放在配置保存成功之后再写
+	if body.CFApiKey != nil {
+		if err := app.SetCFKey(*body.CFApiKey); err != nil {
+			writeErr(w, 500, fmt.Errorf("保存 CurseForge API Key 失败: %w", err))
+			return
+		}
 	}
 	// 开机自启是注册表副作用（不落 config.json）：放在所有校验与配置保存成功之后再执行，
 	// 避免上面任一校验失败提前 return 时已经改动了注册表（否则会「报错却已悄悄改了自启」）

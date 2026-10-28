@@ -76,7 +76,7 @@ func (s *Server) handleImportModpack(w http.ResponseWriter, r *http.Request) {
 	if !isLoopbackReq(r) {
 		req.Root = "" // 同 handleCreateInstance：远程 / 局域网请求不得指定主机任意路径，强制落到默认根
 	}
-	id, err := s.mgr.ImportModpackAsync(pack, req, app.GetConfig().CFApiKey)
+	id, err := s.mgr.ImportModpackAsync(pack, req, app.CFKey())
 	if err != nil {
 		os.Remove(dest)
 		writeErr(w, 400, err)

@@ -5,6 +5,7 @@
 /backups/
 /bg/
 /config.json
+/secrets.json
 /tunnels.json
 /update.bat
 

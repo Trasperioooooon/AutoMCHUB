@@ -1,0 +1,112 @@
+package secret
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// DPAPI 加密再解密要原样回来，密文里看不到明文。
+func TestSealRoundTrip(t *testing.T) {
+	for _, plain := range []string{"cf-key-123", `a+b&c"d'e<f>g\h 中文 😀`, strings.Repeat("x", 4096)} {
+		s, err := Seal(plain)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !IsSealed(s) || strings.Contains(s, plain) {
+			t.Fatalf("密文不对：%.60q", s)
+		}
+		got, err := Unseal(s)
+		if err != nil || got != plain {
+			t.Fatalf("Unseal = %.40q, %v；应为 %.40q", got, err, plain)
+		}
+	}
+	if s, err := Seal(""); s != "" || err != nil {
+		t.Errorf("空串应原样返回：%q, %v", s, err)
+	}
+	if got, err := Unseal("旧版明文"); got != "旧版明文" || err != nil {
+		t.Errorf("没有 dpapi: 前缀的应按明文原样返回：%q, %v", got, err)
+	}
+}
+
+// 密文被改坏、或者不带本程序的附加口令（相当于别的程序来解）都解不开，报 ErrUnreadable。
+func TestUnsealFailures(t *testing.T) {
+	s, err := Seal("secret-value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, bad := range map[string]string{
+		"不是 base64": "dpapi:@@@",
+		"截断":        s[:len(s)-12],
+		"改了一个字节":    s[:len(prefix)+20] + flip(s[len(prefix)+20]) + s[len(prefix)+21:],
+	} {
+		if _, err := Unseal(bad); !errors.Is(err, ErrUnreadable) {
+			t.Errorf("%s：应返回 ErrUnreadable，实际 %v", name, err)
+		}
+	}
+	old := entropy
+	entropy = []byte("someone-else")
+	_, err = Unseal(s)
+	entropy = old
+	if !errors.Is(err, ErrUnreadable) {
+		t.Errorf("附加口令不对也解开了：%v", err)
+	}
+}
+
+func flip(c byte) string {
+	if c == 'A' {
+		return "B"
+	}
+	return "A"
+}
+
+// Store：存进文件的是密文；空串删除；解不开的一项报「解不开」而不是当成有值。
+func TestStore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.json")
+	st := NewStore(path)
+	if v, err := st.Get("cf.key"); v != "" || err != nil {
+		t.Fatalf("文件不存在时应为空：%q, %v", v, err)
+	}
+	if set, bad := st.State("cf.key"); set || bad {
+		t.Fatalf("State = %v, %v", set, bad)
+	}
+	if err := st.Set("cf.key", "my-curseforge-key"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Set("ai.key", "my-ai-key"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "my-curseforge-key") || strings.Contains(string(b), "my-ai-key") || !strings.Contains(string(b), `"cf.key": "dpapi:`) {
+		t.Fatalf("secrets.json 里有明文或格式不对：%s", b)
+	}
+	if v, err := NewStore(path).Get("cf.key"); v != "my-curseforge-key" || err != nil {
+		t.Fatalf("Get = %q, %v", v, err)
+	}
+	if set, bad := st.State("cf.key"); !set || bad {
+		t.Fatalf("State = %v, %v", set, bad)
+	}
+	if err := st.Set("cf.key", ""); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := st.Get("cf.key"); v != "" {
+		t.Fatalf("空串应删除这一项，仍为 %q", v)
+	}
+	if v, _ := st.Get("ai.key"); v != "my-ai-key" {
+		t.Fatalf("删一项不应影响别的项：%q", v)
+	}
+	if err := os.WriteFile(path, []byte(`{"cf.key":"dpapi:AAAA"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if set, bad := st.State("cf.key"); set || !bad {
+		t.Errorf("解不开的一项应报 unreadable：%v, %v", set, bad)
+	}
+	if _, err := st.Get("cf.key"); !errors.Is(err, ErrUnreadable) {
+		t.Errorf("Get 应返回 ErrUnreadable：%v", err)
+	}
+}

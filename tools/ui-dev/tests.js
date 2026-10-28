@@ -518,6 +518,52 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
     } finally { await c.close(); }
   });
 
+  await run("CurseForge Key 只写不读：已设置时输入框留空、占位写「已设置」，可清除；解不开时提示重填；导入页提示跟随 cfKeySet", async () => {
+    const mockState = b => page.evaluate(x => fetch("/__mock/state", { method: "POST", body: JSON.stringify(x) }), b);
+    const appText = () => page.evaluate(() => fetch("/api/app", { headers: { "X-Token": "mock" } }).then(r => r.text()));
+    const importHint = async () => {
+      await page.goto(url("#/create")); await settle();
+      await page.click("#mode-import"); await settle();
+      return page.evaluate(() => [...document.querySelectorAll(".hint")].some(h => h.textContent.includes("需要 API Key")));
+    };
+    const field = () => page.evaluate(() => ({ v: document.querySelector("#cf-key").value, ph: document.querySelector("#cf-key").placeholder,
+      clear: !document.querySelector("#cf-clear").hidden, save: !document.querySelector("#cf-save").disabled, sub: document.querySelector("#cf-sub").textContent }));
+    await mockState({ cfKey: "", cfKeyBroken: false });
+    try {
+      assert(await importHint(), "没设置 Key 时导入页应提示需要 API Key");
+      await page.goto(url("#/settings/download")); await settle();
+      let f = await field();
+      assert(f.v === "" && f.ph === "粘贴 API Key" && !f.clear && !f.save, "未设置时：" + JSON.stringify(f));
+      const key = "cf-test-key-" + Date.now();
+      await page.fill("#cf-key", key);
+      const before = reqs.length;
+      await page.press("#cf-key", "Enter"); await settle(300);
+      assert(putConfig(before, "cfApiKey"), "回车未保存");
+      f = await field();
+      assert(f.v === "" && f.ph.includes("已设置") && f.clear && !f.save, "保存后输入框应清空、占位写「已设置」、出现「清除」：" + JSON.stringify(f));
+      const info = await appText();
+      assert(!info.includes(key) && JSON.parse(info).data.cfKeySet === true, "/api/app 不应下发 Key，应给 cfKeySet：" + info);
+      await page.reload(); await settle();
+      f = await field();
+      assert(f.v === "" && f.ph.includes("已设置") && f.clear, "重新打开后：" + JSON.stringify(f));
+      assert(!(await importHint()), "已设置 Key 时导入页不应再提示");
+      // 清除：危险操作多一步，确认框默认聚焦「取消」
+      await page.goto(url("#/settings/download")); await settle();
+      await page.click("#cf-clear"); await settle(200);
+      assert((await page.evaluate(() => document.activeElement && document.activeElement.textContent.trim())) === "取消", "清除确认框应默认聚焦「取消」");
+      const b2 = reqs.length;
+      await page.click('.modal [data-x="ok"]'); await settle(300);
+      assert(reqs.slice(b2).some(r => r.m === "PUT" && r.u === "/api/config" && JSON.parse(r.b || "{}").cfApiKey === ""), "清除应发 cfApiKey 空串");
+      f = await field();
+      assert(f.ph === "粘贴 API Key" && !f.clear && JSON.parse(await appText()).data.cfKeySet === false, "清除后：" + JSON.stringify(f));
+      // 存着的 Key 解不开（换了电脑或 Windows 用户）
+      await mockState({ cfKey: "old", cfKeyBroken: true });
+      await page.goto(url("#/settings/download")); await settle();
+      f = await field();
+      assert(f.sub.includes("无法解开") && f.ph === "粘贴 API Key" && f.clear, "解不开时应提示重填：" + JSON.stringify(f));
+    } finally { await mockState({ cfKey: "", cfKeyBroken: false }); }
+  });
+
   await run("全程无页面报错", async () => { assert(errors.length === 0, errors.slice(0, 3).join(" | ")); });
 
   await browser.close();

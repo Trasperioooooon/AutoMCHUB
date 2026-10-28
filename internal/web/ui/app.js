@@ -1060,7 +1060,7 @@ async function drawImport() {
       <div class="field"><label class="switch"><input type="checkbox" id="im-flight" checked><span class="sw"></span>
         <span><span class="sw-label">允许飞行</span><div class="sw-desc">整合包强烈建议开启</div></span></label></div>
     </div>
-    ${app.config.cfApiKey ? "" : `<div class="hint" style="margin-bottom:10px">提示：CurseForge 格式整合包的模组下载需要 API Key（<a href="https://console.curseforge.com/" target="_blank">免费申请</a>后在「设置 → 下载与网络」填写）；Modrinth 格式无需任何配置。</div>`}
+    ${app.cfKeySet ? "" : `<div class="hint" style="margin-bottom:10px">提示：CurseForge 格式整合包的模组下载需要 API Key（<a href="https://console.curseforge.com/" target="_blank">免费申请</a>后在「设置 → 下载与网络」填写）；Modrinth 格式无需任何配置。</div>`}
     <div class="eula-box">
       <label class="switch"><input type="checkbox" id="im-eula"><span class="sw"></span>
         <span class="sw-label">我已阅读并同意 <a href="https://aka.ms/MinecraftEULA" target="_blank">Minecraft EULA</a></span></label>
@@ -2325,9 +2325,16 @@ function setStartup(body, info) {
   });
 }
 
+/* CurseForge API Key 只写不读（后端只告诉 cfKeySet）：已设置时输入框留空、占位写「已设置」，旁边给「清除」；
+   存着的 Key 解不开（换了电脑或 Windows 用户）时提示重填，也可以直接清除 */
+const cfKeySub = k => k.broken ? `<span class="warn-text">${icon("warn")} 密钥无法解开，可能换了电脑或 Windows 用户，请重新填写</span>`
+  : "加密保存在本机（Windows DPAPI），换电脑或换 Windows 用户后需要重填";
+const cfKeyHolder = k => k.set ? "已设置（留空不修改）" : "粘贴 API Key";
+
 /* — 下载与网络 — 下载源是一组单选行（选中行右侧打勾，点选即时生效）；API Key 是单字段保存 */
 function setDownload(body, info) {
   const src = info.config.source || "auto";
+  const cf = { set: !!info.cfKeySet, broken: !!info.cfKeyBroken };
   const opts = [
     { v: "auto", t: "自动（推荐）", d: "国内镜像（BMCLAPI / 清华）优先，失败自动切换官方源" },
     { v: "mirror", t: "仅国内镜像", d: "只用 BMCLAPI 与清华镜像（Paper/Purpur 无镜像，仍走官方）" },
@@ -2338,8 +2345,8 @@ function setDownload(body, info) {
     group(opts.map(o => riRow({ title: o.t, sub: esc(o.d), right: check(src === o.v), cls: "choice" + (src === o.v ? " sel" : ""),
       attrs: `role="radio" tabindex="0" aria-checked="${src === o.v}" data-v="${o.v}"` })).join(""), { attrs: `id="src-cards" role="radiogroup" aria-label="下载源"` }) +
     settingsHead("CurseForge API Key（选填）", `导入 CurseForge 格式整合包时解析模组直链用，<a href="https://console.curseforge.com/" target="_blank">免费申请</a>；Modrinth 格式整合包无需配置。`) +
-    group(riRow({ ico: "package", title: "API Key", sub: "只保存在本机的 config.json 里",
-      field: `<input type="password" id="cf-key" value="${esc(info.config.cfApiKey || "")}" placeholder="粘贴 API Key" aria-label="CurseForge API Key"><button class="btn" id="cf-save">保存</button>` }), { ico: true });
+    group(riRow({ ico: "package", title: "API Key", sub: `<span id="cf-sub">${cfKeySub(cf)}</span>`,
+      field: `<input type="password" id="cf-key" autocomplete="off" placeholder="${cfKeyHolder(cf)}" aria-label="CurseForge API Key"><button class="btn" id="cf-save">保存</button><button class="btn ghost" id="cf-clear"${cf.set || cf.broken ? "" : " hidden"}>清除</button>` }), { ico: true });
   const pick = async c => {
     if (c.classList.contains("sel")) return;
     try {
@@ -2357,10 +2364,31 @@ function setDownload(body, info) {
     c.onclick = () => pick(c);
     c.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(c); } };
   });
+  const paintCF = () => {
+    $("#cf-key").placeholder = cfKeyHolder(cf);
+    $("#cf-sub").innerHTML = cfKeySub(cf);
+    $("#cf-clear").hidden = !(cf.set || cf.broken);
+  };
   bindSaveInput($("#cf-key"), $("#cf-save"), async v => {
-    await api("/api/config", { method: "PUT", body: { cfApiKey: v.trim() } });
-    toast("CurseForge API Key 已保存");
+    const k = v.trim();
+    if (k) {
+      await api("/api/config", { method: "PUT", body: { cfApiKey: k } });
+      Object.assign(cf, { set: true, broken: false });
+      toast("CurseForge API Key 已保存");
+    }
+    $("#cf-key").value = ""; // 存好后清空输入框（只填了空白也一样，什么都不存；清除走「清除」按钮）
+    paintCF();
   }, viewGen);
+  $("#cf-clear").onclick = async () => {
+    const r = await confirmModal({ title: "清除 CurseForge API Key？", body: "清除后，导入 CurseForge 格式的整合包时无法自动下载模组。需要时可以重新填写。", okText: "清除", danger: true, icon: "trash" });
+    if (!r) return;
+    try {
+      await api("/api/config", { method: "PUT", body: { cfApiKey: "" } });
+      Object.assign(cf, { set: false, broken: false });
+      paintCF();
+      toast("已清除 CurseForge API Key");
+    } catch (e) { toast(e.message, true); }
+  };
 }
 
 /* — 存储位置 — */
