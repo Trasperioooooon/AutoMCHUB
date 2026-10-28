@@ -126,7 +126,7 @@ AI 是可选功能。没配置时（`enabled` 为 false）MineDeck 不连接任�
  "inst":"生存服","args":{"pairs":[{"key":"max-players","value":"10"}]},"ok":true,"ms":12}
 ```
 
-- `src` 是来源：`ui`（本机界面）、`api`（本机的其他程序）、`lan`（局域网设备，`actor` 是它的地址）、`schedule`（定时任务和崩溃自动重启，`actor` 写明是哪一种）；`assistant`、`gamechat`、`companion` 留给以后的 AI 功能，AI 发起的写操作要人确认后才执行，记录里带 `proposal`（提案编号）和 `approvedBy`（确认的人）。
+- `src` 是来源：`ui`（本机界面）、`api`（本机的其他程序）、`lan`（局域网设备，`actor` 是它的地址）、`schedule`（定时任务和崩溃自动重启，`actor` 写明是哪一种）；`assistant`（应用内 AI 助手）、`gamechat`（游戏内 AI，`actor` 是玩家名，见「游戏内 AI（第四阶段）」）、`companion`（留给以后的 AI 伙伴）。AI 发起的写操作要人确认后才执行，记录里带 `proposal`（提案编号）和 `approvedBy`（确认的人）。
 - 失败的操作也记，`ok` 为 false，`err` 是错误信息。
 - Key、密码、令牌、凭据、Webhook 地址，以及 server.properties 里像密码的项（如 `rcon.password`），在 `args` 里一律写成 `***`（清空时保留空串）。
 
@@ -188,6 +188,26 @@ AI 助手用的读写能力，网页也能直接调。人调用时，写操作�
 | PUT | `/api/instances/{name}/java` | `{major, path?}`：给实例换 Java，下次启动生效。本机或 MineDeck 已经有这个版本就直接换，返回 `{java}`；没有就在后台下载便携版，返回 `{taskId}`（进度见 `/api/tasks/{id}`） |
 | POST | `/api/instances/{name}/restart` | 重启：先保存世界并停止（最多等 40 秒），再启动。服务器没在运行时返回 400。危险操作 |
 | GET | `/api/ports/{port}?proto=` | 端口占用：`{port, tcp?, udp?, instances?}`。每个协议是 `{free, owners?: [{pid, process, instance?, minedeck?}], note?}`；`instances` 是配置了这个端口的实例。`proto` 为 `tcp` / `udp`，空串两种都查 |
+
+### 游戏内 AI（第四阶段）
+
+玩家在游戏聊天里用「@AI 问题」提问，MineDeck 从控制台认出这句聊天，调 AI，再用 tellraw 回复（设计文档 §6）。服务器上不用装插件或模组；群组代理端没有游戏聊天，没有这个功能。设置按实例存，默认关。改设置、一键开启白名单都**仅本机**，局域网会话只能看设置和最近的问答、做识别测试，改的话返回 403。这几个接口都经过操作层，都是「仅人工」的操作，AI 看不到也调不了；看设置、识别测试、看最近的问答不记操作记录。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/instances/{name}/gameai` | 「游戏内 AI」标签的全部内容，只读，局域网会话也能看。字段：<br>• `supported`：为 false 表示群组代理端。<br>• `settings`：当前设置，字段见下面的 `PUT`。<br>• `defaults`：限流和额度的默认值 `{cooldown, perPlayer, perServer, budget}`。<br>• `templates`：10 个命令模板 `[{id, title, usage, limit, default}]`。`usage` 里的 `<自己>` 由程序换成提问的人；`default` 是默认开不开（`gamemode`、`give`、`difficulty`、`seed` 默认关）。<br>• `ai`：`{enabled, missing?, provider?, model?, quotaUsed, quotaLimit}`。`provider` 是隐私提示里服务商的说法；`quotaUsed`、`quotaLimit` 是「设置 → AI」里游戏内 AI 的每日额度，所有实例合计，`quotaLimit` 为 0 表示不限。<br>• `today`：这个实例今天的 `{count, tokens, players}`，`players` 是名字（小写）→ 次数。<br>• `players`：可以授权的人 `[{name, online, whitelist, op, seen, allowed}]`：在线的、白名单里的、管理员、最近来过的（`seen`）、已经授权的，同名不分大小写只列一次，在线的排前面。<br>• `whitelistOn`：server.properties 的 `white-list` 是否为 true。`running`：服务器在运行。`local`：请求是否来自本机。 |
+| PUT | `/api/instances/{name}/gameai` | 改设置，只改传了的字段，返回内容同 `GET`。不合规时整次不改，返回 400。<br>• `enabled`：打开游戏内 AI。<br>• `prefix`：触发前缀，默认 `@AI`。1–16 个字，不能有空白、`/ ／ 、`、冒号、逗号和 `< > " \ §`。<br>• `aliases`：别名，整体替换，最多 8 个，规则同前缀。<br>• `allowed`：能让 AI 执行命令的玩家，整体替换，最多 200 个；名字是 1–16 个可打印的 ASCII 字符，不含空格和 `< > " \`，不以 `@` 开头。<br>• `templates`：`{模板编号: 开关}`，只改列出的；没有这个模板返回 400。<br>• `cooldown`（每人冷却，秒，0–3600）、`perPlayer`（每人每天几次）、`perServer`（全服每天几次）、`budget`（全服每天多少 token）：0 表示不限。<br>• `looseNames`：放宽名字规则；`anyThread`：不看线程名；`pattern`：自定义正则，要有命名分组 `name` 和 `msg`，对整行日志匹配，最多 500 个字，空串表示用内置的规则。<br>**仅本机** |
+| POST | `/api/instances/{name}/gameai/test` | 识别测试：`{line, …}`。`line` 是一行服务器日志，必填，最多 4000 字；还可以带上 `PUT` 的任意字段（比如还没保存的 `prefix`、`aliases`、`pattern`），只用于这一次，不保存。返回 `{format, thread?, chat, player?, message?, ask?, reason?, online, authorized, result}`：<br>• `format` 是 `forge`、`vanilla`、`paper` 或 `custom`（自定义正则），空串表示认不出日志格式；`chat` 表示认出是一句聊天。<br>• `ask` 是解析出的 `{prefix, opts, private, noExec, question, action, unknown?, example?}`。`opts` 是 `私`、`问`、`额度`、`帮助`；`action` 为 `ask`（提问）、`help`、`quota`、`unknown`（未知选项）、`nospace`（选项后面没空格）、`misplaced`（选项写在了问题后面）。<br>• 没触发时 `reason` 写明原因；`online`、`authorized` 是这个人现在在不在线、能不能让 AI 执行命令；`result` 是一句话说明会怎么处理。<br>不发任何东西，局域网会话也能用 |
+| GET | `/api/instances/{name}/gameai/log?limit=` | 最近的问答和执行记录，新的在前，`limit` 1–100，默认 50。每条是 `{t, player, kind, opts?, question?, reply?, private?, exec?, commands?, usage?, cost?, cut?, err?, note?}`：<br>• `kind`：`ask`（回答了）、`failed`（没答上，`err` 是详情）、`help`、`quota`、`unknown`、`nospace`、`misplaced`、`cooldown`、`limit`（次数或额度用完）、`busy`（排队满了）、`silenced`（刷屏，开始静默）、`disabled`（主机没配置 AI）。<br>• `reply` 是完整的回答或系统提示（游戏里太长截掉了时 `cut` 为 true）；`private` 表示只发给了提问的人；`exec` 表示这次给了 AI 执行命令的工具。<br>• `commands`：`[{command, run?, ok, reason?, output?}]`。`command` 是模型给的原文，`run` 是实际执行的，`reason` 是没执行的原因，`output` 是执行后 1 秒内的控制台输出。<br>• `usage`、`cost` 的写法同应用内助手。<br>局域网会话也能看 |
+| POST | `/api/instances/{name}/gameai/whitelist` | 一键开启白名单：`{players}`。先把这些人加进白名单，已经在里面的跳过；名字要是 1–16 位字母、数字、下划线，否则返回 400。再开启白名单：<br>• 服务器运行中：发 `whitelist add <名字>`，把 server.properties 的 `white-list` 改成 true，再发 `whitelist on`；<br>• 服务器停着：直接改 `whitelist.json` 和 server.properties。<br>返回内容同 `GET`。**仅本机** |
+
+- **怎么认聊天**：只看打开了游戏内 AI 的实例。认三种日志格式：Forge / NeoForge、原版 / Fabric / Quilt、Paper 系。聊天要由服务器主线程或异步聊天线程打出，Forge 格式还要是 `minecraft/MinecraftServer` 或 `minecraft/DedicatedServer` 记录的；`anyThread` 打开后不看线程名。说话的人要在线，名字默认只认 1–16 位字母、数字、下划线；`looseNames` 打开后放宽成 1–16 个可打印的 ASCII 字符，以 `@` 开头、含 `"`、`\` 或中文的名字照样不认。MineDeck 自己写进控制台的行（`> ` 和 `[MineDeck]` 开头）不看。
+- **提问选项**：写在前缀之后、问题之前。`/私`（`/p`）只回提问的人；`/问`（`/ask`）这一次不给 AI 执行命令的工具；`/额度`（`/quota`）和 `/帮助`（`/h`、`/help`）不调用 AI。标记也认全角的 `／` 和顿号 `、`，英文别名不分大小写，前缀也认全角的 `＠`。
+- **回复**：`tellraw @a {"text":"[AI→名字] ","color":"aqua","extra":[{"text":"回答","color":"white"}]}`。用了 `/私` 的回答和所有系统提示，目标是提问的人，开头是 `[AI] `；系统提示的正文是灰色。文本里的非 ASCII 字符一律写成 `\uXXXX`，整条命令只有 ASCII，不受服务器读标准输入的编码影响。每条最多 180 个字，最多 3 条，更长的截掉，提示到 MineDeck 面板看完整的回答。MineDeck 的控制台里另写一行看得懂的回显，比如 `[MineDeck] 游戏内 AI 回复（全服可见）：[AI→Steve] …`。每次开服后受理第一个提问之前，先向全服发一次「提问会发给哪家服务商」。
+- **执行命令**：只有 `allowed` 里的人、而且没带 `/问` 时，请求里才有 `run_command` 工具。每条命令执行前，按最新的设置再查一次授权，再按打开了的命令模板和写死的禁止清单校验：整条只能是 ASCII，不许用目标选择器，「自己」由程序换成提问的人。通过了才写进服务器的标准输入，控制台回显 `[MineDeck] 游戏内 AI 替 名字 执行：/命令`。一个问题最多执行 3 条命令、调用 6 次工具、请求 4 次 AI，2 分钟没答完按超时处理。AI 能读的只有 `game.info`：核心、Minecraft 版本、加载器版本、模组和插件的数量、在线玩家、人数上限、服务器的本地时间。它是操作层里唯一 `InGame` 的读操作；游戏内调用别的操作一律 403，写操作也不生成提案。
+- **限流和额度**：每人冷却、每人每天的次数、全服每天的次数、全服每天的 token（`budget`）这四项按实例算；另有「设置 → AI」里游戏内 AI 的每日额度（`PUT /api/ai/quota` 的 `gamechat`），所有实例合计。受理一个提问就算一次，并开始冷却，没答上也算。不调用 AI 的回复不算次数，但算进防刷屏：同一个人 1 分钟内触发超过 5 次，静默 10 分钟。同一实例同一时间只回答 1 个问题，最多排队 3 个。按本地日期计，过了 0 点清零。
+- **操作记录**：来源 `gamechat`，`actor` 是玩家名。每个问题一条 `gameai.ask`，`args` 是 `{chars, opts, exec, result, usage, commands}`：问题的字数、用了哪些选项、给没给执行工具、结果（同 `kind`）、这次用的 token、命令的条数，不记问题原文。AI 要执行的每条命令一条 `gameai.command`，`args` 是 `{command, run}`；没执行的也记，记为失败，`err` 是原因。不调用 AI 的回复不写操作记录，只进最近的问答。
+- **存放**：设置在实例目录的 `gameai.json`。当天的次数和 token、最近来过的名字、最近 100 条问答在同一目录的 `gameai-state.json`，没打开游戏内 AI 时不写。这两个文件跟着实例走，删实例时一起删掉。
 
 所有响应统一为 `{"ok": true, "data": ...}` 或 `{"ok": false, "error": "..."}`。
 
