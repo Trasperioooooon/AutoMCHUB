@@ -26,15 +26,6 @@ type Release struct {
 	checksumURL string
 }
 
-// ghMirrors 把 GitHub 直链包装为国内加速候选（顺序尝试）。
-func ghMirrors(u string) []string {
-	return []string{
-		"https://ghfast.top/" + u,
-		"https://gh-proxy.com/" + u,
-		u,
-	}
-}
-
 // Check 查询最新 Release；repo 形如 "user/MineDeck"。
 func Check(ctx context.Context, repo string) (*Release, bool, error) {
 	repo = strings.Trim(strings.TrimSpace(repo), "/")
@@ -142,7 +133,7 @@ func Apply(ctx context.Context, r *Release) error {
 	defer cancel()
 	// 经镜像下载但以官方 SHA-256 强校验：镜像被投毒/中间人返回的伪 exe 会校验失败、绝不落地执行
 	if err := dl.Fetch(cctx, dl.Request{
-		URLs: ghMirrors(r.AssetURL), Dest: newExe, MinSize: 4 << 20, SHA256: r.SHA256,
+		URLs: dl.GHMirrors(r.AssetURL), Dest: newExe, MinSize: 4 << 20, SHA256: r.SHA256,
 	}, nil); err != nil {
 		return fmt.Errorf("下载新版本失败: %w", err)
 	}

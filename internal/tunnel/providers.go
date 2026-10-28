@@ -200,11 +200,7 @@ func (customProvider) EnsureFrpc(con *procutil.Console) (string, error) {
 	defer cancel()
 	file := fmt.Sprintf("frp_%s_windows_amd64.zip", frpVersion)
 	ghPath := fmt.Sprintf("https://github.com/fatedier/frp/releases/download/v%s/%s", frpVersion, file)
-	urls := []string{
-		"https://ghfast.top/" + ghPath, // 国内加速
-		"https://gh-proxy.com/" + ghPath,
-		ghPath,
-	}
+	urls := dl.GHMirrors(ghPath) // 国内加速镜像优先，最后直连
 	zipPath := filepath.Join(app.CacheDir, "frpc", file)
 	if err := dl.Fetch(ctx, dl.Request{URLs: urls, Dest: zipPath, SHA256: frpSHA256, MinSize: 1 << 20}, nil); err != nil {
 		return "", fmt.Errorf("下载 frp 客户端失败（可手动将 frpc.exe 放入 %s）: %w", dir, err)
