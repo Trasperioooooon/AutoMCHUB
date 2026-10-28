@@ -70,11 +70,18 @@ func main() {
 	}
 	addr := ln.Addr().(*net.TCPAddr)
 	url := fmt.Sprintf("http://127.0.0.1:%d/?token=%s", addr.Port, web.Token)
+	// 操作层的注册表在这里建好：网页接口和应用内助手共用同一个（AI 的提案存在里面）
+	reg := catalog.New(catalog.Env{Mgr: mgr, Tun: tun, AI: aiSvc, Port: addr.Port, Shutdown: func() {
+		if web.OnShutdown != nil { // OnShutdown 在下面才注入，用到时再取
+			web.OnShutdown()
+		}
+	}})
+	asst := catalog.NewAssistant(reg, aiSvc, web.Token)
 	go func() {
 		// 显式 http.Server 以设 ReadHeaderTimeout，防局域网模式下的 slowloris 半开连接；
 		// 不设 WriteTimeout，以兼容控制台 SSE 长连接。
 		srv := &http.Server{
-			Handler:           web.New(mgr, tun, aiSvc, addr.Port),
+			Handler:           web.New(mgr, tun, reg, asst),
 			ReadHeaderTimeout: 10 * time.Second,
 		}
 		if err := srv.Serve(ln); err != nil {
