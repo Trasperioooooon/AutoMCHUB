@@ -1,12 +1,12 @@
-# MineDeck · Minecraft 一键开服工具
+# MineDeck · 我的世界（Minecraft）一键开服工具
 
 [![Release](https://img.shields.io/github/v/release/Trasperioooooon/MineDeck?color=6fd24b)](https://github.com/Trasperioooooon/MineDeck/releases/latest) [![Downloads](https://img.shields.io/github/downloads/Trasperioooooon/MineDeck/total?color=6fd24b)](https://github.com/Trasperioooooon/MineDeck/releases) [![License](https://img.shields.io/github/license/Trasperioooooon/MineDeck?color=6fd24b)](LICENSE) ![Platform](https://img.shields.io/badge/platform-Windows-2b6cb0) ![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)
 
-Windows 本地运行的 **MC 多人联机服务器自动部署工具**（单文件 `MineDeck.exe`，约 13 MB，零依赖）。
+Windows 上的**我的世界（Minecraft Java 版）一键开服工具**：单文件 `MineDeck.exe`（约 13 MB，零依赖），自动下载 Java 和服务端，图形界面管理服务器；整合包一键导入，内置樱花穿透、OpenFrp 内网穿透，好友异地也能联机。还可以接入自己的 AI Key：开服排错助手、游戏内 AI 问答、会跟随和砍树打怪的 AI 伙伴，以及把房主的音乐放给全服听的音乐共享。
 
 选好版本点创建，自动完成：**匹配并下载便携式 Java → 下载服务端核心 → 运行安装器 → 同意 EULA → 生成配置与启动脚本 → 图形界面管理开服**。全程使用国内镜像加速（BMCLAPI / 清华 TUNA），官方源自动兜底。
 
-> 本工具只负责本机/局域网开服。异地联机请配合内网穿透工具（樱花穿透等）转发实例端口即可。
+> 异地联机：在「内网穿透」页添加樱花穿透、OpenFrp 或自定义 frps 的隧道，跟随服务器自动启动，公网地址一键复制给好友。
 
 ---
 
@@ -55,6 +55,45 @@ Windows 本地运行的 **MC 多人联机服务器自动部署工具**（单文�
 - **调内存**：实例 → 内存/启动 → 滑块
 - **手动开服**：每个实例目录内有与 GUI 等效的 `run.bat`
 - **命令行模式**：`MineDeck.exe -nogui -port 27333`（仅后台服务，浏览器访问日志中的 URL）
+
+## ❓ 常见问题
+
+### 要自己装 Java 吗？
+
+不用。MineDeck 按 Mojang 的版本元数据挑对应的 Java（8 / 17 / 21 / 25……），下载便携版放进 `runtimes/`，不改系统环境变量；本机已经装好的 Java 能用就直接用。
+
+### 朋友不在同一个网络，怎么连进来？
+
+在「内网穿透」页添加樱花穿透、OpenFrp 或自定义 frps 的隧道，绑定服务器并打开「跟随实例启动」，开服后把公网地址发给朋友。同一个局域网的朋友直接连 `你的内网IP:端口`。
+
+### 支持哪些版本和核心？
+
+MC 1.12.2 到最新版（含 26.x 起的年份版本号），12 种核心：原版、Paper、Purpur、Leaves、Folia、Fabric、NeoForge、Forge、Mohist、Banner、Velocity、Waterfall。Modrinth（`.mrpack`）和 CurseForge（zip）的整合包可以直接导入。
+
+### 服务器起不来、报错看不懂怎么办？
+
+看控制台顶部的报错横幅，它会说明原因，比如少装前置模组、客户端模组放进了服务端、端口被占、Java 版本不对，这一步不需要 AI。接入 AI 以后，可以点「让 AI 分析」，或者在「AI 助手」里直接问。
+
+### AI 功能要花钱吗？会不会偷偷联网？
+
+AI 是可选的，用你自己的 API Key，费用按服务商的价格付给服务商。MineDeck 会估算每次的花费，每个功能都能设每日额度。不配置 AI 就不会连任何 AI 服务；Key 用 Windows 的 DPAPI 加密保存。
+
+### AI 会不会乱改我的服务器？
+
+不会自己动手。读日志、看配置这类操作直接做；改配置、换 Java、重启这类操作只生成确认卡片，你点了确认才执行，所有操作都记在 `logs\ops\`。游戏内 AI 默认只回答问题，只有你勾选的玩家才能让它执行命令，而且只限白名单里的命令，`op`、`execute` 这类一律不执行。
+
+### AI 伙伴和音乐共享，好友要装什么？
+
+- AI 伙伴：好友的客户端只装伙伴模组，发布页有下载。
+- 音乐共享：服务器和好友都装同一版本的 Simple Voice Chat，桥接模组由 MineDeck 装进服务器。
+
+### 数据存在哪？怎么卸载？
+
+数据都在 exe 所在的文件夹里，只有界面偏好存在 `%LocalAppData%\MineDeck`。卸载就是删掉这两个文件夹。
+
+### Windows 提示「已保护你的电脑」？
+
+exe 没有数字签名，点「更多信息 → 仍要运行」即可。源码公开（MIT），也可以自己构建（见下文）。
 
 ## 🔧 从源码构建
 
@@ -138,3 +177,16 @@ assets/        应用图标 icon.ico（像素画逐尺寸绘制）；界面设�
 - Paper / Purpur 官方 API 无国内镜像（Cloudflare 直连一般可用）；Forge/NeoForge 安装器的部分依赖库下载仍需可访问官方 maven（已用 `--mirror` + 重试缓解）。
 - 首次启动某实例时 Windows 防火墙可能弹窗，请选择「允许访问」，否则局域网玩家无法连接。
 - 删除 `runtimes/` 会导致已建实例无法启动（重新创建实例即可自动补全）。
+
+## English
+
+MineDeck is a one-click Minecraft (Java Edition) server launcher for Windows. It is a single ~13 MB executable (Go + WebView2) that picks and downloads the right Java runtime and server software (Vanilla, Paper, Purpur, Fabric, Forge, NeoForge, Mohist and more), imports Modrinth and CurseForge modpacks, and manages servers through a GUI: console, players, backups, scheduled restarts, and built-in frp tunnels (SakuraFrp, OpenFrp, self-hosted frps) so friends can join from anywhere.
+
+Optional AI features use your own API key (OpenAI-compatible or Claude protocol; presets for DeepSeek, Qwen, Kimi, Zhipu, OpenAI, Claude and Ollama):
+
+- an in-app assistant that reads logs and configs to troubleshoot, and proposes changes that run only after you confirm them;
+- in-game AI: players ask `@AI ...` in chat, and players you authorize can have it run allowlisted commands;
+- AI companions built on PlayerEngine (NeoForge 1.21.1 and Forge 1.20.1) that follow players, gather wood and fight mobs;
+- music sharing: stream the host's music player to everyone on the server through Simple Voice Chat.
+
+The interface is Chinese only for now. MIT licensed.
