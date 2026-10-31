@@ -1493,6 +1493,7 @@ async function renderDetail(name, tab = "console") {
       if (info.core !== "vanilla") tabs.push(["res", "资源"]);
       if (window.MDMusic && MDMusic.applies(info.core)) tabs.push(["music", "音乐共享"]); // 第五阶段，见 music.js
       if (window.MDGameChat && MDGameChat.applies(info)) tabs.push(["gameai", "游戏内 AI"]); // 第四阶段，见 gamechat.js
+      if (window.MDCompanion && MDCompanion.applies(info)) tabs.push(["companion", "伙伴"]); // 第七阶段，见 companion.js
       if (!isProxy) tabs.push(["common", "常用设置"], ["raw", "全部配置"]);
       tabs.push(["jvm", "内存 / 启动"]);
       const base = "#/inst/" + encodeURIComponent(name) + "/";
@@ -2013,6 +2014,9 @@ async function renderDetail(name, tab = "console") {
 
   } else if (tab === "gameai" && window.MDGameChat) { // 游戏内 AI（第四阶段）：整块在 gamechat.js
     await MDGameChat.render(body, info, gen);
+
+  } else if (tab === "companion" && window.MDCompanion) { // AI 伙伴（第七阶段）：整块在 companion.js
+    await MDCompanion.render(body, info, gen);
 
   } else if (tab === "jvm") {
     const appInfo = await api("/api/app").catch(() => ({ ramMb: 8192, availRamMb: 4096 }));
@@ -2547,7 +2551,7 @@ function setNotify(body, info) {
    服务商设置是多字段表单（吸底保存条）：Key 只写不读，已设置时输入框留空、占位写「已设置」；改了服务商、协议或地址，
    保存后旧 Key 自动清掉，要重新填写。每日额度是单字段保存（bindSaveInput）。局域网打开时只能看（修改仅本机）。 */
 const AI_EFFORTS = [["", "默认（模型自己定）"], ["low", "低：最快、最省"], ["medium", "中"], ["high", "高"], ["xhigh", "很高"], ["max", "最高：最慢、最贵"]];
-const AI_FEATS = [{ id: "assistant", name: "应用内助手" }, { id: "gamechat", name: "游戏内 AI" }]; // 应用内助手：本机和局域网登录的设备共用一份额度
+const AI_FEATS = [{ id: "assistant", name: "应用内助手" }, { id: "gamechat", name: "游戏内 AI" }, { id: "companion", name: "AI 伙伴" }]; // 应用内助手：本机和局域网登录的设备共用一份额度；AI 伙伴（第七阶段）：玩家叫着伙伴的名字说话时
 const fmtTokens = n => { n = +n || 0; return n >= 10000 ? (Math.round(n / 1000) / 10).toString() + " 万" : n.toLocaleString("en-US"); };
 const fmtMoney = (amount, cur) => (cur === "CNY" ? "¥" : "$") + (amount > 0 && amount < 0.01 ? amount.toFixed(4) : amount.toFixed(2));
 /* 一段时间的费用合计：按币种分开（不做汇率换算），如「约 $0.12 + ¥0.30」；没有金额时为空 */

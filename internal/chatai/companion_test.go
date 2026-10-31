@@ -345,6 +345,15 @@ func TestCompanionActChecks(t *testing.T) {
 	f := newFixtureWith(t, comps)
 	f.set(Patch{Allowed: &[]string{"Steve"}})
 	calls := []call{{"c0", "companion_status", `{"inventory":true}`}}
+	f.ai.queue(toolReply(call{"s1", "companion_say", js(map[string]string{"text": "§c大家好\n我是小方"})}), textReply("说了。"))
+	f.say("Steve", "@AI 让小方打个招呼")
+	if a := comps.actCalls(); len(a) != 1 || a[0].op != "say" || a[0].args["text"] != "大家好 我是小方" {
+		t.Fatalf("说话要去掉 § 格式码和换行：%+v", a)
+	}
+	comps.mu.Lock()
+	comps.calls = nil
+	comps.mu.Unlock()
+	f.advance(time.Minute)
 	for i := 1; i <= 5; i++ {
 		calls = append(calls, call{"c" + string(rune('0'+i)), "companion_collect", `{"item":"minecraft:oak_log","count":1}`})
 	}
@@ -359,7 +368,7 @@ func TestCompanionActChecks(t *testing.T) {
 		t.Errorf("第 5 次采集不该执行：%+v", h.Actions)
 	}
 	reqs := f.ai.requests()
-	if c := parseReq(t, reqs[1]).Messages; !strings.Contains(c[len(c)-4].Content, "【数据开始") || !strings.Contains(c[len(c)-4].Content, `"name":"小方"`) {
+	if c := parseReq(t, reqs[3]).Messages; !strings.Contains(c[len(c)-4].Content, "【数据开始") || !strings.Contains(c[len(c)-4].Content, `"name":"小方"`) {
 		t.Errorf("查状态的结果交给 AI：%+v", c)
 	}
 

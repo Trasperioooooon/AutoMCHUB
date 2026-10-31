@@ -1252,6 +1252,177 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
   });
   // ==================== 第四阶段结束 ====================
 
+  // ==================== 第七阶段：AI 伙伴（companion.js）====================
+  // 仿真后端的场景见 server.js 的 cpMockState；改设置的 PUT 记在 reqs 里，安装、刷出、停下、移除的 POST 记在 posts 里（第五阶段那块登记的）
+  const cpState = b => page.evaluate(x => fetch("/__mock/state", { method: "POST", body: JSON.stringify(x) }).then(r => r.json()).then(j => j.data), b);
+  const cpPuts = since => reqs.slice(since).filter(x => x.m === "PUT" && decodeURIComponent(x.u).endsWith("/companion/settings")).map(x => JSON.parse(x.b || "{}"));
+  const openCP = async () => { await page.goto(url("#/inst/" + encodeURIComponent(PACK) + "/companion")); await settle(900); };
+  const CP_INSTALLED = { minedeck_companion: { state: "ok", version: "0.1.0", files: [{ file: "minedeck-companion-forge-1.20.1-0.1.0.jar", version: "0.1.0", keep: true }] },
+    playerengine: { state: "ok", version: "1.20.1-1.4.0", files: [{ file: "playerengine-forge-1.20.1-1.4.0.jar", version: "1.20.1-1.4.0", keep: true }] } };
+  const resetCP = () => cpState({ cp: { reset: true }, ai: { reset: true }, status: { [PACK]: "stopped" } });
+
+  await run("伙伴：只有 NeoForge / Forge 的服务器有这个标签；安装状态列出三个模组，一键安装后都装好；好友的客户端按清单显示，依赖改成只装服务端时不再标「要装」", async () => {
+    try {
+      await resetCP();
+      await page.goto(url("#/inst/" + inst + "/console")); await settle();
+      assert(!(await page.$('.tabs [data-t="companion"]')), "Paper 服不该有伙伴标签");
+      await openCP();
+      assert(await page.$('.tabs [data-t="companion"].cur'), "Forge 服应有伙伴标签并选中");
+      const mods = await page.$$eval("#cp-install [data-mod]", rs => rs.map(r => r.dataset.mod + ":" + r.querySelector(".tag").textContent));
+      assert(JSON.stringify(mods) === JSON.stringify(["minedeck_companion:没装", "playerengine:没装", "architectury:已装好"]), "三个模组的状态：" + mods);
+      const act = await page.textContent("#cp-install");
+      assert(act.includes("要从 Modrinth 下载约 4.3 MB") && act.includes("实测过的是 1.20.1-1.4.0"), "安装行：" + act);
+      assert(await page.$('#cp-install [data-mod="playerengine"] a[href="https://modrinth.com/mod/playerengine/version/wFlD9yTq"]'), "依赖附 Modrinth 链接");
+      const gate = await page.textContent("#cp-gate");
+      assert(gate.includes("AI 还没配置") && await page.$('#cp-gate a[href="#/settings/ai"]'), "没配置 AI 时提示去设置：" + gate);
+      const t0 = posts.length;
+      await page.click("#cp-install-btn"); await settle(500);
+      assert(postsTo(t0, "/companion/install").length === 1, "应发安装请求");
+      assert(await toastHas("已安装：minedeck-companion-forge-1.20.1-0.1.0.jar、playerengine-forge-1.20.1-1.4.0.jar"), "应提示装了什么");
+      assert((await page.textContent("#cp-install")).includes("三个都装好了") && !(await page.$("#cp-install-btn")), "装好以后不再给安装按钮");
+      // 好友的客户端：伙伴模组随 MineDeck 内置（打开 mods 目录发给好友），两个依赖附 Modrinth 链接
+      const cl = await page.$$eval("#cp-client [data-client]", rs => rs.map(r => r.dataset.client + ":" + r.querySelector(".tag").textContent));
+      assert(JSON.stringify(cl) === JSON.stringify(["minedeck_companion:要装", "playerengine:要装", "architectury:要装"]), "好友要装的：" + cl);
+      assert(await page.$("#cp-mods-dir") && await page.$('#cp-client a[href="https://modrinth.com/mod/architectury-api/version/1MKTLiiG"]'), "打开 mods 目录、下载页");
+      await cpState({ cp: { clientSide: "server" } });
+      await openCP();
+      const cl2 = await page.$$eval("#cp-client [data-client]", rs => rs.map(r => r.dataset.client + ":" + r.querySelector(".tag").textContent));
+      assert(JSON.stringify(cl2) === JSON.stringify(["minedeck_companion:要装", "playerengine:不用装", "architectury:不用装"]), "side 是 server 的依赖不用装：" + cl2);
+      // 运行中要替换旧版本：先停服
+      await cpState({ cp: { reset: true, inst: { [PACK]: { mods: { minedeck_companion: { state: "outdated", version: "0.0.9", files: [{ file: "minedeck-companion-forge-1.20.1-0.0.9.jar", version: "0.0.9", keep: false }] } } } } }, status: { [PACK]: "running" } });
+      await openCP();
+      assert((await page.textContent("#cp-install")).includes("先停服再安装") && await page.$eval("#cp-install-btn", b => b.disabled), "运行中不能替换旧版本");
+      assert((await page.textContent('#cp-install [data-mod="minedeck_companion"]')).includes("安装时删掉：minedeck-companion-forge-1.20.1-0.0.9.jar"), "列出要删掉的旧版本");
+    } finally { await resetCP(); }
+  });
+
+  await run("伙伴：开关即时生效（没装伙伴模组时不能打开）；伙伴上限、不许打的生物单字段保存，填错就近提示；禁挖区域在弹窗里添加（填错就近提示）、编辑、删除", async () => {
+    try {
+      await resetCP();
+      await openCP();
+      assert(await page.$eval("#cp-on", e => e.disabled) && (await page.textContent("#cp-on-sub")).includes("先装伙伴模组"), "没装时不能打开");
+      await cpState({ cp: { inst: { [PACK]: { mods: CP_INSTALLED } } } });
+      await openCP();
+      let t0 = reqs.length;
+      await page.click("#cp-on + .sw"); await settle(300);
+      assert(JSON.stringify(cpPuts(t0)) === JSON.stringify([{ enabled: true }]) && await toastHas("已打开 AI 伙伴"), "开关应即时发 PUT：" + JSON.stringify(cpPuts(t0)));
+      assert(await page.$eval("#cp-max-save", b => b.disabled), "没改时保存键置灰");
+      await page.fill("#cp-max", "0"); await page.press("#cp-max", "Enter"); await settle(200);
+      assert((await page.textContent("#cp-max-err")).includes("1 到 16") && await page.$("#cp-max.invalid"), "上限填错就近提示");
+      t0 = reqs.length;
+      await page.fill("#cp-max", "2"); await page.press("#cp-max", "Enter"); await settle(300);
+      await page.fill("#cp-deny", "Villager!"); await page.click("#cp-deny-save"); await settle(200);
+      assert((await page.textContent("#cp-deny-err")).includes("不是生物 ID"), "生物 ID 填错就近提示");
+      await page.fill("#cp-deny", "villager，minecraft:cat"); await page.click("#cp-deny-save"); await settle(300);
+      assert(JSON.stringify(cpPuts(t0)) === JSON.stringify([{ maxCompanions: 2 }, { attackDeny: ["villager", "minecraft:cat"] }]), "单字段保存：" + JSON.stringify(cpPuts(t0)));
+      assert((await page.inputValue("#cp-deny")) === "minecraft:villager, minecraft:cat" && await toastHas("不许打：villager、cat"), "保存后按规范写法显示");
+      t0 = reqs.length;
+      await page.click("#cp-deny-default"); await settle(300);
+      assert(JSON.stringify(cpPuts(t0)) === JSON.stringify([{ denyDefault: true }]) && (await page.inputValue("#cp-deny")).includes("minecraft:wandering_trader"), "恢复默认");
+      // 禁挖区域：弹窗里填，填错就近提示
+      assert((await page.textContent("#cp-zones")).includes("还没有禁挖区域"), "没有区域时说明");
+      await page.click("#cp-zone-add"); await page.waitForSelector(".modal");
+      await page.fill("#cz-name", "我的家"); await page.click('.modal [data-x="ok"]'); await settle(150);
+      assert((await page.textContent("#cz-err")).includes("字母、数字") && await page.$("#cz-name.invalid"), "区域名填错就近提示");
+      await page.fill("#cz-name", "base");
+      for (const [k, val] of [["ax", "-120"], ["ay", "-64"], ["az", "-80"], ["bx", "-40"], ["by", "3200"], ["bz", "10"]]) await page.fill("#cz-" + k, val);
+      await page.click('.modal [data-x="ok"]'); await settle(150);
+      assert((await page.textContent("#cz-err")).includes("角 2 的 y") && await page.$("#cz-by.invalid"), "坐标超范围就近提示");
+      await page.fill("#cz-by", "320");
+      t0 = reqs.length;
+      await page.click('.modal [data-x="ok"]'); await settle(400);
+      const zone = { name: "base", dim: "minecraft:overworld", min: [-120, -64, -80], max: [-40, 320, 10] };
+      assert(JSON.stringify(cpPuts(t0)) === JSON.stringify([{ zones: [zone] }]) && !(await page.$(".modal")), "添加区域：" + JSON.stringify(cpPuts(t0)));
+      assert((await page.textContent('#cp-zones [data-zone="base"]')).includes("主世界 · (-120, -64, -80) → (-40, 320, 10)"), "区域行");
+      // 编辑：改名、换成模组的维度
+      await page.click('[data-zedit="base"]'); await page.waitForSelector(".modal");
+      await page.fill("#cz-name", "home"); await page.selectOption("#cz-dim", "");
+      assert(!(await page.$eval("#cz-dim-row", e => e.hidden)), "选「其他」时要填维度 ID");
+      await page.fill("#cz-dim-custom", "twilightforest:twilight_forest");
+      t0 = reqs.length;
+      await page.click('.modal [data-x="ok"]'); await settle(400);
+      assert(JSON.stringify(cpPuts(t0)) === JSON.stringify([{ zones: [{ ...zone, name: "home", dim: "twilightforest:twilight_forest" }] }]), "编辑区域：" + JSON.stringify(cpPuts(t0)));
+      t0 = reqs.length;
+      await page.click('[data-zdel="home"]'); await page.waitForSelector(".modal");
+      await page.click('.modal [data-x="ok"]'); await settle(400);
+      assert(JSON.stringify(cpPuts(t0)) === JSON.stringify([{ zones: [] }]) && (await page.textContent("#cp-zones")).includes("还没有禁挖区域"), "删除区域");
+    } finally { await resetCP(); }
+  });
+
+  await run("伙伴：连上伙伴模组才能刷出；刷出（弹窗校验名字）、停下、全部停下、移除（确认，可选掉落背包）；「设置 → AI」有 AI 伙伴的每日额度", async () => {
+    try {
+      await cpState({ cp: { reset: true, inst: { [PACK]: { mods: CP_INSTALLED, settings: { enabled: true, exists: true } } } }, ai: { reset: true, ...AI_DEEPSEEK, key: "sk-x" } });
+      await openCP();
+      assert((await page.textContent("#cp-link")).includes("等服务器开好") && await page.$eval("#cp-spawn", b => b.disabled), "服务器没开时不能刷出");
+      assert((await page.textContent("#cp-gate")).includes("游戏内 AI"), "游戏内 AI 没开时提醒");
+      await cpState({ status: { [PACK]: "running" } });
+      await openCP();
+      assert((await page.textContent("#cp-link")).includes("已连上") && (await page.textContent("#cp-list")).includes("还没有伙伴"), "连上以后：" + await page.textContent("#cp-link"));
+      await page.click("#cp-spawn"); await page.waitForSelector(".modal");
+      await page.fill("#cs-name", "小 方"); await page.click('.modal [data-x="ok"]'); await settle(150);
+      assert((await page.textContent("#cs-err")).includes("空格") && await page.$("#cs-name.invalid"), "名字不合规就近提示");
+      await page.fill("#cs-name", "小方"); await page.fill("#cs-owner", "Steve"); await page.selectOption("#cs-near", "Alex");
+      const p0 = posts.length;
+      await page.click('.modal [data-x="ok"]'); await settle(500);
+      const sp = postsTo(p0, "/companion/spawn");
+      assert(sp.length === 1 && JSON.stringify(JSON.parse(sp[0].b)) === JSON.stringify({ name: "小方", owner: "Steve", near: "Alex" }), "刷出的请求：" + JSON.stringify(sp));
+      assert(await toastHas("刷出了伙伴「小方」") && (await page.textContent('#cp-list [data-comp="1"]')).includes("主人 Steve"), "列表里有小方");
+      assert((await page.textContent("#cp-events")).includes("刷出了伙伴「小方」（主人 Steve）"), "最近的事件");
+      await page.click("#cp-spawn"); await page.waitForSelector(".modal");
+      await page.fill("#cs-name", "小方"); await page.click('.modal [data-x="ok"]'); await settle(150);
+      assert((await page.textContent("#cs-err")).includes("已经有一个叫「小方」"), "重名就近提示");
+      await page.keyboard.press("Escape"); await settle(200);
+      // 派个任务：能停下、全部停下
+      await cpState({ cp: { busy: true } });
+      await openCP();
+      assert((await page.textContent('#cp-list [data-comp="1"]')).includes("正在采集 oak_log ×3"), "显示当前任务");
+      let p1 = posts.length;
+      await page.click('[data-cstop="1"]'); await settle(400);
+      assert(JSON.stringify(JSON.parse(postsTo(p1, "/companion/stop")[0].b)) === JSON.stringify({ companion: 1 }) && await toastHas("已停下"), "停下一个");
+      assert((await page.textContent('#cp-list [data-comp="1"]')).includes("上次：采集 oak_log ×3 停下了") && await page.$eval("#cp-stopall", b => b.disabled), "停下后显示上次的结果");
+      await cpState({ cp: { busy: true } });
+      await openCP();
+      p1 = posts.length;
+      await page.click("#cp-stopall"); await settle(400);
+      assert(JSON.stringify(JSON.parse(postsTo(p1, "/companion/stop")[0].b)) === JSON.stringify({ all: true }), "全部停下");
+      // 移除：确认，默认聚焦取消；勾上掉落背包
+      await page.click('[data-cdel="1"]'); await page.waitForSelector(".modal");
+      const focused = await page.evaluate(() => document.activeElement && document.activeElement.textContent.trim());
+      assert(focused === "取消", "移除的确认框默认聚焦取消：" + focused);
+      await page.click('.modal .switch .sw');
+      p1 = posts.length;
+      await page.click('.modal [data-x="ok"]'); await settle(400);
+      assert(JSON.stringify(JSON.parse(postsTo(p1, "/companion/despawn")[0].b)) === JSON.stringify({ companion: 1, drop: true }) && await toastHas("已移除伙伴「小方」"), "移除的请求");
+      assert(!(await page.$('#cp-list [data-comp="1"]')), "移除后不在列表里");
+      // 「设置 → AI」：AI 伙伴的每日额度
+      await page.goto(url("#/settings/ai")); await settle();
+      assert((await page.textContent("#q-sub-companion")).includes("今天已用 2,400 token"), "AI 伙伴的用量：" + await page.textContent("#q-sub-companion"));
+      const t0 = reqs.length;
+      await page.fill("#q-companion", "3"); await page.press("#q-companion", "Enter"); await settle(300);
+      assert(JSON.stringify(putBody(t0, "/api/ai/quota")) === JSON.stringify({ companion: 30000 }) && await toastHas("AI 伙伴每天最多 3 万 token"), "AI 伙伴的额度按万 token 保存");
+      await openCP();
+      assert((await page.textContent("#cp-quota")).includes("每天最多 3 万"), "伙伴页显示额度：" + await page.textContent("#cp-quota"));
+    } finally { await resetCP(); }
+  });
+
+  await run("伙伴：手机宽度（390px）下不横向溢出，弹窗里的坐标一列一个", async () => {
+    await cpState({ cp: { reset: true, inst: { [PACK]: { mods: CP_INSTALLED, settings: { enabled: true, exists: true, zones: [{ name: "base", dim: "minecraft:overworld", min: [-120, -64, -80], max: [-40, 320, 10] }] } } } }, status: { [PACK]: "running" } });
+    const c = await hostCtx({ host: false }, { viewport: { width: 390, height: 844 } });
+    try {
+      const p = await c.newPage();
+      p.on("pageerror", e => errors.push(e.message));
+      await p.goto(ORIGIN + "#/inst/" + encodeURIComponent(PACK) + "/companion"); await p.waitForTimeout(1200);
+      const overflow = () => p.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth,
+        wide: [...document.querySelectorAll("#tab-body *, .modal *")].filter(e => e.getClientRects().length && e.getBoundingClientRect().right > innerWidth + 1).map(e => e.id || e.className).slice(0, 5) }));
+      let w = await overflow();
+      assert(w.sw <= w.cw && w.wide.length === 0, "横向溢出：" + JSON.stringify(w));
+      await p.click("#cp-zone-add"); await p.waitForSelector(".modal"); await p.waitForTimeout(300);
+      w = await overflow();
+      assert(w.sw <= w.cw && w.wide.length === 0, "弹窗横向溢出：" + JSON.stringify(w));
+    } finally { await c.close(); await resetCP(); }
+  });
+  // ==================== 第七阶段结束 ====================
+
   await run("全程无页面报错", async () => { assert(errors.length === 0, errors.slice(0, 3).join(" | ")); });
 
   await browser.close();

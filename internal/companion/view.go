@@ -45,6 +45,7 @@ type SettingsView struct {
 type View struct {
 	Inst         string       `json:"inst"`
 	ServerStatus string       `json:"serverStatus"`
+	Online       []string     `json:"online"` // 在线的玩家（刷出时选主人、出生在谁旁边）
 	Install      InstallView  `json:"install"`
 	Client       []ClientMod  `json:"client"` // 好友的客户端要装什么（按清单）
 	Settings     SettingsView `json:"settings"`
@@ -60,7 +61,8 @@ func (s *Service) Status(name string) (*View, error) {
 	if err != nil {
 		return nil, &Error{Code: 404, Err: err}
 	}
-	v := &View{Inst: name, ServerStatus: info.Status, Install: s.installView(info), Client: []ClientMod{}, Companions: []Companion{}, Events: []EventView{}}
+	v := &View{Inst: name, ServerStatus: info.Status, Online: append([]string{}, info.Online...), Install: s.installView(info), Client: []ClientMod{},
+		Companions: []Companion{}, Events: []EventView{}}
 	if man, err := s.manifest(); err == nil && v.Install.Supported {
 		j, _ := supported(man, info.Core, info.MC)
 		v.Client = clientMods(man, j)

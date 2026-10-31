@@ -196,6 +196,10 @@ func (r *room) companionAct(ctx context.Context, j *job, tc ai.ToolCall, acted *
 		if _, ok := args["inventory"]; !ok {
 			args["inventory"] = false
 		}
+	case "say":
+		if t, ok := args["text"].(string); ok { // 伙伴说的话会显示在聊天栏：去掉 § 格式码、换行和控制字符（同 tellraw）
+			args["text"] = strings.TrimSpace(cleanText(t))
+		}
 	}
 	ar.Title = companion.ActionTitle(op, args)
 	res, err := s.comps.Act(ctx, r.name, op, args, companion.Origin{Player: j.player, Companion: j.companion})

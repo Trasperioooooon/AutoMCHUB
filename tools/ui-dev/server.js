@@ -61,6 +61,7 @@ function newState(ui) {
     ai: newAIState(),
     music: newMusicState(), // 第五阶段
     gc: newGcState(), // 第四阶段：游戏内 AI
+    cp: newCpState(), // 第七阶段：AI 伙伴
     asst: newAsstState(), // 第三阶段：应用内 AI 助手
   };
   state.props = catalog(ui).map(p => ({ key: p.key, value: p.key === "motd" ? "§a生存服 §7· §e一起来玩！" : String(p.def ?? "") }));
@@ -183,8 +184,10 @@ function newAIState() {
   return {
     preset: "", protocol: "", baseUrl: "", model: "", maxOutput: 0, effort: "", key: "", keyBroken: false,
     quota: {}, prices: [], priceUpdated: "", local: true, testFail: false,
-    today: { assistant: { requests: 12, tokens: 123456, estimated: 1, cost: { USD: 0.0312 } }, gamechat: { requests: 3, tokens: 5600, cost: { USD: 0.002 } } },
-    month: { assistant: { requests: 80, tokens: 1234567, estimated: 2, unpriced: 1, cost: { USD: 0.42, CNY: 1.3 } }, gamechat: { requests: 20, tokens: 45000, cost: { USD: 0.01 } } },
+    today: { assistant: { requests: 12, tokens: 123456, estimated: 1, cost: { USD: 0.0312 } }, gamechat: { requests: 3, tokens: 5600, cost: { USD: 0.002 } },
+      companion: { requests: 2, tokens: 2400, cost: { USD: 0.0008 } } },
+    month: { assistant: { requests: 80, tokens: 1234567, estimated: 2, unpriced: 1, cost: { USD: 0.42, CNY: 1.3 } }, gamechat: { requests: 20, tokens: 45000, cost: { USD: 0.01 } },
+      companion: { requests: 9, tokens: 10800, cost: { USD: 0.0036 } } },
   };
 }
 function aiMissing(a) {
@@ -262,7 +265,7 @@ async function aiHandler(state, req, res, p, m) {
   }
   if (p === "/api/ai/quota" && m === "PUT") {
     for (const [k, v] of Object.entries(b)) {
-      if (!["assistant", "gamechat"].includes(k)) return err(res, 400, `参数 ${k} 不认识`);
+      if (!["assistant", "gamechat", "companion"].includes(k)) return err(res, 400, `参数 ${k} 不认识`);
       if (!(v >= 0)) return err(res, 400, "额度要在 0 到 1 万亿 token 之间（0 表示不限）");
       if (v) a.quota[k] = v; else delete a.quota[k];
     }
@@ -899,6 +902,148 @@ function gcMockState(state, b) {
 }
 // ============================== 第四阶段结束 ==============================
 
+// ================================ 第七阶段：AI 伙伴 ================================
+// 同 /api/instances/{name}/companion（GET）、/install、/settings（PUT）、/spawn、/despawn、/stop（见 web/companion.go、companion.View）。
+// 只有「机械动力整合包」（Forge 1.20.1）支持；开着伙伴、服务器运行中才算连着伙伴模组（link.state = live），刷出、停下、移除才可用。
+// 清单的数据照抄 internal/companion/jar/manifest.json 的 Forge 1.20.1 那一项（好友的客户端要装什么按 side 来：clientSide 可改成 server）。
+const CP_MANIFEST = {
+  ours: { id: "minedeck_companion", name: "MineDeck Companion", version: "0.1.0", file: "minedeck-companion-forge-1.20.1-0.1.0.jar", size: 44762, license: "MIT" },
+  deps: [
+    { id: "playerengine", name: "PlayerEngine", want: "1.20.1-1.4.0", range: "[1.20.1-1.4.0,1.20.1-1.5)", file: "playerengine-forge-1.20.1-1.4.0.jar", size: 4488694, license: "LGPL-3.0",
+      page: "https://modrinth.com/mod/playerengine/version/wFlD9yTq" },
+    { id: "architectury", name: "Architectury API", want: "9.2.14", range: "[9.2.14,)", file: "architectury-9.2.14-forge.jar", size: 580602, license: "LGPL-3.0",
+      page: "https://modrinth.com/mod/architectury-api/version/1MKTLiiG" },
+  ],
+};
+const CP_DENY = ["minecraft:villager", "minecraft:wandering_trader", "minecraft:iron_golem", "minecraft:snow_golem", "minecraft:allay"];
+const CP_PACK = "机械动力整合包";
+function newCpState() { return { insts: {}, clientSide: "both", installs: [] }; }
+function cpInst(state, name) {
+  let c = state.cp.insts[name];
+  if (!c) {
+    c = state.cp.insts[name] = {
+      mods: { minedeck_companion: { state: "missing", files: [] }, playerengine: { state: "missing", files: [] },
+        architectury: { state: "ok", version: "9.2.14", files: [{ file: "architectury-9.2.14-forge.jar", version: "9.2.14", keep: true }] } },
+      settings: { exists: false, enabled: false, port: 24480, maxCompanions: 4, attackDeny: [...CP_DENY], attackDenyDefault: true, zones: [], problems: [] },
+      comps: [], events: [], restart: false, nextId: 1, nextTask: 1, loaderWarn: "",
+    };
+  }
+  return c;
+}
+const cpLive = (i, c) => c.settings.enabled && i.status === "running";
+function cpEvent(c, text, level = "info", extra = {}) { c.events.unshift({ t: new Date().toISOString(), event: extra.event || "", level, text, ...extra }); c.events = c.events.slice(0, 100); }
+function cpView(state, i) {
+  const c = cpInst(state, i.name), a = state.ai, g = gcInst(state, i.name), missing = aiMissing(a);
+  const supported = i.core === "forge" && i.mc === "1.20.1" || i.core === "neoforge" && i.mc === "1.21.1";
+  if (!supported) return { inst: i.name, install: { supported: false, reason: `AI 伙伴现在只支持 NeoForge 1.21.1、Forge 1.20.1（这台是 ${i.core} ${i.mc}）：伙伴模组用到了 Minecraft 的类，每个加载器、每个 MC 版本要各编一个 jar`, mods: [] } };
+  const m = CP_MANIFEST, mods = [
+    { id: m.ours.id, name: m.ours.name, kind: "companion", want: m.ours.version, file: m.ours.file, size: m.ours.size, license: m.ours.license, ...c.mods.minedeck_companion },
+    ...m.deps.map(d => ({ id: d.id, name: d.name, kind: "dependency", want: d.want, range: d.range, file: d.file, size: d.size, license: d.license, page: d.page, ...c.mods[d.id] })),
+  ];
+  const needed = mods.some(x => x.state !== "ok" && x.state !== "inrange" || (x.files || []).some(f => !f.keep));
+  const live = cpLive(i, c);
+  return {
+    inst: i.name, serverStatus: i.status, online: i.status === "running" ? GC_ONLINE : [],
+    install: { supported: true, loader: i.core, mc: i.mc, loaderWarn: c.loaderWarn, java: 17, mods, ready: mods.every(x => x.state === "ok" || x.state === "inrange"), needed,
+      download: mods.filter(x => x.kind === "dependency" && x.state !== "ok" && x.state !== "inrange").reduce((n, x) => n + x.size, 0) },
+    client: [{ id: m.ours.id, name: m.ours.name, version: m.ours.version, file: m.ours.file, required: true, license: m.ours.license },
+      ...m.deps.map(d => ({ id: d.id, name: d.name, version: d.want, file: d.file, required: state.cp.clientSide === "both", page: d.page, license: d.license }))],
+    settings: { ...c.settings, applied: live ? { maxCompanions: c.settings.maxCompanions, attackDeny: c.settings.attackDeny, zones: c.settings.zones, problems: [] } : undefined,
+      pending: false, defaultDeny: CP_DENY, maxLimit: 16, maxZones: 64 },
+    link: !c.settings.enabled ? { state: "off" } : !live ? { state: "waiting" } : { state: "live", mod: "0.2.0", playerEngine: "1.20.1-1.4.0", session: "s1", protocol: 1, rttMs: 0.8,
+      ops: ["spawn", "despawn", "status", "collect", "follow", "goto", "attack", "give", "stop", "say"], features: ["nodig", "adopt"] },
+    companions: live ? c.comps : [], events: c.events, restart: c.restart,
+    ai: { enabled: !missing, missing, quotaUsed: (a.today.companion || {}).tokens || 0, quotaLimit: a.quota.companion || 0 },
+    gameai: { enabled: g.settings.enabled, prefix: g.settings.prefix, allowed: g.settings.allowed }, local: a.local,
+  };
+}
+async function cpHandler(state, req, res, m, seg) {
+  const i = state.instances.find(x => x.name === seg[3]);
+  if (!i) return err(res, 404, "实例不存在");
+  const c = cpInst(state, i.name), sub = seg[5] || "", b = m === "GET" ? {} : await readBody(req);
+  const v = cpView(state, i);
+  if (sub === "" && m === "GET") return ok(res, v);
+  if (!v.install.supported) return err(res, 400, v.install.reason);
+  const live = cpLive(i, c);
+  if (sub === "install" && m === "POST") {
+    state.cp.installs.push(Date.now());
+    const replace = v.install.mods.some(x => (x.files || []).some(f => !f.keep));
+    if (i.status !== "stopped" && replace) return err(res, 409, "服务器运行中不能替换已经装着的模组（文件被服务器占用）：先停服再安装");
+    const installed = v.install.mods.filter(x => x.state !== "ok" && x.state !== "inrange").map(x => x.file);
+    for (const x of v.install.mods) c.mods[x.id] = { state: x.state === "inrange" ? "inrange" : "ok", version: x.state === "inrange" ? x.version : x.want, files: [{ file: x.state === "inrange" ? (x.files.find(f => f.keep) || {}).file : x.file, version: x.want, keep: true }] };
+    c.restart = i.status !== "stopped";
+    return ok(res, { installed, removed: [], restart: c.restart, install: cpView(state, i).install });
+  }
+  if (sub === "settings" && m === "PUT") {
+    if (b.enabled === true && c.mods.minedeck_companion.state === "missing") return err(res, 400, "先装伙伴模组，再打开");
+    if (b.maxCompanions != null && !(Number.isInteger(b.maxCompanions) && b.maxCompanions >= 1 && b.maxCompanions <= 16)) return err(res, 400, "参数 maxCompanions 应在 1 到 16 之间");
+    if (Array.isArray(b.attackDeny)) {
+      const bad = b.attackDeny.find(x => !/^(?:[a-z0-9_.-]+:)?[a-z0-9_./-]+$/.test(x));
+      if (bad) return err(res, 400, `「${bad}」不是生物种类的 ID（如 minecraft:villager）`);
+    }
+    if (Array.isArray(b.zones)) {
+      const seen = new Set();
+      for (const z of b.zones) {
+        if (!/^[A-Za-z0-9_-]{1,32}$/.test(z.name)) return err(res, 400, `区域名「${z.name}」只能是 1–32 个字母、数字、_、-`);
+        if (seen.has(z.name.toLowerCase())) return err(res, 400, `有两个禁挖区域都叫「${z.name}」`);
+        seen.add(z.name.toLowerCase());
+      }
+    }
+    if ("enabled" in b) { c.settings.enabled = !!b.enabled; c.settings.exists = true; cpEvent(c, b.enabled ? "MineDeck 打开了伙伴" : "MineDeck 关掉了伙伴"); }
+    if (b.maxCompanions != null) c.settings.maxCompanions = b.maxCompanions;
+    if (b.denyDefault) { c.settings.attackDeny = [...CP_DENY]; c.settings.attackDenyDefault = true; }
+    else if (Array.isArray(b.attackDeny)) { c.settings.attackDeny = [...new Set(b.attackDeny.map(x => (x.includes(":") ? x : "minecraft:" + x)))]; c.settings.attackDenyDefault = false; }
+    if (Array.isArray(b.zones)) c.settings.zones = [...b.zones].sort((x, y) => (x.name < y.name ? -1 : 1));
+    return ok(res, cpView(state, i));
+  }
+  if (!live) return err(res, 409, "现在没连着伙伴模组：要先开服、打开伙伴，等连上以后再试");
+  if (sub === "spawn" && m === "POST") {
+    if (c.comps.some(x => x.name.toLowerCase() === String(b.name || "").toLowerCase())) return err(res, 400, `已经有一个叫「${b.name}」的伙伴`);
+    if (c.comps.length >= c.settings.maxCompanions) return err(res, 400, "伙伴数量到上限了");
+    const comp = { id: c.nextId++, uuid: "00000000-0000-0000-0000-00000000000" + c.nextId, name: b.name, owner: b.owner || "", dim: "minecraft:overworld", x: 32.5, y: 64, z: -383.5,
+      health: 20, maxHealth: 20, state: "idle", task: null, lastResult: null };
+    c.comps.push(comp);
+    cpEvent(c, `刷出了伙伴「${comp.name}」${comp.owner ? "（主人 " + comp.owner + "）" : ""}`, "info", { event: "spawned", companion: comp.id, name: comp.name });
+    return ok(res, comp);
+  }
+  if (sub === "despawn" && m === "POST") {
+    const removed = c.comps.filter(x => b.all || x.id === b.companion).map(x => x.id);
+    for (const id of removed) { const x = c.comps.find(y => y.id === id); cpEvent(c, `伙伴「${x.name}」没了（MineDeck 移除的）`, "info", { event: "removed", companion: id, name: x.name }); }
+    c.comps = c.comps.filter(x => !removed.includes(x.id));
+    state.cp.lastDespawn = b;
+    return ok(res, { removed });
+  }
+  if (sub === "stop" && m === "POST") {
+    const stopped = [];
+    for (const x of c.comps.filter(y => b.all || y.id === b.companion)) {
+      if (!x.task) continue;
+      stopped.push(x.task.id);
+      x.lastResult = { task: x.task, result: "cancelled", seconds: 3, at: Date.now() };
+      cpEvent(c, `「${x.name}」${x.task.op === "collect" ? "采集 " + String(x.task.args.item).replace(/^minecraft:/, "") + " ×" + x.task.args.count : x.task.op} 停下了。`, "info", { event: "task_finished", companion: x.id, name: x.name });
+      x.task = null; x.state = "idle";
+    }
+    return ok(res, { stopped });
+  }
+  return err(res, 404, "没有这个接口");
+}
+// cp：{ reset, clientSide: "server" 依赖改成只装服务端, inst: { 名称: { mods, settings, comps, events, restart, loaderWarn… } }, busy: 给第一个伙伴派个采集任务 }
+function cpMockState(state, b) {
+  if (b.reset) state.cp = newCpState();
+  if (b.clientSide) state.cp.clientSide = b.clientSide;
+  for (const [n, x] of Object.entries(b.inst || {})) {
+    const c = cpInst(state, n);
+    const { settings, mods, ...rest } = x;
+    Object.assign(c, rest);
+    if (settings) Object.assign(c.settings, settings);
+    if (mods) Object.assign(c.mods, mods);
+  }
+  if (b.busy) {
+    const c = cpInst(state, CP_PACK), x = c.comps[0];
+    if (x) { x.task = { id: c.nextTask++, companion: x.id, op: "collect", args: { item: "minecraft:oak_log", count: 3 }, timeout: 600, startedAt: Date.now() }; x.state = "busy"; }
+  }
+}
+// ============================== 第七阶段结束 ==============================
+
 const VERSIONS = ["26.2", "26.1", "1.21.4", "1.21.3", "1.21.1", "1.21", "1.20.6", "1.20.4", "1.20.2", "1.20.1", "1.19.4", "1.19.2", "1.18.2", "1.17.1", "1.16.5", "1.12.2"];
 const SNAPS = ["26.3-snapshot-2", "26.3-snapshot-1", "26.2-rc1"];
 
@@ -940,6 +1085,7 @@ function handler(state, ui, portOf) {
     //   credBroken: 隧道编号（如 "t2"），模拟这条隧道的凭据解不开；空串还原
     //   ai: { reset: true 回到没配置, local: false 模拟局域网打开（只能看）, keyBroken, testFail, priceUpdated, 以及 preset/baseUrl/model/key 等直接写入 }
     //   gc（第四阶段）: { reset: true 回到初始数据, inst: { 名称: { whitelistOn, seen, log, settings… } } }；响应里的 gc.whitelistReq 是上一次一键开白名单加的人
+    //   cp（第七阶段）: 见 cpMockState；响应里的 cp.installs 是点过几次安装、cp.lastDespawn 是上一次移除的请求体
     //   music（第五阶段）: { reset, cap: "win11" | "win10", local, systemConfirmed, voiceTunnel: true 多一条语音隧道, inst: { 名称: { svc, bridge, voiceHost, … } } }
     //   asst（第三阶段）: { reset: true 清空会话和执行记录, lan: false 关掉「局域网可用 AI 助手」, slow: 流式回复每块的间隔（毫秒）}；响应里的 asst.executed 是确认后执行过的操作
     if (p === "/__mock/state" && m === "POST") {
@@ -956,6 +1102,7 @@ function handler(state, ui, portOf) {
       if (b.ai) { if (b.ai.reset) state.ai = newAIState(); const { reset, ...rest } = b.ai; Object.assign(state.ai, rest); }
       if (b.music) musicMockState(state, b.music); // 第五阶段
       if (b.gc) gcMockState(state, b.gc); // 第四阶段
+      if (b.cp) cpMockState(state, b.cp); // 第七阶段
       if (b.asst) { if (b.asst.reset) { for (const x of state.asst.sessions) for (const r of x.subs) r.end(); state.asst = newAsstState(); } const { reset, ...rest } = b.asst; Object.assign(state.asst, rest); } // 第三阶段
       if (b.status) for (const [n, st] of Object.entries(b.status)) { const i = state.instances.find(x => x.name === n); if (i) { i.status = st; i.uptimeSec = st === "stopped" ? 0 : st === "starting" ? 9 : i.uptimeSec; i.onlineCount = st === "running" ? i.onlineCount : 0; } }
       return ok(res, state);
@@ -981,6 +1128,7 @@ function handler(state, ui, portOf) {
       if (await asstHandler(state, req, res, p, m, u)) return; // 第三阶段：应用内 AI 助手（含 GET /api/ai/settings 的 lanAssistant）
       if (p.startsWith("/api/ai/")) return aiHandler(state, req, res, p, m);
       if (seg[2] === "instances" && seg[4] === "gameai") return gcHandler(state, req, res, m, seg, u); // 第四阶段
+      if (seg[2] === "instances" && seg[4] === "companion") return cpHandler(state, req, res, m, seg); // 第七阶段
       if (p.startsWith("/api/music/") || (seg[2] === "instances" && seg[4] === "music") || (p === "/api/tunnels" && m === "POST")) return musicHandler(state, req, res, p, m, seg); // 第五阶段
       if (p === "/api/cores") return ok(res, CORES);
       if (p === "/api/config" && m === "PUT") {
