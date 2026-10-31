@@ -437,3 +437,25 @@ func TestPreviewFailure(t *testing.T) {
 		t.Fatalf("预览失败：%v %s", isErr, text)
 	}
 }
+
+// Windows 上 Go 的时钟一跳 0.5～15.6 毫秒，前后脚来的客户端 Last 一样（GitHub 的 Windows 机器上实测）：
+// 先后按来访的序号排，最近来过的在前；超过上限时挤掉的是最久没来过的，不是刚来的。
+func TestClientOrderSameTick(t *testing.T) {
+	f := newFixture(t)
+	tick := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	f.svc.now = func() time.Time { return tick } // 时钟停在同一跳
+	for i := 1; i <= maxClients+1; i++ {
+		f.svc.seen(identity{Name: fmt.Sprintf("工具%d", i)}, "http", Modern, false)
+	}
+	f.svc.seen(identity{Name: "工具5"}, "http", Modern, true) // 老客户又来了：排到最前
+	cl := f.svc.Status(true).Clients
+	want := []string{"工具5", "工具9", "工具8", "工具7", "工具6", "工具4", "工具3", "工具2"}
+	if len(cl) != len(want) {
+		t.Fatalf("最多记 %d 个：%+v", maxClients, cl)
+	}
+	for i, c := range cl {
+		if c.Name != want[i] {
+			t.Fatalf("第 %d 个应是 %s：%+v", i+1, want[i], cl)
+		}
+	}
+}

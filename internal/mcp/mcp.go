@@ -101,6 +101,7 @@ type Service struct {
 	sum      []byte // 令牌的 SHA-256：内存里不留明文；nil 表示没有可用的令牌
 	broken   bool   // 存着的令牌解不开（换了电脑或 Windows 用户）
 	clients  []*Client
+	seq      uint64 // 客户端来访的序号（Client.seq）
 	sessions map[string]*session
 	props    map[string]*record // MCP 提出的提案（处理结果留一个小时，给 proposal_status 查）
 	changed  chan struct{}      // 提案有变化时关闭、再换一个新的（proposal_status 的 wait 等它）
@@ -388,7 +389,7 @@ func (s *Service) Status(local bool) View {
 		v.Clients = append(v.Clients, *c)
 	}
 	s.mu.Unlock()
-	sort.SliceStable(v.Clients, func(i, j int) bool { return v.Clients[i].Last.After(v.Clients[j].Last) })
+	newestFirst(v.Clients)
 	v.Pending = len(s.Pending())
 	v.Tools = len(s.toolDefs(Modern))
 	return v
@@ -406,6 +407,12 @@ type Client struct {
 	First     time.Time `json:"first"`
 	Last      time.Time `json:"last"`
 	Calls     int       `json:"calls"` // 调用工具的次数
+	seq       uint64    // 第几个来过的：按它排先后。Windows 上 Go 的时钟一跳 0.5～15.6 毫秒，前后脚来的两个 Last 常常一样
+}
+
+// newestFirst 最近来过的在前。
+func newestFirst(cs []Client) {
+	sort.SliceStable(cs, func(i, j int) bool { return cs[i].seq > cs[j].seq })
 }
 
 const maxClients = 8
@@ -485,12 +492,13 @@ func (s *Service) seen(id identity, transport, protocol string, tool bool) {
 	if c == nil {
 		c = &Client{Name: id.Name, Transport: transport, First: now, Last: now}
 		s.clients = append(s.clients, c)
-		if len(s.clients) > maxClients { // 挤掉最久没来过的（新来的这个 Last 是现在，不会被挤掉）
-			sort.SliceStable(s.clients, func(i, j int) bool { return s.clients[i].Last.After(s.clients[j].Last) })
-			s.clients = s.clients[:maxClients]
-		}
 	}
-	c.Title, c.Version, c.Protocol, c.Last = id.Title, id.Version, protocol, now
+	s.seq++
+	c.Title, c.Version, c.Protocol, c.Last, c.seq = id.Title, id.Version, protocol, now, s.seq
+	if len(s.clients) > maxClients { // 挤掉最久没来过的（新来的这个序号最大，不会被挤掉）
+		sort.SliceStable(s.clients, func(i, j int) bool { return s.clients[i].seq > s.clients[j].seq })
+		s.clients = s.clients[:maxClients]
+	}
 	if tool {
 		c.Calls++
 	}
