@@ -29,7 +29,9 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
   });
   const page = await ctx.newPage();
   const errors = [];
-  page.on("pageerror", e => errors.push(e.message));
+  // 页面报错带上第一处出错位置（文件:行:列），偶发的报错不用复现也能直接定位
+  const pageErr = e => e.message + (((e.stack || "").split("\n").find(l => /^\s*at /.test(l)) || "").replace(/^\s*at\s*/, "  @ ").replace(/https?:\/\/[^/]+\//, ""));
+  page.on("pageerror", e => errors.push(pageErr(e)));
   const reqs = [];
   page.on("request", r => reqs.push({ t: Date.now(), m: r.method(), u: new URL(r.url()).pathname, b: r.method() === "PUT" ? r.postData() || "" : "" }));
   // 某次之后有没有改过某个配置键（PUT /api/config 的请求体里带这个键）——原生窗口还会顺带上报界面底色，不能只看路径
@@ -384,7 +386,7 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
     const c = await hostCtx({ host: true, boot: "boot-1" });
     try {
       const p = await c.newPage();
-      p.on("pageerror", e => errors.push(e.message));
+      p.on("pageerror", e => errors.push(pageErr(e)));
       await p.goto(ORIGIN + "#/instances");
       let st = await splashState(p);
       assert(st.attr === "play" && st.el, "冷启动未播放启动画面：" + JSON.stringify(st));
@@ -502,7 +504,7 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
     const c = await hostCtx({ host: true }, { reducedMotion: "reduce" });
     try {
       const p = await c.newPage();
-      p.on("pageerror", e => errors.push(e.message));
+      p.on("pageerror", e => errors.push(pageErr(e)));
       const running = () => p.evaluate(() => document.getAnimations().filter(a => a.playState === "running").length);
       await p.goto(ORIGIN + "#/instances"); await p.waitForTimeout(400);
       await p.click('.card[data-name="机械动力整合包"] [data-act="more"]');
@@ -762,7 +764,7 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
     const c = await hostCtx({ host: false }, { viewport: { width: 390, height: 844 } });
     try {
       const p = await c.newPage();
-      p.on("pageerror", e => errors.push(e.message));
+      p.on("pageerror", e => errors.push(pageErr(e)));
       await p.goto(ORIGIN + "#/settings/ai"); await p.waitForTimeout(900);
       const w = await p.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth,
         wide: [...document.querySelectorAll("#set-body *")].filter(e => e.getClientRects().length && e.getBoundingClientRect().right > innerWidth + 1).map(e => e.id || e.className).slice(0, 5) }));
@@ -924,7 +926,7 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
     const c = await hostCtx({ host: false }, { viewport: { width: 390, height: 844 } });
     try {
       const p = await c.newPage();
-      p.on("pageerror", e => errors.push(e.message));
+      p.on("pageerror", e => errors.push(pageErr(e)));
       await p.goto(ORIGIN + "#/inst/" + encodeURIComponent(PACK) + "/music"); await p.waitForTimeout(1200);
       await p.click("#mu-adv-head"); await p.waitForTimeout(200);
       const w = await p.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth,
@@ -1089,7 +1091,7 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
     const c = await hostCtx({ host: false }, { viewport: { width: 390, height: 844 } });
     try {
       const p = await c.newPage();
-      p.on("pageerror", e => errors.push(e.message));
+      p.on("pageerror", e => errors.push(pageErr(e)));
       await p.goto(ORIGIN + "#/instances"); await p.waitForTimeout(800);
       await p.click("#ai-btn"); await p.waitForTimeout(400);
       await p.click('#ap-body [data-x="new"]'); await p.waitForTimeout(200);
@@ -1241,7 +1243,7 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
     const c = await hostCtx({ host: false }, { viewport: { width: 390, height: 844 } });
     try {
       const p = await c.newPage();
-      p.on("pageerror", e => errors.push(e.message));
+      p.on("pageerror", e => errors.push(pageErr(e)));
       await p.goto(ORIGIN + "#/inst/" + encodeURIComponent("生存服 · 朋友") + "/gameai"); await p.waitForTimeout(1200);
       await p.click('[data-allow="Notch_CN"] + .sw'); await p.waitForTimeout(400);
       await p.click("#gc-sample"); await p.click("#gc-run"); await p.click("#gc-adv-head"); await p.waitForTimeout(400);
@@ -1412,7 +1414,7 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
     const c = await hostCtx({ host: false }, { viewport: { width: 390, height: 844 } });
     try {
       const p = await c.newPage();
-      p.on("pageerror", e => errors.push(e.message));
+      p.on("pageerror", e => errors.push(pageErr(e)));
       await p.goto(ORIGIN + "#/inst/" + encodeURIComponent(PACK) + "/companion"); await p.waitForTimeout(1200);
       const overflow = () => p.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth,
         wide: [...document.querySelectorAll("#tab-body *, .modal *")].filter(e => e.getClientRects().length && e.getBoundingClientRect().right > innerWidth + 1).map(e => e.id || e.className).slice(0, 5) }));
