@@ -354,8 +354,22 @@ func TestLedgerQuotaAndCost(t *testing.T) {
 	if err := s.SetQuota(map[Feature]int64{FeatAssistant: 3000, FeatGameChat: 0}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetQuota(map[Feature]int64{"companion": 1}); err == nil {
-		t.Error("现在只能给助手和游戏内 AI 设额度")
+	if err := s.SetQuota(map[Feature]int64{"music": 1}); err == nil {
+		t.Error("只能给助手、游戏内 AI 和 AI 伙伴设额度")
+	}
+	if err := s.SetQuota(map[Feature]int64{FeatCompanion: 100}); err != nil || s.View().Quota[FeatCompanion] != 100 {
+		t.Errorf("AI 伙伴的额度（第七阶段）：%v %v", err, s.View().Quota)
+	}
+	s.Record(FeatCompanion, &Result{Usage: Usage{Input: 80, Output: 40}, Model: "deepseek-v4-flash"})
+	var cq *QuotaError
+	if err := s.Begin(FeatCompanion); !errors.As(err, &cq) || cq.Feature != FeatCompanion || !strings.Contains(err.Error(), "AI 伙伴今天的额度已用完") {
+		t.Errorf("AI 伙伴的额度用完了：%v", err)
+	}
+	if err := s.Begin(FeatGameChat); err != nil {
+		t.Errorf("AI 伙伴的额度和游戏内 AI 分开算：%v", err)
+	}
+	if err := s.SetQuota(map[Feature]int64{FeatCompanion: 0}); err != nil || s.Begin(FeatCompanion) != nil {
+		t.Errorf("清掉 AI 伙伴的额度：%v", err)
 	}
 	if err := s.Begin(FeatAssistant); err != nil {
 		t.Fatal(err)

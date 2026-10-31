@@ -80,6 +80,9 @@ func TestLevelsFollowDesign(t *testing.T) {
 	// 游戏内 AI（第四阶段）：游戏里只能调 game.info；「游戏内 AI」标签的操作 AI 永远看不到、也改不了
 	want[ops.Read] = append(want[ops.Read], "game.info")
 	want[ops.HumanOnly] = append(want[ops.HumanOnly], "gameai.get", "gameai.set", "gameai.test", "gameai.log", "gameai.whitelist")
+	// AI 伙伴（第七阶段）：看状态是读；装模组、改设置、刷出、移除、全部停下是写（AI 只能提出）；伙伴的动作只走游戏内 AI 的工具，不是登记的操作
+	want[ops.Read] = append(want[ops.Read], "companion.status")
+	want[ops.Write] = append(want[ops.Write], "companion.install", "companion.settings.set", "companion.spawn", "companion.despawn", "companion.stop")
 
 	n := 0
 	for level, names := range want {
@@ -129,8 +132,9 @@ func TestAIToolLists(t *testing.T) {
 			t.Errorf("助手的工具清单里有仅人工的操作 %s", op.Name)
 		}
 	}
-	if n := len(reg.Available(ops.Caller{Source: ops.SrcAssistant, Local: true})); n != 23+13+11+3+1 { // +3：音乐共享（第五阶段）的读 1 + 写 2；+1：game.info（第四阶段，助手的工具清单里另外去掉了）
-		t.Errorf("助手能用 %d 个操作，应为读 23 + 写 13 + 危险 11 + 音乐共享 3 + game.info 1", n)
+	// +3：音乐共享（第五阶段）的读 1 + 写 2；+1：game.info（第四阶段，助手的工具清单里另外去掉了）；+6：AI 伙伴（第七阶段）的读 1 + 写 5
+	if n := len(reg.Available(ops.Caller{Source: ops.SrcAssistant, Local: true})); n != 23+13+11+3+1+6 {
+		t.Errorf("助手能用 %d 个操作，应为读 23 + 写 13 + 危险 11 + 音乐共享 3 + game.info 1 + AI 伙伴 6", n)
 	}
 	if l := reg.Available(ops.Caller{Source: ops.SrcGameChat, Actor: "Steve"}); len(l) != 1 || l[0].Name != "game.info" {
 		t.Errorf("游戏内 AI 只能调 game.info：%v", l)

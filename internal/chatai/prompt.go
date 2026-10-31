@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"minedeck/internal/ai"
+	"minedeck/internal/companion"
 )
 
 // 系统提示和工具清单（§6.4）。每个问题都是一次新的对话，按人、按选项给不同的工具清单没问题（§4.3 的「历史只追加」管的是同一个会话）。
@@ -26,11 +27,33 @@ const promptExec = `
 const promptNoExec = `
 5. 这一次你不能执行任何命令：玩家要你动手做的事（改天气、传送、给物品……），告诉他这次只能回答问题；可以告诉他该用什么命令、或者找服主。`
 
-func systemPrompt(exec bool) string {
+// 伙伴（第七阶段）：实例没有伙伴时系统提示和原来一字不差。
+const (
+	compNone = iota // 没启用伙伴、或者没连着伙伴模组
+	compTalk        // 有伙伴，但这一次不能指挥（没有执行权限，或者用了 /问）
+	compAct         // 有伙伴，能指挥（多一组 companion_ 开头的工具）
+)
+
+const promptCompTalk = `
+6. 服务器里有 MineDeck 的 AI 伙伴：像玩家一样的角色（不是真玩家），能跟着人走、采集、打怪、给东西。用户消息里列出了现有的伙伴。这一次你不能指挥伙伴（提问的人没有执行权限，或者用了 /问）：玩家要伙伴干活时，告诉他要服主授权才行。
+7. 用户消息里写了「这句话是对伙伴某某说的」时，你就是这个伙伴：用它的口吻、第一人称简短地回答。`
+
+const promptCompAct = `
+6. 服务器里有 MineDeck 的 AI 伙伴：像玩家一样的角色（不是真玩家）。用户消息里列出了现有的伙伴。这位玩家能指挥伙伴：要伙伴跟着走、采集、去某处、打怪、给东西、停下、说话时，调用 companion_ 开头的工具，一次一件事。工具只是让伙伴开始干活：开始了就用一句话告诉玩家，不用等它做完（做完或失败时 MineDeck 会自动告诉他）。物品、生物要写完整的 ID（如 minecraft:oak_log、minecraft:zombie）。伙伴不会破坏或放置任意方块，也不会打玩家；做不到的事照实告诉玩家。
+7. 用户消息里写了「这句话是对伙伴某某说的」时，你就是这个伙伴：用它的口吻、第一人称简短地回答；要它干活时 companion 就填它。`
+
+func systemPrompt(exec bool, comp int) string {
+	p := promptBase + promptNoExec
 	if exec {
-		return promptBase + promptExec
+		p = promptBase + promptExec
 	}
-	return promptBase + promptNoExec
+	switch comp {
+	case compTalk:
+		p += promptCompTalk
+	case compAct:
+		p += promptCompAct
+	}
+	return p
 }
 
 // 两个工具。
@@ -53,8 +76,8 @@ func runCommandTool(enabled map[string]bool) ai.Tool {
 	return ai.Tool{Name: "run_command", Description: b.String(), Schema: runCommandSchema}
 }
 
-// userMessage 发给 AI 的用户消息：提问的人、有没有执行权限、问题（脱敏后）。
-func userMessage(j *job, question string) string {
+// userMessage 发给 AI 的用户消息：提问的人、有没有执行权限、现有的伙伴（启用了伙伴时）、问题（脱敏后）。
+func userMessage(j *job, question string, comps []companion.Companion, live bool) string {
 	perm := "没有执行命令的权限"
 	switch {
 	case j.exec:
@@ -62,7 +85,18 @@ func userMessage(j *job, question string) string {
 	case j.authorized:
 		perm = "有执行命令的权限，但这次用了 /问：只回答，不执行命令"
 	}
-	return fmt.Sprintf("提问的人：%s（%s）\n问题：%s", j.player, perm, question)
+	msg := fmt.Sprintf("提问的人：%s（%s）\n", j.player, perm)
+	if live {
+		if len(comps) == 0 {
+			msg += "伙伴：现在一个都没有（服主可以在 MineDeck 里刷出）\n"
+		} else {
+			msg += "伙伴：" + companionLines(comps) + "\n"
+		}
+	}
+	if j.companion != "" {
+		msg += "这句话是对伙伴「" + j.companion + "」说的。\n"
+	}
+	return msg + "问题：" + question
 }
 
 // 工具结果外面的边界标记（§10.4）：只能降低提示词注入的风险，真正的防线是代码里的权限和命令白名单。

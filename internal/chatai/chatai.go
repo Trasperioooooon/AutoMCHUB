@@ -13,6 +13,7 @@ package chatai
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -66,6 +67,8 @@ type Options struct {
 	Now     func() time.Time
 	CmdWait time.Duration // 执行命令后收集多久的控制台输出，默认 1 秒（§6.6 第 6 步）
 	Timeout time.Duration // 一个问题最多处理多久，默认 2 分钟
+	// Companions AI 伙伴（第七阶段）；nil 时没有伙伴：不认「@伙伴名」，也没有伙伴工具。
+	Companions Companions
 }
 
 // Service 游戏内聊天 AI。
@@ -74,6 +77,7 @@ type Service struct {
 	ai      *ai.Service
 	reg     *ops.Registry
 	redact  Redactor
+	comps   Companions
 	now     func() time.Time
 	cmdWait time.Duration
 	timeout time.Duration
@@ -97,7 +101,7 @@ func New(o Options) *Service {
 		o.Timeout = 2 * time.Minute
 	}
 	ctx, stop := context.WithCancel(context.Background())
-	return &Service{b: o.Backend, ai: o.AI, reg: o.Ops, redact: o.Redact, now: o.Now, cmdWait: o.CmdWait, timeout: o.Timeout,
+	return &Service{b: o.Backend, ai: o.AI, reg: o.Ops, redact: o.Redact, comps: o.Companions, now: o.Now, cmdWait: o.CmdWait, timeout: o.Timeout,
 		ctx: ctx, stop: stop, rooms: map[string]*room{}}
 }
 
@@ -142,16 +146,19 @@ type room struct {
 }
 
 type trigger struct {
-	player string
-	ask    *Ask
-	t      time.Time
+	player    string
+	ask       *Ask
+	companion string // 叫着这个伙伴的名字说的（「@小方 跟着我」）
+	t         time.Time
 }
 
 type job struct {
 	player     string
 	ask        *Ask
 	authorized bool
-	exec       bool // 这次给执行命令的工具
+	exec       bool       // 这次给执行命令（和指挥伙伴）的工具
+	companion  string     // 叫着这个伙伴的名字说的：以它的名义回答，记在 AI 伙伴的额度里
+	feat       ai.Feature // 记在哪项功能名下
 	t          time.Time
 }
 
@@ -197,8 +204,13 @@ func (s *Service) OnLine(inst, line string) {
 		see(r.seen, l.Player, s.now())
 		r.mu.Unlock()
 	}
-	if !set.Enabled {
+	if !set.Enabled || (l.Kind != mclog.Chat && rules.Pattern == nil) {
 		return
+	}
+	base := rules
+	list, _, _ := s.companionsLive(inst) // 伙伴的名字也能触发：「@小方 跟着我」
+	if len(list) > 0 {
+		rules.Prefixes = append(slices.Clone(rules.Prefixes), companionPrefixes(list)...)
 	}
 	h := recognizeParsed(l, rules)
 	if !h.Trigger() {
@@ -207,7 +219,7 @@ func (s *Service) OnLine(inst, line string) {
 	r.start()
 	s.busy.Add(1)
 	select {
-	case r.inbox <- trigger{player: h.Player, ask: h.Ask, t: s.now()}:
+	case r.inbox <- trigger{player: h.Player, ask: h.Ask, companion: addressed(h.Ask.Prefix, base, list), t: s.now()}:
 	default: // 收件箱满了（有人在刷屏）：丢掉
 		s.busy.Done()
 	}
@@ -294,12 +306,13 @@ func (r *room) handle(t trigger) {
 		sent, _ := r.say(t.player, true, text, colorSystem)
 		r.record(Record{T: t.t, Player: t.player, Kind: kind, Opts: t.ask.Opts, Question: t.ask.Question, Reply: sent, Private: true})
 	}
+	feat := featureOf(t.companion)
 	switch t.ask.Action {
 	case ActHelp:
-		sys(string(ActHelp), r.helpText(set, authorized))
+		sys(string(ActHelp), r.helpText(set, authorized, t.companion))
 		return
 	case ActQuota:
-		sys(string(ActQuota), r.quotaText(set, t.player, t.t))
+		sys(string(ActQuota), r.quotaText(set, t.player, t.t, feat))
 		return
 	case ActUnknown, ActNoSpace, ActMisplaced:
 		sys(string(t.ask.Action), hintText(set.Prefix, t.ask, authorized))
@@ -318,8 +331,8 @@ func (r *room) handle(t trigger) {
 		sys(kind, msg)
 		return
 	}
-	if err := s.ai.Begin(ai.FeatGameChat); err != nil { // 「设置 → AI」里游戏内 AI 的每日额度（所有实例共用）
-		sys("limit", "游戏内 AI 今天的额度用完了，明天再来吧。")
+	if err := s.ai.Begin(feat); err != nil { // 「设置 → AI」里游戏内 AI（叫着伙伴说的是 AI 伙伴）的每日额度（所有实例共用）
+		sys("limit", quotaMsg(feat))
 		return
 	}
 	if len(r.jobs) >= queueSize {
@@ -329,7 +342,7 @@ func (r *room) handle(t trigger) {
 	r.notifyPrivacy() // 先说清楚提问会发给谁，再去问 AI
 	r.accept(t.player, t.t)
 	s.busy.Add(1)
-	r.jobs <- &job{player: t.player, ask: t.ask, authorized: authorized, exec: authorized && !t.ask.NoExec, t: t.t}
+	r.jobs <- &job{player: t.player, ask: t.ask, authorized: authorized, exec: authorized && !t.ask.NoExec, companion: t.companion, feat: feat, t: t.t}
 }
 
 // limit 冷却、每人每天、全服每天的次数、全服每天的 token；有一项不满足就返回给玩家的提示。
@@ -419,10 +432,15 @@ func (r *room) persist() {
 // say 回复一个人：回答默认全服可见（目标 @a，开头写 [AI→名字]），/私 和系统提示只发给提问的人（目标是名字，开头 [AI]）。
 // 返回实际发出去的文字（拆成几条的用空格接起来）和是不是截断了。
 func (r *room) say(player string, private bool, text, color string) (string, bool) {
+	return r.sayAs("AI", player, private, text, color)
+}
+
+// sayAs 同 say，开头写成 speaker（叫着伙伴的名字问的，以伙伴的名义回答：[小方→Steve]）。
+func (r *room) sayAs(speaker, player string, private bool, text, color string) (string, bool) {
 	msgs, cut := Pack(text, MaxMsgRunes, MaxMsgs)
-	target, head, who := "@a", "[AI→"+player+"] ", "全服可见"
+	target, head, who := "@a", "["+speaker+"→"+player+"] ", "全服可见"
 	if private {
-		target, head, who = player, "[AI] ", "只发给 "+player
+		target, head, who = player, "["+speaker+"] ", "只发给 "+player
 	}
 	for _, m := range msgs {
 		_ = r.s.b.Send(r.name, Tellraw(target, head, m, color), "[MineDeck] 游戏内 AI 回复（"+who+"）："+head+m)

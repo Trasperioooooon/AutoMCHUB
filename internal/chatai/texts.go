@@ -15,7 +15,7 @@ import (
 
 // helpText /帮助：由选项表生成，只列这个服实际能用的选项。有执行权限的人多一行「能让 AI 做的事」（按打开了的命令模板生成）；
 // 没有执行权限的人不显示 /问，因为对他们来说本来就只回答。
-func (r *room) helpText(set Settings, authorized bool) string {
+func (r *room) helpText(set Settings, authorized bool, comp string) string {
 	p := set.Prefix
 	opts := []string{"/私（只回你；你的提问别人照样看得到）"}
 	if authorized {
@@ -34,6 +34,12 @@ func (r *room) helpText(set Settings, authorized bool) string {
 			text += "\n你能让 AI 帮你：" + strings.Join(does, "、") + "。AI 执行的命令，效果大家都看得到。"
 		}
 	}
+	if list, _, ok := r.s.companionsLive(r.name); ok { // AI 伙伴（第七阶段）
+		text += companionHelp(p, list, authorized)
+	}
+	if comp != "" {
+		text = "我是伙伴「" + comp + "」。" + text
+	}
 	if !r.s.ai.Enabled() {
 		text += "\n主机的 MineDeck 还没配置 AI，现在问不了问题。"
 	}
@@ -41,7 +47,7 @@ func (r *room) helpText(set Settings, authorized bool) string {
 }
 
 // quotaText /额度：自己今天还能问几次、冷却还剩几秒；全服当天的次数或 token 快用完时也一并说明。
-func (r *room) quotaText(set Settings, player string, now time.Time) string {
+func (r *room) quotaText(set Settings, player string, now time.Time, feat ai.Feature) string {
 	r.mu.Lock()
 	c := &r.st.Counters
 	c.roll(now)
@@ -77,11 +83,15 @@ func (r *room) quotaText(set Settings, player string, now time.Time) string {
 			text += fmt.Sprintf("全服今天的 AI 额度已经用了 %d%%。", tokens*100/set.Budget)
 		}
 	}
-	if used, limit := r.s.ai.Usage(ai.FeatGameChat); limit > 0 {
+	what := "游戏内 AI"
+	if feat == ai.FeatCompanion {
+		what = "AI 伙伴"
+	}
+	if used, limit := r.s.ai.Usage(feat); limit > 0 {
 		if used.Tokens >= limit {
-			text += "游戏内 AI 今天的总额度已经用完了。"
+			text += what + "今天的总额度已经用完了。"
 		} else if used.Tokens*5 >= limit*4 {
-			text += fmt.Sprintf("游戏内 AI 今天的总额度已经用了 %d%%。", used.Tokens*100/limit)
+			text += fmt.Sprintf("%s今天的总额度已经用了 %d%%。", what, used.Tokens*100/limit)
 		}
 	}
 	return text

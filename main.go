@@ -18,6 +18,7 @@ import (
 
 	"minedeck/internal/app"
 	"minedeck/internal/autostart"
+	"minedeck/internal/companion"
 	"minedeck/internal/inst"
 	"minedeck/internal/java"
 	"minedeck/internal/musicshare"
@@ -121,6 +122,7 @@ func main() {
 
 	log.Println("正在停止所有运行中的服务器与隧道...")
 	musicshare.ShutdownAll("MineDeck 已退出") // 音乐共享（第五阶段）：先停广播（给桥接模组发 END、停采集），再关服
+	companion.ShutdownAll("MineDeck 已退出")  // AI 伙伴（第七阶段）：给伙伴模组发 END 断开（伙伴和任务留在游戏里）
 	tun.StopAll()
 	mgr.ShutdownAll(30 * time.Second)
 }

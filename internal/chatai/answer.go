@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"minedeck/internal/ai"
+	"minedeck/internal/companion"
 	"minedeck/internal/mclog"
 	"minedeck/internal/ops"
 )
@@ -27,10 +29,15 @@ func (r *room) answer(j *job) {
 	if !set.Enabled { // 排队的时候服主把游戏内 AI 关掉了
 		return
 	}
-	rec := Record{T: j.t, Player: j.player, Kind: string(ActAsk), Opts: j.ask.Opts, Question: j.ask.Question, Private: j.ask.Private, Exec: j.exec}
+	rec := Record{T: j.t, Player: j.player, Kind: string(ActAsk), Opts: j.ask.Opts, Question: j.ask.Question, Private: j.ask.Private, Exec: j.exec,
+		Companion: j.companion}
 	var usage ai.Usage
 	cost := map[string]float64{}
-	reply, failMsg, err := r.converse(ctx, j, set, caller, &usage, cost, &rec.Commands)
+	reply, failMsg, err := r.converse(ctx, j, set, caller, &usage, cost, &rec.Commands, &rec.Actions)
+	speaker := "AI"
+	if j.companion != "" {
+		speaker = j.companion // 叫着伙伴的名字问的：以它的名义回答
+	}
 	if usage.Total() > 0 {
 		rec.Usage = &usage
 	}
@@ -39,10 +46,10 @@ func (r *room) answer(j *job) {
 	}
 	if err != nil {
 		rec.Kind, rec.Err = "failed", r.redactText(err.Error())
-		rec.Reply, _ = r.say(j.player, true, failMsg, colorSystem)
+		rec.Reply, _ = r.sayAs(speaker, j.player, true, failMsg, colorSystem)
 		rec.Private = true
 	} else {
-		rec.Reply, rec.Cut = r.say(j.player, j.ask.Private, reply, colorBody)
+		rec.Reply, rec.Cut = r.sayAs(speaker, j.player, j.ask.Private, reply, colorBody)
 		if rec.Cut {
 			rec.Reply = reply // 游戏里截断了，这里存完整的
 		}
@@ -51,6 +58,9 @@ func (r *room) answer(j *job) {
 	if s.reg != nil {
 		args := map[string]any{"inst": r.name, "chars": utf8.RuneCountInString(j.ask.Question), "opts": optLabels(j.ask.Opts),
 			"exec": j.exec, "result": rec.Kind, "usage": usage.Total(), "commands": len(rec.Commands)} // 键名不能带 token：操作记录会把它当密钥写成 ***
+		if j.companion != "" || len(rec.Actions) > 0 { // AI 伙伴（第七阶段）
+			args["companion"], args["actions"] = j.companion, len(rec.Actions)
+		}
 		s.reg.Record(caller, "gameai.ask", ops.ArgsOf(args), err, s.now().Sub(start))
 	}
 }
@@ -70,30 +80,45 @@ var (
 )
 
 // converse 和 AI 来回：返回回答；出错时返回给玩家看的提示和错误详情（给服主看）。
-func (r *room) converse(ctx context.Context, j *job, set Settings, caller ops.Caller, usage *ai.Usage, cost map[string]float64, cmds *[]CmdRecord) (string, string, error) {
+func (r *room) converse(ctx context.Context, j *job, set Settings, caller ops.Caller, usage *ai.Usage, cost map[string]float64, cmds *[]CmdRecord,
+	acts *[]ActionRecord) (string, string, error) {
 	s := r.s
+	feat := j.feat
+	if feat == "" {
+		feat = ai.FeatGameChat
+	}
 	tools := []ai.Tool{gameInfoTool}
 	if j.exec {
 		tools = append(tools, runCommandTool(set.enabledTemplates()))
+	}
+	// AI 伙伴（第七阶段）：实例启用了伙伴、连着模组时才提；有执行权限、又没带 /问 的才给工具（权限只在代码里判断）
+	comps, compOps, live := s.companionsLive(r.name)
+	mode := compNone
+	if live {
+		mode = compTalk
+		if j.exec {
+			mode = compAct
+			tools = append(tools, companionToolList(compOps)...)
+		}
 	}
 	cl, err := s.ai.Client(true)
 	if err != nil {
 		return "", failText(err), err
 	}
-	conv, err := cl.NewConversation(systemPrompt(j.exec), tools)
+	conv, err := cl.NewConversation(systemPrompt(j.exec, mode), tools)
 	if err != nil {
 		return "", failText(err), err
 	}
-	if err := conv.AddUser(userMessage(j, r.redactText(j.ask.Question))); err != nil {
+	if err := conv.AddUser(userMessage(j, r.redactText(j.ask.Question), comps, live)); err != nil {
 		return "", failText(err), err
 	}
-	calls, ran := 0, 0
+	calls, ran, acted := 0, 0, 0
 	for round := 0; ; round++ {
-		if err := s.ai.Begin(ai.FeatGameChat); err != nil {
+		if err := s.ai.Begin(feat); err != nil {
 			return "", failText(err), err
 		}
 		res, err := cl.Chat(ctx, conv, nil)
-		if c := s.ai.Record(ai.FeatGameChat, res); c != nil && c.Amount > 0 { // 不管成没成功，花了的都要记
+		if c := s.ai.Record(feat, res); c != nil && c.Amount > 0 { // 不管成没成功，花了的都要记
 			cost[c.Currency] += c.Amount
 		}
 		if res != nil {
@@ -110,8 +135,8 @@ func (r *room) converse(ctx context.Context, j *job, set Settings, caller ops.Ca
 			if ctx.Err() != nil && s.ctx.Err() == nil {
 				err = fmt.Errorf("回复超时（%v）：%w", s.timeout, err)
 			}
-			if errors.Is(err, errEmpty) && len(*cmds) > 0 {
-				return summary(*cmds), "", nil // 命令执行了、只是没有收尾的话：照实说执行了什么
+			if errors.Is(err, errEmpty) && (len(*cmds) > 0 || len(*acts) > 0) {
+				return summary(*cmds, *acts), "", nil // 命令执行了、只是没有收尾的话：照实说执行了什么
 			}
 			return "", failText(err), err
 		}
@@ -119,8 +144,8 @@ func (r *room) converse(ctx context.Context, j *job, set Settings, caller ops.Ca
 			if t := strings.TrimSpace(res.Text); t != "" {
 				return t, "", nil
 			}
-			if len(*cmds) > 0 {
-				return summary(*cmds), "", nil
+			if len(*cmds) > 0 || len(*acts) > 0 {
+				return summary(*cmds, *acts), "", nil
 			}
 			return "", failText(errEmpty), errEmpty // 只有空白
 		}
@@ -128,8 +153,8 @@ func (r *room) converse(ctx context.Context, j *job, set Settings, caller ops.Ca
 			if t := strings.TrimSpace(res.Text); t != "" {
 				return t, "", nil
 			}
-			if len(*cmds) > 0 {
-				return summary(*cmds), "", nil
+			if len(*cmds) > 0 || len(*acts) > 0 {
+				return summary(*cmds, *acts), "", nil
 			}
 			return "", "这个问题有点复杂，AI 没能在几步之内答完，换个问法试试。", errors.New("请求 AI 的次数到上限了")
 		}
@@ -152,6 +177,12 @@ func (r *room) converse(ctx context.Context, j *job, set Settings, caller ops.Ca
 				var cr CmdRecord
 				content, isErr, cr = r.runCommand(ctx, j, tc, &ran)
 				*cmds = append(*cmds, cr)
+			case mode == compAct && strings.HasPrefix(tc.Name, companionToolPrefix) && slices.Contains(compOps, strings.TrimPrefix(tc.Name, companionToolPrefix)) &&
+				slices.Contains(companion.ActionOps, strings.TrimPrefix(tc.Name, companionToolPrefix)):
+				calls++
+				var a ActionRecord
+				content, isErr, a = r.companionAct(ctx, j, tc, &acted)
+				*acts = append(*acts, a)
 			default: // 没给的工具（没有执行权限时的 run_command）：根本不在请求里，模型硬要调用也不执行
 				content = "没有这个工具：" + tc.Name
 			}
@@ -168,7 +199,7 @@ func failText(err error) string {
 	var qe *ai.QuotaError
 	switch {
 	case errors.As(err, &qe):
-		return "游戏内 AI 今天的额度用完了，明天再来吧。"
+		return quotaMsg(qe.Feature)
 	case errors.Is(err, ai.ErrDisabled):
 		return "主机的 MineDeck 还没配置 AI，现在问不了问题。"
 	case errors.Is(err, errRefused):
@@ -181,14 +212,25 @@ func failText(err error) string {
 	return "AI 暂时连不上，请稍后再问。"
 }
 
-// summary 命令执行了、AI 却没说话时的回答。
-func summary(cmds []CmdRecord) string {
+// summary 命令执行了（伙伴开始干活了）、AI 却没说话时的回答。
+func summary(cmds []CmdRecord, acts []ActionRecord) string {
 	var ok, bad []string
 	for _, c := range cmds {
 		if c.OK {
 			ok = append(ok, c.Run)
 		} else {
 			bad = append(bad, c.Command)
+		}
+	}
+	for _, a := range acts {
+		t := a.Title
+		if a.Companion != "" {
+			t = a.Companion + " " + t
+		}
+		if a.OK {
+			ok = append(ok, t)
+		} else {
+			bad = append(bad, t)
 		}
 	}
 	var parts []string

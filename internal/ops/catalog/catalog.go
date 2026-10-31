@@ -15,6 +15,7 @@ import (
 	"minedeck/internal/ai"
 	"minedeck/internal/app"
 	"minedeck/internal/chatai"
+	"minedeck/internal/companion"
 	"minedeck/internal/dl"
 	"minedeck/internal/inst"
 	"minedeck/internal/musicshare"
@@ -37,6 +38,9 @@ type Env struct {
 	// Token 是 MineDeck 这次启动的访问令牌：和应用内助手一样，原样出现在要发给 AI 的内容里就换成 ***。
 	GameChat *chatai.Service
 	Token    string
+
+	// Companion AI 伙伴（第七阶段）；nil 时建一个（有 Mgr 时）。任务做完或失败时经游戏内 AI 用模板通知发起的玩家。
+	Companion *companion.Service
 }
 
 // NewAI 按程序目录建 AI 接入层：设置、价格缓存和用量放在 <程序目录>/data/ai/，Key 用 DPAPI 加密存进
@@ -68,12 +72,33 @@ func New(env Env) *ops.Registry {
 				ops.ArgsOf(map[string]string{"inst": name, "reason": reason}), err, 0)
 		})
 	}
-	if env.Music != nil && env.Mgr != nil {
-		env.Mgr.SetStartHook(env.Music.BeforeStart)
+	var gc *chatai.Service                      // 伙伴的任务通知要经游戏内 AI 发：先建伙伴，等游戏内 AI 建好再接上
+	if env.Companion == nil && env.Mgr != nil { // AI 伙伴（第七阶段）
+		env.Companion = NewCompanion(env.Mgr, func(f companion.Finished) {
+			if gc != nil {
+				gc.NotifyTask(f)
+			}
+		})
+	}
+	if env.Mgr != nil { // 开服前：音乐共享写好桥接模组的配置和 voice_host，AI 伙伴补好伙伴模组的端口和令牌
+		music, comp := env.Music, env.Companion
+		env.Mgr.SetStartHook(func(name string) {
+			if music != nil {
+				music.BeforeStart(name)
+			}
+			if comp != nil {
+				comp.BeforeStart(name)
+			}
+		})
 	}
 	if env.GameChat == nil && env.Mgr != nil { // 游戏内 AI（第四阶段）
-		env.GameChat = NewGameChat(env.Mgr, reg, env.AI, env.Token)
+		var comps chatai.Companions
+		if env.Companion != nil {
+			comps = env.Companion
+		}
+		env.GameChat = NewGameChat(env.Mgr, reg, env.AI, env.Token, comps)
 	}
+	gc = env.GameChat
 	c := &cat{Env: env, reg: reg}
 	c.appOps()
 	c.instanceOps()
@@ -88,7 +113,8 @@ func New(env Env) *ops.Registry {
 	c.fileOps()
 	c.portOps()
 	c.musicOps()
-	c.gameChatOps() // 第四阶段
+	c.gameChatOps()  // 第四阶段
+	c.companionOps() // 第七阶段
 	if env.Mgr != nil {
 		env.Mgr.SetAutoHook(func(a inst.AutoAction) {
 			reg.Record(ops.Caller{Source: ops.SrcSchedule, Actor: a.Actor, Local: true}, a.Op, ops.ArgsOf(a.Args), a.Err, a.Dur)

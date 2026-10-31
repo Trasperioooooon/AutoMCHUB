@@ -20,8 +20,8 @@ const (
 	FeatCompanion Feature = "companion" // AI 伙伴（第七阶段）
 )
 
-// QuotaFeatures 可以设每日额度的功能。
-var QuotaFeatures = []Feature{FeatAssistant, FeatGameChat}
+// QuotaFeatures 可以设每日额度的功能。AI 伙伴（第七阶段）：玩家在聊天里叫着伙伴的名字说话时记在它名下，任务结束的通知不调用 AI。
+var QuotaFeatures = []Feature{FeatAssistant, FeatGameChat, FeatCompanion}
 
 func (f Feature) valid() bool { return f == FeatAssistant || f == FeatGameChat || f == FeatCompanion }
 

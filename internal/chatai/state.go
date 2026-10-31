@@ -21,20 +21,23 @@ const (
 
 // Record 一次触发的记录（界面上「最近的问答和执行记录」）。游戏里的回答可能截断了，这里存完整的。
 type Record struct {
-	T        time.Time          `json:"t"`
-	Player   string             `json:"player"`
-	Kind     string             `json:"kind"` // 同 Action，另有 cooldown / limit / busy / silenced / disabled / failed
-	Opts     []Opt              `json:"opts,omitempty"`
-	Question string             `json:"question,omitempty"`
-	Reply    string             `json:"reply,omitempty"`   // 发到游戏里的回答（完整的）或系统提示
-	Private  bool               `json:"private,omitempty"` // 只发给了提问的人
-	Exec     bool               `json:"exec,omitempty"`    // 这次给了 AI 执行命令的工具
-	Commands []CmdRecord        `json:"commands,omitempty"`
-	Usage    *ai.Usage          `json:"usage,omitempty"`
-	Cost     map[string]float64 `json:"cost,omitempty"` // 币种 → 金额（估）；查不到价格时没有
-	Cut      bool               `json:"cut,omitempty"`  // 回答太长，游戏里截断了
-	Err      string             `json:"err,omitempty"`  // 出错的详情（给服主看，游戏里只说「暂时连不上」之类）
-	Note     string             `json:"note,omitempty"` // 补充说明
+	T        time.Time   `json:"t"`
+	Player   string      `json:"player"`
+	Kind     string      `json:"kind"` // 同 Action，另有 cooldown / limit / busy / silenced / disabled / failed，以及 task（伙伴的任务通知）
+	Opts     []Opt       `json:"opts,omitempty"`
+	Question string      `json:"question,omitempty"`
+	Reply    string      `json:"reply,omitempty"`   // 发到游戏里的回答（完整的）或系统提示
+	Private  bool        `json:"private,omitempty"` // 只发给了提问的人
+	Exec     bool        `json:"exec,omitempty"`    // 这次给了 AI 执行命令的工具
+	Commands []CmdRecord `json:"commands,omitempty"`
+	// Companion 叫着这个伙伴的名字说的（回复以它的名义发出）；Kind 为 task 时是任务通知（模板消息，不调用 AI）的伙伴。
+	Companion string             `json:"companion,omitempty"`
+	Actions   []ActionRecord     `json:"actions,omitempty"` // AI 让伙伴做的事
+	Usage     *ai.Usage          `json:"usage,omitempty"`
+	Cost      map[string]float64 `json:"cost,omitempty"` // 币种 → 金额（估）；查不到价格时没有
+	Cut       bool               `json:"cut,omitempty"`  // 回答太长，游戏里截断了
+	Err       string             `json:"err,omitempty"`  // 出错的详情（给服主看，游戏里只说「暂时连不上」之类）
+	Note      string             `json:"note,omitempty"` // 补充说明
 }
 
 // CmdRecord AI 要执行的一条命令。

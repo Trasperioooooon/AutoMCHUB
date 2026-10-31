@@ -253,6 +253,12 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
+	return newFixtureWith(t, nil)
+}
+
+// newFixtureWith 同 newFixture，再接上 AI 伙伴（第七阶段）。
+func newFixtureWith(t *testing.T, comps Companions) *fixture {
+	t.Helper()
 	f := &fixture{t: t, ai: newFakeAI(t), now: time.Date(2026, 10, 28, 20, 15, 0, 0, time.Local)}
 	dir := t.TempDir()
 	svc := ai.NewService(ai.Options{Dir: filepath.Join(dir, "ai"), Keys: memKeys{}, HTTP: f.ai.srv.Client(), PriceURL: f.ai.srv.URL + "/prices.json"})
@@ -282,7 +288,8 @@ func newFixture(t *testing.T) *fixture {
 	if err := os.MkdirAll(f.b.dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	f.gc = New(Options{Backend: f.b, AI: svc, Ops: f.reg, Redact: redactLAN{}, Now: f.clockNow, CmdWait: 30 * time.Millisecond, Timeout: 5 * time.Second})
+	f.gc = New(Options{Backend: f.b, AI: svc, Ops: f.reg, Redact: redactLAN{}, Now: f.clockNow, CmdWait: 30 * time.Millisecond, Timeout: 5 * time.Second,
+		Companions: comps})
 	f.b.svc = f.gc
 	t.Cleanup(func() { f.gc.Wait(); f.gc.Close() })
 	f.set(Patch{Enabled: ptr(true)})

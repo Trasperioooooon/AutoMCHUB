@@ -26,9 +26,10 @@ import (
 // 局域网登录的设备能看设置、最近的问答，能做识别测试。
 
 // NewGameChat 建游戏内聊天 AI：服务器每输出一行都交给它认聊天（inst 的回调），game_info 和操作记录用 reg，
-// 脱敏和应用内助手共用一套（NewRedactor）。不起任何后台任务：有人触发了才为那个实例起处理的协程。
-func NewGameChat(mgr *inst.Manager, reg *ops.Registry, aiSvc *ai.Service, token string) *chatai.Service {
-	gc := chatai.New(chatai.Options{Backend: gameBackend{mgr}, AI: aiSvc, Ops: reg, Redact: NewRedactor(token)})
+// 脱敏和应用内助手共用一套（NewRedactor）。comps 是 AI 伙伴（第七阶段，可以为 nil）。
+// 不起任何后台任务：有人触发了才为那个实例起处理的协程。
+func NewGameChat(mgr *inst.Manager, reg *ops.Registry, aiSvc *ai.Service, token string, comps chatai.Companions) *chatai.Service {
+	gc := chatai.New(chatai.Options{Backend: gameBackend{mgr}, AI: aiSvc, Ops: reg, Redact: NewRedactor(token), Companions: comps})
 	mgr.SetLineHook(gc.OnLine)
 	return gc
 }

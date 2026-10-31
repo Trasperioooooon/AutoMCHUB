@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"minedeck/internal/bridge"
 	companionjar "minedeck/internal/companion/jar"
 	"minedeck/internal/events"
 )
@@ -252,17 +253,22 @@ func (s *Service) BeforeStart(name string) {
 	}
 }
 
-// PortsInUse 别的实例的伙伴模组已经用了的端口（选端口时避开）；音乐桥接的端口在另一段（24470 起），由调用方另外避开也行。
+// portsInUse 选端口时要避开的：别的实例的伙伴模组已经用了的，以及所有实例（含自己）音乐桥接用的（它从 24470 起选，会碰上）。
 func (s *Service) portsInUse(self string) func(int) bool {
 	used := map[int]bool{}
 	for _, n := range s.d.Instances.Names() {
+		info, err := s.d.Instances.Info(n)
+		if err != nil {
+			continue
+		}
+		if c, err := bridge.ReadConfig(info.Dir); err == nil && c.Port > 0 {
+			used[c.Port] = true
+		}
 		if n == self {
 			continue
 		}
-		if info, err := s.d.Instances.Info(n); err == nil {
-			if c, err := ReadConfig(info.Dir); err == nil && c.Exists && c.Port > 0 {
-				used[c.Port] = true
-			}
+		if c, err := ReadConfig(info.Dir); err == nil && c.Exists && c.Port > 0 {
+			used[c.Port] = true
 		}
 	}
 	return func(p int) bool { return used[p] }

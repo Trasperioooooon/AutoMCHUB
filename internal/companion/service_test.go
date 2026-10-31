@@ -368,4 +368,10 @@ func TestBeforeStartFixesConfig(t *testing.T) {
 	if !c.Enabled || c.Port == e.mod.Port() || c.Token != token {
 		t.Errorf("端口撞了应换一个、令牌留着：%+v", c)
 	}
+	// 和自己的音乐桥接撞了也换
+	writeFile(t, filepath.Join(e.dir, "config", "minedeck", "voicebridge.properties"), "enabled=true\nport="+itoa(c.Port)+"\ntoken="+token+"\n")
+	e.s.BeforeStart("模组服")
+	if c2, _ := companion.ReadConfig(e.dir); c2.Port == c.Port || c2.Port == e.mod.Port() {
+		t.Errorf("和音乐桥接的端口撞了应换一个：%d", c2.Port)
+	}
 }

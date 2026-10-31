@@ -92,6 +92,7 @@ func (c *cat) aiOps() {
 		Params: ops.Object(map[string]*ops.Schema{
 			"assistant": ops.Integer("应用内助手（局域网登录的设备和本机共用）").Range(0, 1e12),
 			"gamechat":  ops.Integer("游戏内 AI").Range(0, 1e12),
+			"companion": ops.Integer("AI 伙伴（玩家在聊天里叫着伙伴的名字说话时）").Range(0, 1e12),
 		}),
 		Run: func(_ context.Context, caller ops.Caller, a ops.Args) (any, error) {
 			q, err := bind[map[ai.Feature]int64](a)

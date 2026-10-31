@@ -211,9 +211,10 @@ func (s *Service) History(inst string, limit int) ([]Record, error) {
 // TestResult 识别测试（§6.1 第 6 步）：贴一行日志进去，显示认出的玩家、正文和选项，以及会怎么处理。
 type TestResult struct {
 	Hit
-	Online     bool   `json:"online"`     // 这个人现在在线（不在线的人说的话不处理）
-	Authorized bool   `json:"authorized"` // 能让 AI 执行命令
-	Result     string `json:"result"`     // 一句话说明
+	Companion  string `json:"companion,omitempty"` // 叫的是这个伙伴的名字（AI 伙伴，第七阶段）
+	Online     bool   `json:"online"`              // 这个人现在在线（不在线的人说的话不处理）
+	Authorized bool   `json:"authorized"`          // 能让 AI 执行命令
+	Result     string `json:"result"`              // 一句话说明
 }
 
 // Test 识别测试：按实例当前的设置识别一行日志；p 不为 nil 时先套用这些还没保存的改动（界面上边改边试）。
@@ -227,7 +228,16 @@ func (s *Service) Test(inst, line string, p *Patch) (*TestResult, error) {
 			return nil, err
 		}
 	}
-	t := &TestResult{Hit: Recognize(line, set.Rules())}
+	rules := set.Rules()
+	base := rules
+	list, _, _ := s.companionsLive(inst) // 伙伴的名字也能触发
+	if len(list) > 0 {
+		rules.Prefixes = append(slices.Clone(rules.Prefixes), companionPrefixes(list)...)
+	}
+	t := &TestResult{Hit: Recognize(line, rules)}
+	if t.Ask != nil {
+		t.Companion = addressed(t.Ask.Prefix, base, list)
+	}
 	if t.Chat {
 		t.Online = containsName(s.b.Online(inst), t.Player)
 		t.Authorized = set.Authorized(t.Player)
@@ -272,6 +282,9 @@ func describe(t *TestResult, set Settings) string {
 		default:
 			out += "；" + who + " 没有执行权限，只回答"
 		}
+	}
+	if t.Companion != "" {
+		out += "。这句是对伙伴「" + t.Companion + "」说的：回复以它的名义发出，用量记在 AI 伙伴名下"
 	}
 	if !t.Online {
 		out += "。注意：" + who + " 现在不在线，实际运行时不在线的人说的话不处理"
