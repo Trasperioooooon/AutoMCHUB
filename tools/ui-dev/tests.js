@@ -1427,6 +1427,151 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
   });
   // ==================== 第七阶段结束 ====================
 
+  // ==================== MCP 接口（mcp.js，助手面板顶上的「外部 AI 的请求」在 assistant.js）====================
+  // 仿真后端的场景见 server.js 的 mcpMockState：enabled、portChanged、clients、propose（模拟外部 AI 提出一个写操作）
+  const mcpState = b => page.evaluate(x => fetch("/__mock/state", { method: "POST", body: JSON.stringify({ mcp: x }) }).then(r => r.json()).then(j => j.data.mcp), b);
+  const MCP_PROPS = { op: "instance.props.set", title: "修改 server.properties", level: "W", actor: "Claude Desktop",
+    args: { inst: "生存服 · 朋友", pairs: [{ key: "max-players", value: "10" }] },
+    plan: { summary: "把「生存服 · 朋友」的 max-players 从 20 改成 10", changes: [{ what: "max-players", before: "20", after: "10" }] } };
+  const MCP_RESTART = { op: "instance.restart", title: "重启服务器", level: "D", actor: "Cursor", args: { inst: "生存服 · 朋友" },
+    plan: { summary: "重启「生存服 · 朋友」", warning: "重启：在线的 3 人会掉线" } };
+  const stubClipboard = p => p.evaluate(() => {
+    window.__copied = [];
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async t => { window.__copied.push(t); } } });
+  });
+
+  await run("MCP 接口：默认关着；打开后有地址、令牌和复制配置（预览里令牌是占位，复制的是完整的）；重置令牌要确认；关掉后不再显示", async () => {
+    await mcpState({ reset: true }); await aiState({ reset: true });
+    try {
+      await page.goto(url("#/settings/ai")); await settle(700);
+      const off = await page.evaluate(() => ({ sw: !!document.querySelector("#mcp-on") && !document.querySelector("#mcp-on").checked,
+        url: !!document.querySelector("#mcp-url"), head: (document.querySelector("#ai-mcp-slot") || {}).textContent || "" }));
+      assert(off.sw && !off.url && off.head.includes("MCP 接口") && off.head.includes("默认关闭"), "默认：" + JSON.stringify(off).slice(0, 200));
+      let t0 = reqs.length;
+      await page.click("#ai-mcp-slot .switch .sw"); await settle(400);
+      assert((putBody(t0, "/api/mcp") || {}).enabled === true, "打开应发 enabled: true");
+      assert(await toastHas("MCP 接口已打开"), "应提示已打开");
+      const on = await page.evaluate(() => ({ key: (document.querySelector("#mcp-group .ri-key") || {}).textContent || "", reset: !!document.querySelector("#mcp-reset"),
+        copy: !!document.querySelector("#mcp-copy"), clients: (document.querySelector("#mcp-clients") || {}).textContent || "" }));
+      assert(on.key === "http://127.0.0.1:27333/mcp" && on.reset && on.copy && on.clients.includes("还没有 AI 工具连过"), "打开后：" + JSON.stringify(on));
+      const tok = (await mcpState({})).token;
+      await stubClipboard(page);
+      await page.click("#mcp-copy"); await settle(250);
+      const items = await page.$$eval(".dropmenu button", bs => bs.map(b => b.textContent.trim()));
+      assert(items.length === 6 && items[0] === "Claude Desktop（stdio）" && items.includes("Cherry Studio（HTTP）") && items.includes("VS Code（HTTP）"), "复制给谁：" + items);
+      await page.click('.dropmenu button:has-text("Cherry Studio")'); await page.waitForSelector(".modal .mcp-pre");
+      const pv = await page.evaluate(() => ({ pre: document.querySelector(".modal .mcp-pre").textContent, body: document.querySelector(".modal .m-body").textContent }));
+      assert(pv.pre.includes('"streamableHttp"') && pv.pre.includes("<令牌，复制时自动带上>") && !pv.pre.includes(tok) && pv.body.includes("从 JSON 导入"), "预览：" + JSON.stringify(pv).slice(0, 300));
+      await page.click('.modal [data-x="ok"]'); await settle(300);
+      const copied = await page.evaluate(() => window.__copied.pop() || "");
+      assert(copied.includes("Bearer " + tok) && JSON.parse(copied).mcpServers.minedeck.url === "http://127.0.0.1:27333/mcp", "复制的内容：" + copied);
+      assert(await toastHas("已复制 Cherry Studio 的配置"), "应提示已复制");
+      await page.click("#mcp-copy"); await settle(250);
+      await page.click('.dropmenu button:has-text("Claude Desktop")'); await page.waitForSelector(".modal .mcp-pre");
+      const cl = await page.textContent(".modal .mcp-pre");
+      assert(cl.includes('"-mcp"') && cl.includes("MineDeck.exe") && !cl.includes("令牌"), "Claude Desktop 用 stdio、不带令牌：" + cl);
+      await page.keyboard.press("Escape"); await settle(250);
+      t0 = reqs.length;
+      await page.click("#mcp-reset"); await settle(250);
+      assert((await page.textContent(".modal")).includes("旧令牌马上失效"), "重置前要确认");
+      await page.click('.modal [data-x="ok"]'); await settle(400);
+      assert(reqs.slice(t0).some(r => r.m === "POST" && r.u === "/api/mcp/token") && (await mcpState({})).token !== tok, "应换了令牌");
+      assert(await toastHas("已重置令牌"), "应提示已重置");
+      t0 = reqs.length;
+      await page.click("#ai-mcp-slot .switch .sw"); await settle(400);
+      assert((putBody(t0, "/api/mcp") || {}).enabled === false && !(await page.$("#mcp-url")) && !(await page.$("#mcp-copy")), "关掉后不再显示地址和复制配置");
+    } finally { await page.keyboard.press("Escape"); await mcpState({ reset: true }); await aiState({ reset: true }); }
+  });
+
+  await run("MCP 接口：外部 AI 提出写操作——提示、标题栏「AI 助手」亮小方块；面板顶上是同样的确认卡片（没配置 AI 也能处理），确认后按提案执行；拒绝的理由交回；危险操作要多勾一次", async () => {
+    await mcpState({ reset: true, enabled: true }); await aiState({ reset: true }); await asstState({ reset: true });
+    try {
+      await page.goto(url("#/instances")); await settle(700);
+      assert(await page.$eval("#ai-btn .tb-dot", d => d.hidden), "没有请求时不亮");
+      await mcpState({ propose: MCP_PROPS });
+      assert(await toastHas("外部 AI「Claude Desktop」请求：修改 server.properties"), "来了新请求要提示");
+      const btn = await page.$eval("#ai-btn", b => ({ dot: !b.querySelector(".tb-dot").hidden, title: b.title }));
+      assert(btn.dot && btn.title.includes("外部 AI 有 1 个操作等你确认"), "标题栏入口：" + JSON.stringify(btn));
+      await page.click('.toast.ext'); await page.waitForSelector("#ai-panel #ap-ext .ap-card.pending");
+      await page.waitForFunction(() => document.querySelector("#ap-body").textContent.includes("AI 还没配置"), null, { timeout: 3000 }).catch(() => {});
+      const v = await page.evaluate(() => ({ ext: document.querySelector("#ap-ext").textContent.replace(/\s+/g, " "), gate: document.querySelector("#ap-body").textContent,
+        n: document.querySelectorAll("#ap-ext .ax-item").length, dot: !document.querySelector("#ai-btn .tb-dot").hidden }));
+      assert(v.n === 1 && v.ext.includes("外部 AI 的请求") && v.ext.includes("Claude Desktop") && v.ext.includes("max-players") && v.ext.includes("写操作") && !v.dot,
+        "面板顶上的卡片：" + JSON.stringify(v).slice(0, 300));
+      assert(v.gate.includes("AI 还没配置"), "没配置 AI 时下面照样是引导，外部 AI 的请求也能处理");
+      assert((await mcpState({})).executed.length === 0, "没确认不能执行");
+      await page.click('#ap-ext [data-x="ok"]'); await settle(400);
+      let st = await mcpState({});
+      assert(st.executed.length === 1 && JSON.stringify(st.executed[0].args) === JSON.stringify(MCP_PROPS.args) && st.executed[0].actor === "Claude Desktop", "确认后按提案执行：" + JSON.stringify(st.executed));
+      assert(await toastHas("已确认，已经执行") && await page.$eval("#ap-ext", e => e.hidden), "确认后卡片拿掉");
+      // 危险操作：要多勾一次
+      await mcpState({ propose: MCP_RESTART }); await page.waitForSelector("#ap-ext .ap-card.danger.pending");
+      const ok = await page.$eval('#ap-ext .ap-card.danger [data-x="ok"]', b => ({ dis: b.disabled, cls: b.className }));
+      assert(ok.dis && ok.cls.includes("danger solid") && (await page.textContent("#ap-ext")).includes("在线的 3 人会掉线"), "危险操作没勾时：" + JSON.stringify(ok));
+      await page.check('#ap-ext .ap-card.danger [data-k="ack"]');
+      await page.click('#ap-ext .ap-card.danger [data-x="ok"]'); await settle(400);
+      st = await mcpState({});
+      assert(st.executed.length === 2 && st.executed[1].op === "instance.restart" && st.executed[1].ack === true, "危险操作带上第二次确认：" + JSON.stringify(st.executed));
+      // 拒绝：理由交回给外部 AI；两张卡片时只处理那一张，另一张勾的框、写的理由不受影响
+      await mcpState({ propose: [MCP_PROPS, { ...MCP_PROPS, actor: "VS Code" }] }); await page.waitForFunction(() => document.querySelectorAll("#ap-ext .ax-item").length === 2);
+      await page.click('#ap-ext .ax-item >> nth=1 >> [data-x="reject"]');
+      await page.fill("#ap-ext .ax-item >> nth=1 >> .pc-reason input", "周末人多");
+      await page.click('#ap-ext .ax-item >> nth=0 >> [data-x="reject"]');
+      await page.fill("#ap-ext .ax-item >> nth=0 >> .pc-reason input", "先别动");
+      await page.press("#ap-ext .ax-item >> nth=0 >> .pc-reason input", "Enter"); await settle(400);
+      st = await mcpState({});
+      assert(st.rejected.length === 1 && st.rejected[0].reason === "先别动", "拒绝的理由：" + JSON.stringify(st.rejected));
+      assert((await page.inputValue("#ap-ext .ax-item >> nth=0 >> .pc-reason input")) === "周末人多", "另一张卡片写了一半的理由要留着");
+      await page.keyboard.press("Escape"); await settle(300);
+      assert(!(await page.$("#ai-panel")) && !(await page.$eval("#ai-btn .tb-dot", d => d.hidden)), "关掉面板后还有一个在等：小方块亮着");
+    } finally { await page.keyboard.press("Escape"); await mcpState({ reset: true }); await aiState({ reset: true }); await asstState({ reset: true }); }
+  });
+
+  await run("MCP 接口：局域网打开只能看——开关禁用，没有令牌和复制配置，不连事件流，也收不到外部 AI 的请求", async () => {
+    await mcpState({ reset: true, enabled: true, clients: [{ name: "claude-ai", title: "Claude", version: "0.14.2", transport: "stdio", protocol: "2025-06-18",
+      first: new Date().toISOString(), last: new Date().toISOString(), calls: 3 }] });
+    await aiState({ reset: true, local: false });
+    try {
+      const t0 = reqs.length;
+      await page.goto(url("#/settings/ai")); await settle(800);
+      const v = await page.evaluate(() => ({ sw: document.querySelector("#mcp-on").disabled && document.querySelector("#mcp-on").checked,
+        copy: !!document.querySelector("#mcp-copy"), reset: !!document.querySelector("#mcp-reset"), text: document.querySelector("#ai-mcp-slot").textContent }));
+      assert(v.sw && !v.copy && !v.reset && v.text.includes("MCP 接口的设置仅支持在本机修改") && v.text.includes("Claude"), "局域网：" + JSON.stringify(v).slice(0, 300));
+      await mcpState({ propose: MCP_PROPS }); await settle(500);
+      assert(!reqs.slice(t0).some(r => r.u === "/api/mcp/events"), "局域网不该连外部 AI 请求的事件流");
+      assert(!(await toastHas("外部 AI", 300)), "局域网不提示外部 AI 的请求");
+    } finally { await aiState({ reset: true }); await mcpState({ reset: true }); }
+  });
+
+  await run("MCP 接口：端口被占用时写明 HTTP 方式的配置要改；连过的 AI 工具列出名字、方式和协议；手机宽度（390px）下不横向溢出", async () => {
+    const now = new Date().toISOString();
+    await mcpState({ reset: true, enabled: true, portChanged: true, clients: [
+      { name: "claude-ai", title: "Claude", version: "0.14.2", transport: "stdio", protocol: "2025-06-18", first: now, last: now, calls: 3 },
+      { name: "cursor-vscode", version: "2.3.1", transport: "http", protocol: "2026-07-28", first: now, last: now, calls: 0 }] });
+    await aiState({ reset: true });
+    const c = await hostCtx({ host: false }, { viewport: { width: 390, height: 844 } });
+    try {
+      await page.goto(url("#/settings/ai")); await settle(800);
+      const d = await page.evaluate(() => ({ warn: (document.querySelector("#mcp-group .warn-text") || {}).textContent || "",
+        key: document.querySelector("#mcp-group .ri-key").textContent, rows: [...document.querySelectorAll("#mcp-clients .row-item")].map(r => r.textContent.replace(/\s+/g, " ").trim()) }));
+      assert(d.warn.includes("想用的端口被占用") && d.key.includes(":51234/mcp"), "端口被占用：" + JSON.stringify(d));
+      assert(d.rows.length === 2 && d.rows[0].includes("Claude") && d.rows[0].includes("stdio") && d.rows[0].includes("2025-06-18") && d.rows[0].includes("调用了 3 次工具") &&
+        d.rows[1].includes("cursor-vscode") && d.rows[1].includes("HTTP"), "连过的 AI 工具：" + JSON.stringify(d.rows));
+      const p = await c.newPage();
+      p.on("pageerror", e => errors.push(pageErr(e)));
+      await p.goto(ORIGIN + "#/settings/ai"); await p.waitForTimeout(900);
+      await p.evaluate(() => document.querySelector("#ai-mcp-slot").scrollIntoView());
+      const w = await p.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth,
+        wide: [...document.querySelectorAll("#ai-mcp-slot *")].filter(e => e.getClientRects().length && e.getBoundingClientRect().right > innerWidth + 1).map(e => e.className || e.tagName).slice(0, 5) }));
+      assert(w.sw <= w.cw && w.wide.length === 0, "手机宽度的设置：" + JSON.stringify(w));
+      await mcpState({ propose: MCP_RESTART }); await p.waitForTimeout(500);
+      await p.click("#ai-btn"); await p.waitForSelector("#ap-ext .ap-card.danger.pending");
+      const pw = await p.evaluate(() => ({ wide: [...document.querySelectorAll("#ap-ext *")].filter(e => e.getClientRects().length && e.getBoundingClientRect().right > innerWidth + 1 && !e.closest(".ap-kv")).map(e => e.className || e.tagName).slice(0, 5) }));
+      assert(pw.wide.length === 0, "手机宽度的外部 AI 卡片：" + JSON.stringify(pw));
+    } finally { await c.close(); await mcpState({ reset: true }); await aiState({ reset: true }); }
+  });
+  // ==================== MCP 接口结束 ====================
+
   await run("全程无页面报错", async () => { assert(errors.length === 0, errors.slice(0, 3).join(" | ")); });
 
   await browser.close();

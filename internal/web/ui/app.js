@@ -134,6 +134,7 @@ function toast(msg, isErr = false) {
   };
   d.onclick = kill;
   setTimeout(kill, isErr ? 6500 : 3500);
+  return d; // 调用方可以换掉点击的行为（如 mcp.js：点一下打开 AI 助手）
 }
 /* 复制到剪贴板：优先 navigator.clipboard；非安全上下文（http 局域网）下其为 undefined，回退 execCommand */
 async function copy(text, okMsg = "已复制") {
@@ -2614,6 +2615,7 @@ function drawAI(body, v, gen) {
       { ico: true }) +
     `<div class="group has-ico" id="ai-prices"></div>` +
     `<div id="ai-assist-slot"></div>` +
+    `<div id="ai-mcp-slot"></div>` +
     (ro ? "" : group(riRow({ ico: "power", title: "停用 AI", sub: "清掉服务商设置和 Key；用量记录、额度和自填单价保留",
       right: `<button class="btn danger" id="ai-off">停用</button>` }), { ico: true, cls: "danger-zone", attrs: `id="ai-off-zone" style="margin-top:28px"` })) +
     `<div class="hint" style="margin-top:20px;line-height:1.8">隐私：用 AI 时，提问内容和工具结果（实例信息、配置、日志片段等）会发给所选的服务商，各家的数据保留政策不一样；在意隐私可以用本机的 Ollama。
@@ -2830,6 +2832,7 @@ function drawAI(body, v, gen) {
     catch (e) { toast(e.message, true); }
   };
   window.MDAssist?.settings($("#ai-assist-slot"), v, gen); // 应用内助手（assistant.js）
+  window.MDMcp?.settings($("#ai-mcp-slot"), gen); // MCP 接口（mcp.js）
 }
 
 /* — 更新与关于 — */
@@ -2962,6 +2965,7 @@ async function applyBackground() {
   }
   navigate();
   window.MDAssist?.init(); // 应用内 AI 助手的入口（assistant.js）
+  window.MDMcp?.init(); // MCP 接口：外部 AI 提出、等你确认的操作（mcp.js）
   document.dispatchEvent(new Event("md-ready")); // 启动画面（若在播）据此在方块拼完后淡出
   chromeReport.last = (info.config && info.config.chromeColor) || "";
   reportChrome();

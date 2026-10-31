@@ -63,6 +63,7 @@ function newState(ui) {
     gc: newGcState(), // 第四阶段：游戏内 AI
     cp: newCpState(), // 第七阶段：AI 伙伴
     asst: newAsstState(), // 第三阶段：应用内 AI 助手
+    mcp: newMcpState(), // MCP 接口
   };
   state.props = catalog(ui).map(p => ({ key: p.key, value: p.key === "motd" ? "§a生存服 §7· §e一起来玩！" : String(p.def ?? "") }));
   return state;
@@ -690,6 +691,99 @@ async function asstHandler(state, req, res, p, m, u) {
 }
 // ============================== 第三阶段结束 ==============================
 
+// ================================ MCP 接口 ================================
+// 同 /api/mcp*（见 web/mcp.go、internal/mcp）：开关、访问令牌（只给本机）、复制配置、连过的 AI 工具；/api/mcp/events（SSE）推等确认的
+// 外部 AI 提案，这些提案经 /api/ops/proposals/{id}/confirm|reject 处理，只认本机（state.ai.local 为 false 时模拟局域网，403）。
+// /__mock/state 的 mcp：{ reset, enabled, portChanged, clients: [...], propose: 一个或一组 {op, title, level, args, plan, consent, actor} 模拟外部 AI 提出 }；
+// 响应里的 mcp.executed / mcp.rejected 是确认、拒绝过的提案。
+const MCP_LOCAL_MSG = "MCP 接口的设置仅支持在本机修改";
+function newMcpState() {
+  return { enabled: false, token: "", port: 27333, portChanged: false, clients: [], pending: [], executed: [], rejected: [], subs: new Set(), seq: 0 };
+}
+function mcpView(state) {
+  const M = state.mcp;
+  return { enabled: M.enabled, local: state.ai.local, url: `http://127.0.0.1:${M.port}/mcp`, port: M.port, portChanged: M.portChanged || undefined,
+    tokenSet: !!M.token, clients: M.clients, pending: M.pending.length, tools: 54, versions: ["2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"] };
+}
+function mcpEmit(state) {
+  const d = `data: ${JSON.stringify({ type: "pending", items: state.mcp.pending })}\n\n`;
+  for (const r of state.mcp.subs) r.write(d);
+}
+function mcpNewToken(state) { state.mcp.token = (++state.mcp.seq).toString(16).padStart(8, "0") + "9f2c41d07be3a5c8e61f0d24b7a93c58e1d6f4a2b0c97e35d8a1f6c2"; }
+function mcpPropose(state, x) {
+  const now = Date.now();
+  const p = { id: "p_" + (0xe000 + ++state.mcp.seq).toString(16).padStart(12, "0"), op: x.op || "instance.props.set", title: x.title || "修改 server.properties",
+    level: x.level || "W", args: x.args || { inst: "生存服 · 朋友", pairs: [{ key: "max-players", value: "10" }] },
+    plan: x.plan || { summary: "把「生存服 · 朋友」的 max-players 从 20 改成 10", changes: [{ what: "max-players", before: "20", after: "10" }] },
+    consent: x.consent, actor: x.actor || "Claude Desktop", created: new Date(now).toISOString(), expires: new Date(now + 300e3).toISOString() };
+  state.mcp.pending.push(p);
+}
+function mcpConfig(state) {
+  const M = state.mcp, url = `http://127.0.0.1:${M.port}/mcp`, exe = "D:\\MineDeck\\MineDeck.exe";
+  const auth = { Authorization: "Bearer " + M.token };
+  const wrap = (key, v) => JSON.stringify({ [key]: { minedeck: v } }, null, 2);
+  return { url, token: M.token, exe, snippets: [
+    { id: "claude", name: "Claude Desktop", transport: "stdio", where: "Claude Desktop：「设置 → 开发者 → 编辑配置」打开 claude_desktop_config.json，把 minedeck 这一项合并进 mcpServers，保存后完全退出 Claude Desktop 再打开。stdio 方式不用填令牌，MineDeck 换了端口也不受影响。", text: wrap("mcpServers", { command: exe, args: ["-mcp"] }) },
+    { id: "cherry", name: "Cherry Studio", transport: "http", where: "Cherry Studio：「设置 → MCP 服务器 → 添加 → 从 JSON 导入」，粘贴后确定。", text: wrap("mcpServers", { type: "streamableHttp", url, headers: auth }) },
+    { id: "cursor", name: "Cursor", transport: "http", where: "Cursor：在 Cursor 的设置里打开 MCP，添加服务器会打开 mcp.json（全局的在用户目录的 .cursor\\mcp.json），把 minedeck 合并进 mcpServers。", text: wrap("mcpServers", { url, headers: auth }) },
+    { id: "vscode", name: "VS Code", transport: "http", where: "VS Code：命令面板里运行「MCP: Open User Configuration」打开 mcp.json，把 minedeck 合并进 servers。", text: wrap("servers", { type: "http", url, headers: auth }) },
+    { id: "http", name: "其他（HTTP）", transport: "http", where: "其他支持 Streamable HTTP 的客户端：按下面填地址和请求头。", text: `地址：${url}\n请求头：Authorization: Bearer ${M.token}` },
+    { id: "stdio", name: "其他（stdio）", transport: "stdio", where: "其他支持 stdio 的客户端：命令填 MineDeck.exe 的完整路径，参数填 -mcp。", text: `命令：${exe}\n参数：-mcp` },
+  ] };
+}
+function mcpMockState(state, b) {
+  if (b.reset) { for (const r of state.mcp.subs) r.end(); state.mcp = newMcpState(); }
+  if ("enabled" in b) { state.mcp.enabled = !!b.enabled; if (b.enabled && !state.mcp.token) mcpNewToken(state); }
+  if ("portChanged" in b) { state.mcp.portChanged = !!b.portChanged; state.mcp.port = b.portChanged ? 51234 : 27333; }
+  if (b.clients) state.mcp.clients = b.clients;
+  if (b.propose) for (const x of [].concat(b.propose)) mcpPropose(state, x);
+  mcpEmit(state);
+}
+async function mcpHandler(state, req, res, p, m) {
+  const M = state.mcp, local = state.ai.local;
+  const pm = p.match(/^\/api\/ops\/proposals\/([^/]+)\/(confirm|reject)$/);
+  if (pm && m === "POST") {
+    const x = M.pending.find(q => q.id === pm[1]);
+    if (!x) return false; // 不是外部 AI 的：交给助手那一块
+    if (!local) return err(res, 403, "外部 AI（MCP）提出的操作只能在运行 MineDeck 的那台电脑上确认或拒绝"), true;
+    const b = await readBody(req);
+    if (pm[2] === "confirm") {
+      if (x.level === "D" && !b.ack) return err(res, 400, "这是危险操作，需要再确认一次"), true;
+      if (x.consent && !b.consent) return err(res, 400, `需要先勾选「${x.consent.text}」`), true;
+      M.executed.push({ id: x.id, op: x.op, args: x.args, ack: !!b.ack, consent: !!b.consent, actor: x.actor });
+    } else M.rejected.push({ id: x.id, reason: String(b.reason || "").trim() });
+    M.pending = M.pending.filter(q => q !== x);
+    mcpEmit(state);
+    return ok(res, pm[2] === "confirm" ? { result: "ok" } : "ok"), true;
+  }
+  if (!p.startsWith("/api/mcp")) return false;
+  if (p === "/api/mcp" && m === "GET") return ok(res, mcpView(state)), true;
+  if (p === "/api/mcp/events" && m === "GET") {
+    if (!local) return err(res, 403, "外部 AI（MCP）的请求只能在运行 MineDeck 的那台电脑上处理"), true;
+    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+    res.write(`data: ${JSON.stringify({ type: "pending", items: M.pending })}\n\n`);
+    M.subs.add(res);
+    req.on("close", () => M.subs.delete(res));
+    return true;
+  }
+  if (!local) return err(res, 403, MCP_LOCAL_MSG), true; // 改设置、拿令牌都仅本机
+  if (p === "/api/mcp" && m === "PUT") {
+    const b = await readBody(req);
+    if (typeof b.enabled !== "boolean") return err(res, 400, "缺少参数 enabled"), true;
+    M.enabled = b.enabled;
+    if (b.enabled && !M.token) mcpNewToken(state);
+    if (!b.enabled) { for (const x of M.pending) M.rejected.push({ id: x.id, reason: "用户关闭了 MineDeck 的 MCP 接口" }); M.pending = []; mcpEmit(state); }
+    return ok(res, mcpView(state)), true;
+  }
+  if (p === "/api/mcp/token" && m === "POST") { mcpNewToken(state); return ok(res, mcpView(state)), true; }
+  if (p === "/api/mcp/config" && m === "GET") {
+    if (!M.enabled) return err(res, 400, "先打开 MCP 接口"), true;
+    return ok(res, mcpConfig(state)), true;
+  }
+  return err(res, 404, "not found"), true;
+}
+// ============================== MCP 接口结束 ==============================
+
 // ================================ 第四阶段：游戏内 AI ================================
 // 同 /api/instances/{name}/gameai（GET / PUT）、/gameai/test、/gameai/log、/gameai/whitelist（见 web/gamechat.go、chatai.View）。
 // 设置只在内存里；state.ai.local 为 false 时模拟局域网打开（改设置、一键开白名单报 403）。识别测试是后端规则（chatai）的简化版，
@@ -1088,6 +1182,7 @@ function handler(state, ui, portOf) {
     //   cp（第七阶段）: 见 cpMockState；响应里的 cp.installs 是点过几次安装、cp.lastDespawn 是上一次移除的请求体
     //   music（第五阶段）: { reset, cap: "win11" | "win10", local, systemConfirmed, voiceTunnel: true 多一条语音隧道, inst: { 名称: { svc, bridge, voiceHost, … } } }
     //   asst（第三阶段）: { reset: true 清空会话和执行记录, lan: false 关掉「局域网可用 AI 助手」, slow: 流式回复每块的间隔（毫秒）}；响应里的 asst.executed 是确认后执行过的操作
+    //   mcp（MCP 接口）: 见 mcpMockState；响应里的 mcp.executed / mcp.rejected 是确认、拒绝过的外部 AI 提案
     if (p === "/__mock/state" && m === "POST") {
       const b = await readBody(req);
       if ("empty" in b) state.empty = !!b.empty;
@@ -1104,6 +1199,7 @@ function handler(state, ui, portOf) {
       if (b.gc) gcMockState(state, b.gc); // 第四阶段
       if (b.cp) cpMockState(state, b.cp); // 第七阶段
       if (b.asst) { if (b.asst.reset) { for (const x of state.asst.sessions) for (const r of x.subs) r.end(); state.asst = newAsstState(); } const { reset, ...rest } = b.asst; Object.assign(state.asst, rest); } // 第三阶段
+      if (b.mcp) mcpMockState(state, b.mcp); // MCP 接口
       if (b.status) for (const [n, st] of Object.entries(b.status)) { const i = state.instances.find(x => x.name === n); if (i) { i.status = st; i.uptimeSec = st === "stopped" ? 0 : st === "starting" ? 9 : i.uptimeSec; i.onlineCount = st === "running" ? i.onlineCount : 0; } }
       return ok(res, state);
     }
@@ -1125,6 +1221,7 @@ function handler(state, ui, portOf) {
         const q = u.searchParams, lim = Math.min(+q.get("limit") || 100, 1000);
         return ok(res, OPLOG.filter(r => (!q.get("inst") || r.inst === q.get("inst")) && (!q.get("src") || r.src === q.get("src")) && (!q.get("op") || r.op.startsWith(q.get("op")))).slice(0, lim));
       }
+      if (await mcpHandler(state, req, res, p, m)) return; // MCP 接口（外部 AI 的提案要先于助手的确认接口认出来）
       if (await asstHandler(state, req, res, p, m, u)) return; // 第三阶段：应用内 AI 助手（含 GET /api/ai/settings 的 lanAssistant）
       if (p.startsWith("/api/ai/")) return aiHandler(state, req, res, p, m);
       if (seg[2] === "instances" && seg[4] === "gameai") return gcHandler(state, req, res, m, seg, u); // 第四阶段
