@@ -88,4 +88,13 @@ public final class Args {
     public static String withNamespace(String id) {
         return id.indexOf(':') >= 0 ? id : "minecraft:" + id;
     }
+
+    /**
+     * 交给 PlayerEngine 的 give 的物品名：原版物品去掉 minecraft:，模组物品照写命名空间。PlayerEngine 1.4 的 give 只认这种
+     * 写法（它的目录名、ItemHelper.stripItemName 都是这样），写成 minecraft:oak_log 时找不到这个物品、什么都不给就结束了。
+     */
+    public static String engineItemName(String id) {
+        String p = "minecraft:";
+        return id.startsWith(p) && id.length() > p.length() ? id.substring(p.length()) : id;
+    }
 }

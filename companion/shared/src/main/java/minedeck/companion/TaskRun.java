@@ -19,6 +19,8 @@ final class TaskRun {
     String item;
     int want;
     int before;
+    /** give：扔给玩家的个数（伙伴扔出这种物品时数，不看背包少了几个：fetch 时要先弄来再扔，背包里是先多后少）。 */
+    int thrown;
     /** follow / give：玩家名。 */
     String player;
     /** attack：对应的 PlayerEngine 任务。 */

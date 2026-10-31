@@ -37,11 +37,14 @@ public final class ControlServer {
         /** 网络线程上调用。实现要切到服务器主线程执行，并且每条指令都要回一条 RESPONSE。 */
         void onRequest(String json, Connection conn);
 
-        /** WELCOME 里的 JSON。网络线程上调用，要线程安全（读快照）。 */
+        /** WELCOME 里的 JSON。在服务器主线程上调用（经 {@link #onMainThread}），读这一刻的状态。 */
         String welcomeJson(int version);
 
         /** 每 2 秒一次的 STATUS。定时检查线程上调用，要线程安全（读快照）。 */
         String statusJson();
+
+        /** 把 task 交给服务器主线程执行（任意线程上调用，不等它做完）。 */
+        void onMainThread(Runnable task);
     }
 
     static final int HANDSHAKE_TIMEOUT_MS = 5000;
@@ -56,6 +59,8 @@ public final class ControlServer {
     static final long END_FLUSH_MS = 500L;
     /** 令牌不对时等这么久再回 ERROR，免得被拿来猜令牌。 */
     static final long BAD_TOKEN_DELAY_MS = 300L;
+    /** 握手时最多等服务器主线程这么久来生成 WELCOME（MineDeck 等 WELCOME 等 6 秒）；等不到回 ERROR 5。 */
+    static final long WELCOME_WAIT_MS = 4000L;
 
     private final Handler handler;
     private final Logger log;
@@ -364,19 +369,94 @@ public final class ControlServer {
                 return false;
             }
             controlling = true;
-            String welcome;
+            // WELCOME 在服务器主线程上生成，ready 也在同一个主线程任务里置上。事件都在主线程上发（control.event），
+            // 于是每件事要么已经体现在 WELCOME 里，要么排在 WELCOME 后面发出去，中间不会漏。以前在网络线程上读每 tick 末尾
+            // 才刷新的快照：握手落在一个 tick 中间时，这个 tick 里的接管、task_finished 既不在 WELCOME 里、也发不出去
+            // （两半联调时实测，重启后每次都是 WELCOME 里没有伙伴、也收不到 adopted）。
+            WelcomeTask w = new WelcomeTask(use);
+            handler.onMainThread(w);
+            boolean done;
             try {
-                welcome = handler.welcomeJson(use);
-            } catch (RuntimeException e) {
-                log.error("生成 WELCOME 失败", e);
-                welcome = "{}";
+                done = w.await(WELCOME_WAIT_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("连接线程被中断");
             }
-            if (!outbox.offer(Protocol.encode(Protocol.WELCOME, Protocol.versionAnd(use, welcome)))) {
+            if (!done) {
+                log.warn("拒绝控制连接 #{}（{}）：服务器主线程 {} 秒没空生成 WELCOME（服务器卡住了或者正在关闭）", id, displayName(),
+                        WELCOME_WAIT_MS / 1000);
+                sendLast(Protocol.ERROR, Protocol.error(Protocol.E_DISABLED,
+                        "服务器主线程 " + WELCOME_WAIT_MS / 1000 + " 秒没空（服务器卡住了或者正在关闭），请稍后再连"));
+                controlling = false;
+                active.compareAndSet(this, null);
+                return false;
+            }
+            if (!w.queued) {
                 throw new IOException("发送队列满了");
             }
-            ready = true;
             log.info("控制连接已建立：{}（#{}，来自 {}，协议版本 {}）", displayName(), id, socket.getRemoteSocketAddress(), use);
             return true;
+        }
+
+        /**
+         * 在服务器主线程上生成 WELCOME、放进发送队列、置 ready（同一个主线程任务里，和事件排好先后）。网络线程最多等
+         * {@link #WELCOME_WAIT_MS}；等不及了就作废，之后主线程才轮到它时什么都不做。
+         */
+        private final class WelcomeTask implements Runnable {
+            private final int version;
+            private boolean done;
+            private boolean abandoned;
+            /** WELCOME 放进了发送队列（ready 已置上）。 */
+            boolean queued;
+
+            WelcomeTask(int version) {
+                this.version = version;
+            }
+
+            @Override
+            public void run() {
+                synchronized (this) {
+                    if (abandoned) {
+                        return;
+                    }
+                }
+                String welcome;
+                try {
+                    welcome = handler.welcomeJson(version);
+                } catch (RuntimeException e) {
+                    log.error("生成 WELCOME 失败", e);
+                    welcome = "{}";
+                }
+                synchronized (this) {
+                    try {
+                        if (!abandoned && !socket.isClosed()) {
+                            queued = outbox.offer(Protocol.encode(Protocol.WELCOME, Protocol.versionAnd(version, welcome)));
+                            if (queued) {
+                                ready = true;
+                            }
+                        }
+                    } catch (RuntimeException e) {
+                        log.error("发不出 WELCOME", e);
+                    } finally {
+                        done = true;
+                        notifyAll();
+                    }
+                }
+            }
+
+            /** 等主线程做完；超时返回 false，并作废这个任务。 */
+            synchronized boolean await(long ms) throws InterruptedException {
+                long deadline = System.currentTimeMillis() + ms;
+                while (!done) {
+                    long left = deadline - System.currentTimeMillis();
+                    if (left <= 0) {
+                        abandoned = true;
+                        return false;
+                    }
+                    wait(left);
+                }
+                return true;
+            }
         }
 
         private String readLoop(InputStream in) throws IOException {

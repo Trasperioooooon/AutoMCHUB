@@ -166,7 +166,11 @@ func ResultText(e Event) string {
 		}
 	case "give":
 		if g, ok := iv(e.Given); ok {
-			parts = append(parts, fmt.Sprintf("交出了 %d 个", g))
+			s := fmt.Sprintf("交出了 %d 个", g)
+			if w, ok := iv(e.Want); ok { // 模组 0.2.1 起 give 也带 want
+				s += fmt.Sprintf("（要 %d 个）", w)
+			}
+			parts = append(parts, s)
 		}
 		if h, ok := iv(e.Have); ok {
 			parts = append(parts, fmt.Sprintf("背包里还有 %d 个", h))
@@ -175,8 +179,8 @@ func ResultText(e Event) string {
 	if d := strings.TrimSpace(e.Detail); d != "" {
 		parts = append(parts, d)
 	}
-	if e.Seconds > 0 {
-		parts = append(parts, "用时 "+fmtNum(float64(int64(e.Seconds+0.5)))+" 秒")
+	if sec := int64(e.Seconds + 0.5); sec > 0 { // 不到半秒就结束的（多半是一下子就失败了）不写用时
+		parts = append(parts, "用时 "+fmtNum(float64(sec))+" 秒")
 	}
 	s := head + " " + verb
 	if len(parts) > 0 {

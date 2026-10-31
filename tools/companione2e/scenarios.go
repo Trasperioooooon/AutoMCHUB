@@ -58,6 +58,7 @@ type env struct {
 
 	blocked   bool
 	session   string
+	muID      int // 关服前小木的编号（重启后接管要一样）
 	cleanOnce sync.Once
 
 	mu       sync.Mutex
@@ -75,7 +76,13 @@ func (e *env) run() int {
 		return e.rep.summary()
 	}
 	e.stepInstall()
-	later := []string{"connect", "manage", "chat", "reconnect", "portchange", "diag", "exit", "stop", "restart"}
+	if e.o.modJar != "" {
+		if err := e.swapModJar(e.o.modJar); err != nil {
+			e.rep.check("swap", "换成指定的伙伴模组", false, "%v", err)
+			return e.rep.summary()
+		}
+	}
+	later := []string{"connect", "manage", "chat", "water", "reconnect", "portchange", "diag", "exit", "stop", "restart"}
 	if slices.ContainsFunc(later, e.want) {
 		if e.stepConnect() {
 			if e.want("manage") {
@@ -83,6 +90,9 @@ func (e *env) run() int {
 			}
 			if e.want("chat") {
 				e.stepChat()
+			}
+			if e.want("water") {
+				e.stepWater()
 			}
 			if e.want("reconnect") {
 				e.stepReconnect()
@@ -217,7 +227,7 @@ func (e *env) setup() error {
 	return nil
 }
 
-// launchJVMArgs inst.launchArgs 里 -Xms、-Xmx 之后的固定参数（inst.consoleUTF8，改那里时这里跟着改）。
+// launchJVMArgs inst.launchArgs 里 -Xms、-Xmx 之后的固定参数（控制台编码不是手动选的 GBK 时；改那里时这里跟着改）。
 // 两半联调前只有 -Dfile.encoding=UTF-8：Java 21 的控制台输出按系统编码，中文变成「?」，游戏内 AI 认不出「@小木」。
 var launchJVMArgs = []string{"-Dfile.encoding=UTF-8", "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8"}
 
@@ -461,6 +471,25 @@ func (e *env) stepInstall() {
 	e.stepInstallInRange(arch)
 }
 
+// swapModJar 用指定的 jar 换掉装好的伙伴模组（-mod-jar：拿别的版本对比，比如修好之前的 0.2.0）。
+func (e *env) swapModJar(path string) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	for _, f := range listMods(e.mods()) {
+		if strings.HasPrefix(f, companionjar.FilePrefix) {
+			_ = os.Remove(filepath.Join(e.mods(), f))
+		}
+	}
+	if err := os.WriteFile(filepath.Join(e.mods(), filepath.Base(path)), b, 0o644); err != nil {
+		return err
+	}
+	sum := sha256.Sum256(b)
+	e.rep.logf("用 %s（%d 字节，sha256 %s…）换掉了内置的伙伴模组，只为对比；mods：%v", filepath.Base(path), len(b), hex.EncodeToString(sum[:])[:12], listMods(e.mods()))
+	return nil
+}
+
 // oldCompanion 从 git 历史里取原型 0.1.0 的 jar（同一个加载器、MC 版本）。
 func (e *env) oldCompanion() (string, []byte, error) {
 	raw, err := exec.Command("git", "-C", e.o.repo, "show", e.o.oldRev+":internal/companion/jar/manifest.json").Output()
@@ -700,8 +729,8 @@ func (e *env) stepManage() {
 	var oe *companion.OpError
 	e.rep.check("M2", "重名被模组拒绝", errors.As(err, &oe) && oe.Code == companion.CodeNameTaken, "%v", err)
 
-	// 停下一个
-	a, err := e.comp.Act(ctx, e.name, "follow", map[string]any{"companion": "小石", "player": "Alex"}, companion.Origin{})
+	// 停下一个（小石刚刷出来，可能还没 tick 过）
+	a, err := e.actReady(ctx, "follow", map[string]any{"companion": "小石", "player": "Alex"})
 	if err != nil || !a.OK || a.Task == nil {
 		e.rep.check("M3", "停下一个伙伴", false, "follow 没开始：%v %+v", err, a)
 		return
@@ -818,20 +847,23 @@ func (e *env) stepManage() {
 // fieldY 场地的高度：悬空，免得旁边有水（伙伴站在水里会淹死，模组已知的限制）、坡、别的树。
 const fieldY = 100
 
-// field 在 (x, z) 上空 fieldY 铺一块 29×29 的草地、上面清空 12 格、四周围 3 格高的玻璃墙（地形每次都一样，伙伴也走不出去），
-// 两个玩家和伙伴都放到上面。之后的树、goto 的目标都在这块地里。
+// field 在 (x, z) 上空 fieldY 铺一块 29×29 的草地、上面清空 12 格，四周围 4 格高的屏障、草地下面再垫一层屏障（地形每次都一样；
+// 屏障拆不掉，伙伴走不出去也掉不下去：PlayerEngine 的方块扫描没赶上看到新放的树时，会去找地面上远处的树，以前从玻璃墙那儿
+// 下去过），两个玩家和伙伴都放到上面，放好两棵树，等 5 秒让 PlayerEngine 扫到。之后 goto 的目标、水箱也都在这块地里。
 func (e *env) field(x, z int) {
 	y := fieldY
 	e.base = [3]int{x, y, z}
+	e.cmd(fmt.Sprintf("fill %d %d %d %d %d %d minecraft:barrier", x-15, y-2, z-15, x+15, y-2, z+15))
 	e.cmd(fmt.Sprintf("fill %d %d %d %d %d %d minecraft:grass_block", x-15, y-1, z-15, x+15, y-1, z+15))
 	e.cmd(fmt.Sprintf("fill %d %d %d %d %d %d minecraft:air", x-15, y, z-15, x+15, y+12, z+15))
 	for _, w := range [][4]int{{x - 15, z - 15, x + 15, z - 15}, {x - 15, z + 15, x + 15, z + 15}, {x - 15, z - 15, x - 15, z + 15}, {x + 15, z - 15, x + 15, z + 15}} {
-		e.cmd(fmt.Sprintf("fill %d %d %d %d %d %d minecraft:glass", w[0], y, w[1], w[2], y+2, w[3]))
+		e.cmd(fmt.Sprintf("fill %d %d %d %d %d %d minecraft:barrier", w[0], y, w[1], w[2], y+3, w[3]))
 	}
 	e.cmd(fmt.Sprintf("tp Steve %d.5 %d %d.5", x-2, y, z+2))
 	e.cmd(fmt.Sprintf("tp Alex %d.5 %d %d.5", x-4, y, z-4))
 	e.home()
-	time.Sleep(1500 * time.Millisecond)
+	e.rep.logf("场地中心 %v；放树：%s；%s", e.base, e.tree(0), e.tree(9))
+	time.Sleep(5 * time.Second)
 }
 
 // home 把小木放回这块地的中心。
@@ -920,7 +952,6 @@ func (e *env) stepChat() {
 		c, _ = e.compByName("小木")
 	}
 	e.field(int(math.Floor(c.X)), int(math.Floor(c.Z)))
-	e.rep.logf("场地中心 %v；放树：%s", e.base, e.tree(0))
 
 	// 1 「@小木 跟着我」
 	sx, sy, sz, _ := steve.Pos()
@@ -1103,6 +1134,24 @@ func (e *env) stepChat() {
 	}
 	e.rep.check("H11", "「@小木 去打村民」：模组拒绝（forbidden），AI 照实转告，没开始任务", ok && forbidden && len(eventsOf(e.status(), companion.EvTaskStarted)) == started,
 		"回复「%s」；工具结果里有 forbidden=%v", reply, forbidden)
+
+	// 12 give 一个都没交出去（模组 0.2.1 起报 failed，不再报 done）：接东西的 Alex 在下界，PlayerEngine 找不到他
+	ax, ay, az, _ := alex.Pos()
+	e.cmd("execute in minecraft:the_nether run tp Alex 0.5 129 0.5") // 下界顶上的基岩外面：安全，没有岩浆
+	time.Sleep(3 * time.Second)
+	smark = steve.Mark()
+	reply, _, ok = e.ask("Steve", "@小木 给 Alex 1 个原木", "[小木→Steve] ", 30*time.Second)
+	note, got = steve.WaitMsg(smark, 60*time.Second, func(m string) bool { return strings.HasPrefix(m, "[小木] 交出 oak_log ×1 给 Alex") })
+	e.cmd(fmt.Sprintf("execute in minecraft:overworld run tp Alex %.1f %.1f %.1f", ax, ay, az))
+	e.rep.check("H12", "give 一个都没交出去（Alex 在下界）：报失败，通知说清楚原因", ok && got && strings.Contains(note, "失败了") && strings.Contains(note, "交出了 0 个（要 1 个）") &&
+		strings.Contains(note, "Alex 不在伙伴所在的维度"), "回复「%s」；Steve 收到「%s」", reply, note)
+
+	// 13 give 背包里没有、也弄不到（fetch，PlayerEngine 不会弄基岩）：同样报失败
+	smark = steve.Mark()
+	reply, _, ok = e.ask("Steve", "@小木 给我 1 个基岩", "[小木→Steve] ", 30*time.Second)
+	note, got = steve.WaitMsg(smark, 60*time.Second, func(m string) bool { return strings.HasPrefix(m, "[小木] 交出 bedrock ×1") })
+	e.rep.check("H13", "give 背包里没有、也弄不到（fetch）：报失败，通知说清楚原因", ok && got && strings.Contains(note, "失败了") && strings.Contains(note, "交出了 0 个（要 1 个）") &&
+		strings.Contains(note, "原来一个都没有，也没弄到"), "回复「%s」；Steve 收到「%s」", reply, note)
 }
 
 // countItem 玩家背包里有几个某物（clear <玩家> <物品> 0 只数不清）。
@@ -1124,6 +1173,19 @@ func kindOf(h []chatai.Record) string {
 }
 
 // fresh 经伙伴模组的 status 指令取伙伴现在的样子（不等下一个 STATUS）。
+// actReady 和 Act 一样，只是模组回 not_ready（伙伴刚刷出来、还没 tick 过，PlayerEngine 控制器还没建）时
+// 隔 100 毫秒再试，最多 5 秒。服务器不忙时，刷出和紧跟着的指令会落在同一个 tick 间隙里（两个版本都这样）。
+func (e *env) actReady(ctx context.Context, op string, args map[string]any) (*companion.ActResult, error) {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		a, err := e.comp.Act(ctx, e.name, op, args, companion.Origin{})
+		if err != nil || a == nil || a.OK || a.Code != companion.CodeNotReady || time.Now().After(deadline) {
+			return a, err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 func (e *env) fresh(name string) companion.Companion {
 	res, err := e.comp.Act(e.ctx, e.name, "status", map[string]any{"companion": name}, companion.Origin{})
 	if err != nil || !res.OK {
@@ -1156,6 +1218,73 @@ func (e *env) inventory(name string) map[string]int {
 		}
 	}
 	return out
+}
+
+// ---------- 空闲时在水里 ----------
+
+// stepWater 停下来的伙伴放进 3 格深的水里（PlayerEngine 停用了 TaskRunner，它的防淹水不跑；两半联调时就是这样淹死的）：
+// 模组 0.2.1 起空闲的伙伴自己浮上来。看 65 秒：还活着、不掉血、浮在水面、没离开水箱、没开始任务。
+func (e *env) stepWater() {
+	c, ok := e.compByName("小木")
+	if !ok {
+		e.rep.skip("W1", "空闲时在水里", "没有伙伴")
+		return
+	}
+	if e.base == [3]int{} {
+		e.field(int(math.Floor(c.X)), int(math.Floor(c.Z)))
+	}
+	x0, y, z0 := e.base[0]-10, e.base[1], e.base[2]+8
+	// 玻璃水箱：里面 3×3、水深 3 格，上面敞着
+	e.cmd(fmt.Sprintf("fill %d %d %d %d %d %d minecraft:glass", x0-1, y, z0-1, x0+3, y+3, z0+3))
+	e.cmd(fmt.Sprintf("fill %d %d %d %d %d %d minecraft:air", x0, y, z0, x0+2, y+3, z0+2))
+	e.cmd(fmt.Sprintf("fill %d %d %d %d %d %d minecraft:water", x0, y, z0, x0+2, y+2, z0+2))
+	if _, err := e.comp.StopTasks(e.ctx, e.name, companion.StopReq{Companion: c.ID}); err != nil {
+		e.rep.check("W1", "空闲时在水里", false, "停不下来：%v", err)
+		return
+	}
+	time.Sleep(time.Second)
+	start := e.fresh("小木")
+	t0 := time.Now()
+	e.cmd(fmt.Sprintf("tp %s %d.5 %d %d.5", c.UUID, x0+1, y, z0+1)) // 水底
+	var ys []string
+	alive := true
+	var cur companion.Companion
+	for time.Since(t0) < 65*time.Second {
+		time.Sleep(5 * time.Second)
+		cur = e.fresh("小木")
+		if cur.ID == 0 {
+			alive = false
+			break
+		}
+		ys = append(ys, fmt.Sprintf("%.1f", cur.Y-float64(y)))
+	}
+	var died string
+	for _, ev := range e.status().Events {
+		if ev.T.After(t0) && (ev.Event == companion.EvDied || ev.Event == companion.EvRemoved) {
+			died = ev.Text
+		}
+	}
+	inTank := math.Abs(cur.X-float64(x0)-1.5) < 1.6 && math.Abs(cur.Z-float64(z0)-1.5) < 1.6
+	e.rep.check("W1", "停下来的伙伴放进 3 格深的水里 65 秒：浮在水面上，不掉血，不乱走，没开始任务", alive && died == "" && cur.Health >= start.Health && cur.Y-float64(y) >= 1.5 &&
+		inTank && cur.Task == nil, "血量 %.0f → %.0f；离水底的高度（每 5 秒）%v；还在水箱里=%v；任务 %s；死亡事件「%s」", start.Health, cur.Health, ys, inTank, taskOf(cur), died)
+	// 拆掉水箱，清掉里面的掉落物：淹死时掉出来的背包会把后面去采集的伙伴引过去（它会去捡）
+	for i := 0; i < 2; i++ {
+		e.cmd(fmt.Sprintf("kill @e[type=minecraft:item,x=%d,y=%d,z=%d,dx=6,dy=6,dz=6]", x0-2, y-1, z0-2))
+		if i == 0 {
+			e.cmd(fmt.Sprintf("fill %d %d %d %d %d %d minecraft:air", x0-1, y, z0-1, x0+3, y+3, z0+3))
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+	if !alive {
+		// 淹死了（比如换成 0.2.0 对比时）：重新刷一个小木，后面几步照样有意义
+		_, err := e.comp.Spawn(e.ctx, e.name, companion.SpawnReq{Name: "小木", Owner: "Steve", Near: "Steve"})
+		waitFor(5*time.Second, func() bool { _, ok := e.compByName("小木"); return ok })
+		c, _ = e.compByName("小木")
+		e.rep.logf("小木淹死了，重新刷了一个（%d 号）给后面几步用：%v", c.ID, err)
+		time.Sleep(time.Second)
+	}
+	e.home()
+	time.Sleep(time.Second)
 }
 
 // ---------- 5 断线重连 ----------
@@ -1306,6 +1435,7 @@ func (e *env) stepExit() {
 	companion.ShutdownAll("MineDeck 已退出")
 	hit, ok := e.waitLog(off, 10*time.Second, regexp.MustCompile(`MineDeck 结束了连接（MineDeck 已退出）`))
 	e.rep.check("X1", "退出 MineDeck：模组收到 END", ok, "模组日志「%s」", clip(hit, 160))
+	e.rawGive()
 	// 重新连上（像重新打开 MineDeck 一样），后面关服要用
 	e.comp.HandleEvent(events.Event{Type: "instance.start", Data: map[string]any{"instance": e.name}})
 	e.rep.check("X2", "重新打开后再连上", e.waitLive(20*time.Second), "状态 %s", e.status().Link.State)
@@ -1326,10 +1456,73 @@ func (e *env) stepExit() {
 	e.rep.check("X4", "再打开：模组重新打开端口，自动连上", err == nil && e.waitLive(30*time.Second), "%.1f 秒后连上", time.Since(t0).Seconds())
 }
 
+// rawGive 绕开 MineDeck（它发 give 前会去掉 minecraft:），直接按协议发 give minecraft:oak_log：模组 0.2.1 自己也去掉，
+// 交给 PlayerEngine 的是 give Steve oak_log 1，真的交出去了。MineDeck 的连接这时已经断开（只能有一个控制连接）。
+func (e *env) rawGive() {
+	var mu sync.Mutex
+	var fin *companion.Event
+	cl := companion.Start(companion.Options{Dir: e.inst, Name: "companione2e 原始协议",
+		OnEvent: func(ev companion.Event) {
+			if ev.Event == companion.EvTaskFinished {
+				mu.Lock()
+				x := ev
+				fin = &x
+				mu.Unlock()
+			}
+		}})
+	defer cl.Stop("测完了")
+	if !waitFor(15*time.Second, cl.Live) {
+		e.rep.check("X1b", "按协议直接发 give minecraft:oak_log", false, "连不上：%s", cl.State().LastError)
+		return
+	}
+	id := 0 // MineDeck 这时没连着，它的伙伴列表是空的：看这个连接自己的 WELCOME
+	if w := cl.State().Welcome; w != nil {
+		for _, c := range w.Companions {
+			if c.Name == "小木" {
+				id = c.ID
+			}
+		}
+	}
+	before := e.countItem("Steve", "minecraft:oak_log")
+	resp, err := cl.Request(e.ctx, "give", map[string]any{"companion": id, "item": "minecraft:oak_log", "count": 1, "player": "Steve"})
+	if err != nil || !resp.OK {
+		e.rep.check("X1b", "按协议直接发 give minecraft:oak_log", false, "%v %+v", err, resp)
+		return
+	}
+	var body struct {
+		Task companion.Task `json:"task"`
+	}
+	_ = resp.Decode(&body)
+	var f companion.Event
+	done := waitFor(60*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		if fin != nil && fin.Task != nil && fin.Task.ID == body.Task.ID {
+			f = *fin
+			return true
+		}
+		return false
+	})
+	time.Sleep(2 * time.Second) // 扔过去的东西落地、被捡起来
+	after := e.countItem("Steve", "minecraft:oak_log")
+	iv := func(p *int) int {
+		if p == nil {
+			return -1
+		}
+		return *p
+	}
+	e.rep.check("X1b", "按协议直接发 give minecraft:oak_log：模组交给 PlayerEngine 的是 oak_log，真的交出去了", done && body.Task.Command == "give Steve oak_log 1" &&
+		f.Result == companion.ResultDone && iv(f.Given) == 1 && iv(f.Want) == 1 && after > before,
+		"任务的 PlayerEngine 指令「%s」；结果 %s，given %d、want %d、have %d；Steve 背包里的原木 %d → %d", body.Task.Command, f.Result, iv(f.Given), iv(f.Want), iv(f.Have), before, after)
+}
+
 func (e *env) stepStop() {
 	for n, b := range e.bots {
 		b.Quit()
 		delete(e.bots, n)
+	}
+	if c, ok := e.compByName("小木"); ok {
+		e.muID = c.ID
 	}
 	off := e.logSize()
 	evN := len(e.status().Events)
@@ -1361,19 +1554,47 @@ func (e *env) stepStop() {
 
 func (e *env) stepRestart() {
 	prev := e.session
+	t0 := time.Now()
 	if err := e.srv.Start(); err != nil {
 		e.rep.check("T1", "重启后接管伙伴", false, "%v", err)
 		return
 	}
 	ok := waitFor(6*time.Minute, func() bool { return e.srv.Status() == "running" }) && e.waitLive(60*time.Second)
 	welcomeHad := len(e.status().Companions)
+	// 接管马上就看得到（模组 0.2.1 在主线程上生成 WELCOME）：要么在 WELCOME 里（「现有 1 个伙伴」），要么紧跟着收到 adopted 事件。
+	// 只看事件，不看伙伴列表（列表也会被 STATUS 补上，那就分不出来了）
+	var how string
+	immediate := waitFor(5*time.Second, func() bool {
+		for _, ev := range e.status().Events {
+			if !ev.T.After(t0) {
+				continue
+			}
+			switch {
+			case ev.Event == "connected" && strings.Contains(ev.Text, "现有 1 个伙伴"):
+				how = "WELCOME 里就有：「" + ev.Text + "」"
+				return true
+			case ev.Event == companion.EvAdopted:
+				how = "WELCOME 之后收到 adopted：「" + ev.Text + "」"
+				return true
+			}
+		}
+		return false
+	})
+	if !immediate {
+		for _, ev := range e.status().Events {
+			if ev.T.After(t0) && ev.Event == "connected" {
+				how = "只有「" + ev.Text + "」，没有 adopted 事件"
+			}
+		}
+	}
+	e.rep.check("T0", "重启后接管马上就看得到：在 WELCOME 里，或者紧跟着收到 adopted（不等 STATUS）", ok && immediate, "%s", how)
 	var c companion.Companion
 	var have bool
 	waitFor(6*time.Second, func() bool { c, have = e.compByName("小木"); return have }) // WELCOME 读的快照可能比接管晚一个 tick：下一个 STATUS 就有了
 	v := e.status()
 	conn, _ := hasEventText(v, "现有 1 个伙伴")
-	e.rep.check("T1", "重启后：重新连上，存档里的小木被接管（编号、主人不变），session 变了", ok && have && c.ID == 1 && c.Owner == "Steve" && v.Link.Session != prev && v.Link.Session != "",
-		"session %s → %s；小木 %d 号，主人 %s（刚连上时列表里 %d 个）；事件「%s」", prev, v.Link.Session, c.ID, c.Owner, welcomeHad, conn)
+	e.rep.check("T1", "重启后：重新连上，存档里的小木被接管（编号、主人不变），session 变了", ok && have && e.muID != 0 && c.ID == e.muID && c.Owner == "Steve" && v.Link.Session != prev && v.Link.Session != "",
+		"session %s → %s；小木 %d 号（关服前 %d 号），主人 %s（刚连上时列表里 %d 个）；事件「%s」", prev, v.Link.Session, c.ID, e.muID, c.Owner, welcomeHad, conn)
 	dt, killed := e.srv.Stop(90 * time.Second)
 	e.rep.check("T2", "再关服", !killed, "用时 %.1f 秒", dt.Seconds())
 }

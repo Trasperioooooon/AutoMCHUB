@@ -42,10 +42,10 @@ var presets = map[string]preset{
 }
 
 type options struct {
-	loader, work, template, java, node, nodeModules, repo, oldRev, steps string
-	xmx                                                                  int
-	extraJVM                                                             string
-	gamePort, ctlPort                                                    int
+	loader, work, template, java, node, nodeModules, repo, oldRev, steps, modJar string
+	xmx                                                                          int
+	extraJVM                                                                     string
+	gamePort, ctlPort                                                            int
 }
 
 func main() {
@@ -58,7 +58,8 @@ func main() {
 	flag.StringVar(&o.nodeModules, "node-modules", "", "装了 mineflayer 的 node_modules 目录")
 	flag.StringVar(&o.repo, "repo", ".", "仓库根目录（从 git 历史里取旧版伙伴模组）")
 	flag.StringVar(&o.oldRev, "old-rev", "9944d36", "旧版伙伴模组（原型 0.1.0）所在的提交")
-	flag.StringVar(&o.steps, "steps", "all", "要跑的步骤，逗号隔开：install,connect,manage,chat,reconnect,portchange,diag,exit,stop,restart；all 是全部")
+	flag.StringVar(&o.steps, "steps", "all", "要跑的步骤，逗号隔开：install,connect,manage,chat,water,reconnect,portchange,diag,exit,stop,restart；all 是全部")
+	flag.StringVar(&o.modJar, "mod-jar", "", "装好以后用这个 jar 换掉内置的伙伴模组（只为和别的版本对比，比如旧版 0.2.0；安装那几项照常按内置的查）")
 	flag.IntVar(&o.xmx, "xmx", 2048, "服务端 -Xmx（MB）")
 	flag.StringVar(&o.extraJVM, "jvm", "", "额外的 JVM 参数（空格隔开），加在 inst.launchArgs 那几个后面")
 	flag.IntVar(&o.gamePort, "game-port", 0, "游戏端口（默认 neo 25631、forge 25632）")

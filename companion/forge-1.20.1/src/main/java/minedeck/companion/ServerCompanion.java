@@ -63,6 +63,8 @@ public class ServerCompanion extends CompanionEntity
     private boolean ticked;
     private boolean adopted;
     private long lastTickError;
+    /** 上一个 tick 替它按住了跳（空闲时在水里浮上来，见 {@link IdleFloat}）。 */
+    private boolean floating;
 
     // MineDeck 的记录（存进实体的 NBT）
     private int companionId;
@@ -149,14 +151,24 @@ public class ServerCompanion extends CompanionEntity
             try {
                 controller.serverTick();
             } catch (Throwable t) {
-                long now = System.currentTimeMillis();
-                if (now - lastTickError > 5000) {
-                    lastTickError = now;
-                    CompanionManager.LOG.error("PlayerEngine 的 tick 出错（5 秒内只记一次）", t);
-                }
+                tickError("PlayerEngine 的 tick 出错", t);
             }
         }
+        try {
+            floating = IdleFloat.tick(this, controller, floating);
+        } catch (Throwable t) {
+            tickError("空闲时在水里浮起来出错", t);
+        }
         setYHeadRot(getYRot());
+    }
+
+    /** tick 里出的错只记下来（5 秒内只记一次），不让它变成整个服务器崩溃。 */
+    private void tickError(String what, Throwable t) {
+        long now = System.currentTimeMillis();
+        if (now - lastTickError > 5000) {
+            lastTickError = now;
+            CompanionManager.LOG.error(what + "（5 秒内只记一次）", t);
+        }
     }
 
     /**
@@ -239,6 +251,7 @@ public class ServerCompanion extends CompanionEntity
         }
         item.setThrower(getUUID());
         item.addTag(DROP_TAG);
+        CompanionManager.noteThrown(this, item.getItem());
         ServerPlayer to = CompanionManager.giveTarget(this);
         if (to != null && to.level() == level()) {
             item.setTarget(to.getUUID());
