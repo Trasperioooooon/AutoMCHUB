@@ -62,11 +62,24 @@ func (r *Redactor) Text(s string) string {
 	if r == nil || s == "" {
 		return s
 	}
-	if r.Secrets != nil {
-		for _, sec := range r.Secrets() {
-			if len(sec) >= 6 {
-				s = strings.ReplaceAll(s, sec, "***")
-			}
+	return r.text(s, r.secrets())
+}
+
+// secrets 取一次已知的密钥（Secrets 每次都要读 secrets.json、解密：处理一整个 JSON 时只取一次）。
+func (r *Redactor) secrets() []string {
+	if r == nil || r.Secrets == nil {
+		return nil
+	}
+	return r.Secrets()
+}
+
+func (r *Redactor) text(s string, secrets []string) string {
+	if s == "" {
+		return s
+	}
+	for _, sec := range secrets {
+		if len(sec) >= 6 {
+			s = strings.ReplaceAll(s, sec, "***")
 		}
 	}
 	// 程序目录、主目录（大小写不敏感，两种斜杠都认）；先换长的
@@ -214,21 +227,25 @@ func replaceFold(s, old, new string) string {
 
 // Value 处理 JSON 解出来的值：先按键名把密钥类的值写成 ***（同操作记录），再处理每个字符串。
 func (r *Redactor) Value(v any) any {
-	return r.walk(ops.Redact(v))
+	v = ops.Redact(v)
+	if r == nil {
+		return v
+	}
+	return r.walk(v, r.secrets())
 }
 
-func (r *Redactor) walk(v any) any {
+func (r *Redactor) walk(v any, secrets []string) any {
 	switch x := v.(type) {
 	case map[string]any:
 		for k, val := range x {
-			x[k] = r.walk(val)
+			x[k] = r.walk(val, secrets)
 		}
 	case []any:
 		for i, val := range x {
-			x[i] = r.walk(val)
+			x[i] = r.walk(val, secrets)
 		}
 	case string:
-		return r.Text(x)
+		return r.text(x, secrets)
 	}
 	return v
 }

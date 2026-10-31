@@ -18,6 +18,7 @@ import (
 	"minedeck/internal/assistant"
 	"minedeck/internal/dl"
 	"minedeck/internal/inst"
+	"minedeck/internal/mcp"
 	"minedeck/internal/ops"
 	"minedeck/internal/ops/catalog"
 	"minedeck/internal/tunnel"
@@ -33,6 +34,7 @@ type fullEnv struct {
 	tunID   string
 	dials   *noDial
 	asst    *assistant.Service
+	mcp     *mcp.Service // MCP 接口（默认关着）
 }
 
 // noDial 一拨号就报错，记下想连的地址：用来证明没配置 AI 时没有任何对外连接。
@@ -118,7 +120,9 @@ func newFullEnv(t *testing.T) *fullEnv {
 	aiSvc := ai.NewService(ai.Options{Dir: filepath.Join(app.Base, "data", "ai"), Keys: app.Secrets(), HTTP: nd.client(), Mirrors: dl.GHMirrors})
 	reg := catalog.New(catalog.Env{Mgr: mgr, Tun: tun, AI: aiSvc, Port: 27333})
 	asst := catalog.NewAssistant(reg, aiSvc, Token)
-	e := &fullEnv{h: New(mgr, tun, reg, asst), tunID: tt.ID, dials: nd, asst: asst}
+	mcpSvc := catalog.NewMCP(reg, Token)
+	mcpSvc.Start(27333, 27333)
+	e := &fullEnv{h: New(mgr, tun, reg, asst, WithMCP(mcpSvc)), tunID: tt.ID, dials: nd, asst: asst, mcp: mcpSvc}
 	e.call(t, "PUT", "/api/config", `{"lanPassword":"`+lanPass+`","listenLan":true,"webhookUrl":"https://hook.example/x?access_token=`+hookToken+`"}`, 200)
 	e.secrets = []string{cfKey, lanPass, sakuraKey, frpsToken, app.GetConfig().AccessPasswordHash}
 	return e

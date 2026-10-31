@@ -32,22 +32,41 @@ func sessionPrompt(inst string) string {
 // game.info 是给游戏内 AI 的（实例信息助手另有 instance.list）。
 var skipTools = map[string]bool{"app.update.check": true, "java.scan": true, "ops.log": true, "game.info": true}
 
-// tools 按调用方从操作层取工具清单（仅人工的永远不在里面），和工具名到操作名的对照。
+// ToolOps 按调用方从操作层取给 AI 的操作（登记顺序）：仅人工的永远不在里面，再去掉 skipTools。
+// 应用内助手和 MCP 接口共用，两边给 AI 的操作一样。
+func ToolOps(reg *ops.Registry, c ops.Caller) []*ops.Op {
+	var out []*ops.Op
+	for _, op := range reg.Available(c) {
+		if !skipTools[op.Name] {
+			out = append(out, op)
+		}
+	}
+	return out
+}
+
+// tools 按调用方从操作层取工具清单，和工具名到操作名的对照。
 func tools(reg *ops.Registry, c ops.Caller) ([]ai.Tool, map[string]string) {
 	var out []ai.Tool
 	names := map[string]string{}
-	for _, op := range reg.Available(c) {
-		if skipTools[op.Name] {
-			continue
-		}
+	for _, op := range ToolOps(reg, c) {
 		name := ops.ToolName(op.Name)
-		out = append(out, ai.Tool{Name: name, Description: toolDesc(op), Schema: op.AISchema()})
+		out = append(out, ai.Tool{Name: name, Description: ToolDesc(op, assistantNotes), Schema: op.AISchema()})
 		names[name] = op.Name
 	}
 	return out, names
 }
 
-func toolDesc(op *ops.Op) string {
+// ToolNotes 工具说明末尾给写操作、危险操作加的那句话：不同入口确认的地方不一样（助手的确认卡片在对话里，
+// MCP 接口的在 MineDeck 的界面上）。
+type ToolNotes struct{ Write, Danger string }
+
+var assistantNotes = ToolNotes{
+	Write:  "（写操作：调用后先生成确认卡片，用户确认后才执行）",
+	Danger: "（危险操作：调用后先生成确认卡片，用户确认时还要再勾选一次）",
+}
+
+// ToolDesc 给 AI 的工具说明：标题、说明，写操作和危险操作再加上 n 里的提示。
+func ToolDesc(op *ops.Op, n ToolNotes) string {
 	var b strings.Builder
 	b.WriteString(op.Title)
 	if op.Desc != "" {
@@ -57,9 +76,9 @@ func toolDesc(op *ops.Op) string {
 	b.WriteString("。")
 	switch op.Level {
 	case ops.Write:
-		b.WriteString("（写操作：调用后先生成确认卡片，用户确认后才执行）")
+		b.WriteString(n.Write)
 	case ops.Danger:
-		b.WriteString("（危险操作：调用后先生成确认卡片，用户确认时还要再勾选一次）")
+		b.WriteString(n.Danger)
 	}
 	return b.String()
 }
