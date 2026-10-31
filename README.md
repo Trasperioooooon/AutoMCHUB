@@ -42,6 +42,7 @@ Windows 上的**我的世界（Minecraft Java 版）一键开服工具**：单�
 | **游戏内 AI** | 玩家在聊天里说 `@AI 问题`，默认全服可见；`/私` 只回自己、`/问` 只答不做、`/额度`、`/帮助`；面板里勾选的玩家可以让 AI 执行白名单里的命令（按模板逐个参数校验，op、execute 等写死禁止），搭配一键开启白名单 |
 | **音乐共享** | 把房主电脑上音乐软件的声音经 Simple Voice Chat 广播给服里的人，每人可在语音设置里单独调小或静音；Windows 11 按程序录音，不录游戏声和语音；桥接模组内置，一键安装 |
 | **AI 伙伴** | NeoForge 1.21.1 / Forge 1.20.1 服里放 AI 伙伴（基于 PlayerEngine）：聊天里说「@伙伴名 跟着我」「砍 10 个橡木原木」「打附近的僵尸」；禁挖区域、不许打的生物可配；好友的客户端只装一个伙伴模组 |
+| **MCP 接口（可选）** | 让 Claude Desktop、Cherry Studio、Cursor、VS Code 这些支持 MCP 的 AI 工具直接用 MineDeck：查状态、看日志直接做，改配置、重启只提请求，在 MineDeck 里确认后才执行；默认关闭，只接受本机连接、要带令牌 |
 | **安全防呆** | 老版本自动启用 log4shell 官方缓解方案；清除 `JAVA_HOME`/`_JAVA_OPTIONS` 等环境污染；下载文件哈希校验；本地 API 带随机令牌 |
 
 ## 📸 截图
@@ -92,7 +93,7 @@ AI 是可选的，用你自己的 API Key，费用按服务商的价格付给服
 
 ### AI 会不会乱改我的服务器？
 
-不会自己动手。读日志、看配置这类操作直接做；改配置、换 Java、重启这类操作只生成确认卡片，你点了确认才执行，所有操作都记在 `logs\ops\`。游戏内 AI 默认只回答问题，只有你勾选的玩家才能让它执行命令，而且只限白名单里的命令，`op`、`execute` 这类一律不执行。
+不会自己动手。读日志、看配置这类操作直接做；改配置、换 Java、重启这类操作只生成确认卡片，你点了确认才执行，所有操作都记在 `logs\ops\`。游戏内 AI 默认只回答问题，只有你勾选的玩家才能让它执行命令，而且只限白名单里的命令，`op`、`execute` 这类一律不执行。经 MCP 接口连进来的外部 AI 工具也一样：只能读，要改东西都得你在 MineDeck 里确认。
 
 ### AI 伙伴和音乐共享，好友要装什么？
 
@@ -200,6 +201,7 @@ Optional AI features use your own API key (OpenAI-compatible or Claude protocol;
 - an in-app assistant that reads logs and configs to troubleshoot, and proposes changes that run only after you confirm them;
 - in-game AI: players ask `@AI ...` in chat, and players you authorize can have it run allowlisted commands;
 - AI companions built on PlayerEngine (NeoForge 1.21.1 and Forge 1.20.1) that follow players, gather wood and fight mobs;
-- music sharing: stream the host's music player to everyone on the server through Simple Voice Chat.
+- music sharing: stream the host's music player to everyone on the server through Simple Voice Chat;
+- an MCP server (off by default), so AI tools on the same PC such as Claude Desktop, Cherry Studio, Cursor or VS Code can read MineDeck's state and propose changes that run only after you confirm them in the app.
 
 The interface is Chinese only for now. MIT licensed.

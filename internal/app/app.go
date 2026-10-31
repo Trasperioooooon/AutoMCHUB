@@ -16,7 +16,7 @@ import (
 	"minedeck/internal/secret"
 )
 
-const Version = "2.9.0-beta.1"
+const Version = "2.9.0-beta.2"
 
 var (
 	Base        string // 程序所在目录（数据自包含于此，不写注册表、不动环境变量）
