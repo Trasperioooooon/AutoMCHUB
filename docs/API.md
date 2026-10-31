@@ -232,6 +232,44 @@ AI 助手用的读写能力，网页也能直接调。人调用时，写操作�
 
 所有响应统一为 `{"ok": true, "data": ...}` 或 `{"ok": false, "error": "..."}`。
 
+### MCP 接口（外部 AI 工具）
+
+让同一台电脑上的其他 AI 工具（Claude Desktop、Cherry Studio、Cursor、VS Code 等）经 MCP 调用操作层，默认关闭。设计见 `docs/AI与音乐共享功能设计.md` §15。
+
+**设置接口**（都是仅人工的操作；修改类的**仅本机**，局域网会话只能看，拿不到令牌）：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/mcp` | 状态，不含令牌：`enabled`、`local`（请求是否来自本机）、`url`（`http://127.0.0.1:<端口>/mcp`）、`port`、`portChanged`（想用的端口被占用，这次换了一个：HTTP 方式的配置要跟着改）、`tokenSet`、`tokenBroken`（解不开，要重置）、`clients`（本次启动以来连过的 AI 工具，最近的在前：`{name, title?, version?, transport: http/stdio, protocol, first, last, calls}`）、`pending`（等确认的外部 AI 提案数）、`tools`（给外部 AI 的工具数）、`versions`（支持的协议版本） |
+| PUT | `/api/mcp` | `{enabled}`：打开或关闭。第一次打开（或令牌解不开）时生成令牌，写运行时文件；关闭时删掉运行时文件，没处理的外部 AI 提案作废。返回同 GET。**仅本机** |
+| POST | `/api/mcp/token` | 重置令牌：HTTP 方式的客户端要换新令牌，stdio 方式不用改。返回同 GET。**仅本机** |
+| GET | `/api/mcp/config` | 复制配置用：`{url, token, exe, snippets: [{id, name, transport, where, text}]}`。`id` 有 `claude`（stdio）、`cherry`、`cursor`、`vscode`（HTTP）、`http`、`stdio`（通用）；`where` 写明粘贴到哪儿。没打开时返回 400。**仅本机**，每次调用记一条操作记录 |
+| GET | `/api/mcp/events` | SSE（可用 `?token=`）：先推 `{"type":"pending","items":[…]}`，之后等确认的外部 AI 提案每次有变化（新提案、处理完、过期、关掉 MCP）再推一份完整的。每项是 `{id, op, title, level: W/D, args, plan, consent?, actor, created, expires}`。**仅本机** |
+
+**MCP 端点**：`POST /mcp`（Streamable HTTP）。
+
+- 不认网页的令牌和局域网会话，要带 `Authorization: Bearer <MCP 令牌>`；只收本机的连接；`Host` 要是 127.0.0.1、localhost 或 [::1]；带了 `Origin` 的要是本机的网页。依次检查，不过就回 JSON-RPC 错误（不带 id）：
+  - 405：不是 POST（GET、DELETE 也是 405，不提供事件流、不用 DELETE 结束会话）；
+  - 403、-31003：不是本机的连接，或 Host、Origin 不对（没开局域网访问时，Host 不对会先被 MineDeck 的通用检查拒绝，回纯文本的 403）；
+  - 403、-31001：MCP 接口没打开；
+  - 401、-31002：令牌不对或没带（带 `WWW-Authenticate: Bearer`），令牌解不开时提示重置。
+- 协议：2026-07-28（无状态：每个请求的 `_meta` 带 `io.modelcontextprotocol/protocolVersion` 和 `clientCapabilities`，有 `server/discover`），同时认 initialize 握手的 2025-11-25、2025-06-18、2025-03-26、2024-11-05。
+  - 2026-07-28 的请求要带和请求体一致的 `MCP-Protocol-Version`、`Mcp-Method`，tools/call 还要 `Mcp-Name`（不是 ASCII 的写成 `=?base64?…?=`）。对不上回 400、-32020；`_meta` 缺字段回 400、-32602；不支持的版本回 400、-32022（`data: {supported, requested}`）；未知方法和 2026-07-28 去掉了的方法（initialize、ping 等）回 404、-32601。
+  - 旧版：`initialize` 谈版本（要的不认识就回 2025-11-25），回 `Mcp-Session-Id`；之后的请求带上它和 `MCP-Protocol-Version`。认不出的会话照常处理，不回 404。也收 2025-03-26 的批量请求。
+- 方法：`server/discover`（2026-07-28）、`initialize`、`ping`（旧版）、`tools/list`、`tools/call`。能力只有 `tools`，`listChanged` 为 false。回复一律是 JSON（不开 SSE 流）。
+- 工具：和应用内助手给 AI 的一样（仅人工的不给，`app.update.check`、`java.scan`、`ops.log`、`game.info` 也不给），工具名把点换成下划线；外加 `proposal_status`（`{id?, wait?}`：查提案的处理结果，不填 id 列出最近一小时的，`wait` 最多等 30 秒）。
+  - 读操作直接执行，结果脱敏、加数据边界、超过 16 KB 截断。
+  - 写操作和危险操作只生成提案（同「提案：AI 提出的写操作」一节），结果是文字说明：提案编号、要做什么、要用户在 MineDeck 的界面上确认。同时等确认的 MCP 提案最多 10 个。
+  - 参数不对、执行失败按工具的错误（`isError: true`）交回；没有这个工具回 -32602。
+- 外部 AI 的提案只能在本机确认或拒绝（`/api/ops/proposals/{id}/confirm|reject`，局域网会话 403，`GET /api/ops/proposals` 也不列给局域网）。操作记录里 `src` 是 `mcp`，`actor` 是客户端在 `clientInfo` 里报的名字（清理过、最长 40 个字，不知道就写「MCP 客户端」），确认后执行的那条带 `approvedBy`。
+
+**stdio 桥**：`MineDeck.exe -mcp`。MCP 客户端把它当子进程启动，标准输入输出一行一条 JSON-RPC 消息，转给同一目录下运行着的 MineDeck 的 `/mcp`。
+
+- 端口从 `<程序目录>/data/mcp/runtime.json` 读（`{v, pid, port, exe, version, started}`，打开着 MCP 时由运行着的 MineDeck 写，关掉或退出时删掉）。桥会核对里面的进程还在、是同一目录下的程序。
+- 令牌由桥自己从 `secrets.json` 用 DPAPI 解出来，所以 stdio 的配置里不用填令牌。
+- 桥转发时带 `X-MineDeck-Bridge`（版本号）和 `X-MineDeck-Client`（客户端在 initialize 里报的名字，URL 编码）：前者让「连过的 AI 工具」显示 stdio，后者在 MineDeck 重启、认不出旧会话时用来记名字。都是自报的，只用来显示和记录。
+- MineDeck 没运行时回 -31000，令牌读不出来时回 -31002，MCP 没打开时转回 -31001。都带原来请求的 id，同时写到标准错误。
+
 ## Webhook 事件
 
 在全局设置配置 URL 后，以下事件将以 JSON POST 推送（失败重试 3 次）：

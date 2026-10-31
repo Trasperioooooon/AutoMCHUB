@@ -1129,3 +1129,104 @@ LANG=C.UTF-8 GOOS=windows go test -exec /usr/lib/wine/wine64 ./...
 ### 还没定的
 
 **远程朋友怎么广播（第 10 项，阶段 6）**：浏览器方案（要先做 https：自签名证书会有警告，或者用樱花的 HTTPS 隧道），还是让远程朋友也用 MineDeck.exe 的"只广播"模式。到阶段 6 再定（§8.5）。
+
+---
+
+## 15. MCP 接口（外部 AI 工具）
+
+2026-10-31 用户决定现在就做，随测试版 v2.9.0-beta.2 发出去。实现在分支 `mcp`，代码在 `internal/mcp`；和本节的出入、要在 Windows 和真客户端上验证的事项写在 `docs/交接说明.md` 的「MCP 接口」。
+
+### 15.1 目标和边界
+
+- 让同一台电脑上的其他 AI 工具（Claude Desktop、Cherry Studio、Cursor、VS Code 等）用 MineDeck 的能力：查实例、看日志、读配置，提出改动。这些工具用自己的模型，MineDeck 不用配 AI 服务商，也不占 MineDeck 的每日额度。
+- 只做 MCP 的「工具」：不做 resources、prompts、sampling、elicitation，不推送工具清单的变化（`listChanged` 为 false）。
+- 权限和应用内助手一样（§3.3）：读操作直接执行；写操作和危险操作只生成提案，人在 MineDeck 的界面上确认（危险操作多勾一次，EULA 只能人勾）；仅人工的操作不给。
+- 默认关闭，只收这台电脑上的连接。
+
+### 15.2 协议版本
+
+- 2026-10-31 读了规范仓库 modelcontextprotocol/modelcontextprotocol（核实）：当前版本是 **2026-07-28**。和以前比，它是无状态的：
+  - 没有 initialize 握手。每个请求在 `_meta` 里带 `io.modelcontextprotocol/protocolVersion` 和 `io.modelcontextprotocol/clientCapabilities`，`clientInfo` 建议带；结果在 `_meta` 里带 `serverInfo`。
+  - 服务端必须实现 `server/discover`（支持的版本、能力、说明）。
+  - Streamable HTTP 上，`MCP-Protocol-Version`、`Mcp-Method`，以及 tools/call 的 `Mcp-Name` 要和请求体一致，对不上回 400 和 -32020；不支持的版本回 400 和 -32022，`data` 里列出支持的版本；未知方法回 404 和 -32601。
+  - 结果都带 `resultType`；tools/list 和 server/discover 还要带缓存提示 `ttlMs`、`cacheScope`。
+  - 去掉了会话（`Mcp-Session-Id`）、GET 的事件流和 ping。
+- 旧版本（initialize 握手）还得认（核实：读源码，也实测了）：
+  - 截至 2026-10-31，TypeScript SDK 1.x 最新只到 2025-11-25（读的是 1.32.2），Electron 做的客户端多半用它；
+  - TypeScript SDK 2.x（2.4.0）默认也还是 initialize，探测 2026-07-28 要另外打开；
+  - 官方 Go SDK v1.8.0 默认先用 `server/discover` 探测 2026-07-28，不行再退回 initialize。
+- 所以做成「两代都认」（规范里叫 dual-era）：
+  - 请求的 `_meta` 带了 2026-07-28，就按无状态处理；
+  - `initialize` 按旧版握手，认 2025-11-25、2025-06-18、2025-03-26、2024-11-05，要的版本不认识就回 2025-11-25；
+  - 握手后的旧版请求，版本依次看会话、`MCP-Protocol-Version` 头，都没有按规范当作 2025-03-26；
+  - 2025-03-26 的批量请求（JSON 数组）也收。
+- 不做 2024-11-05 的 HTTP+SSE 传输（GET /sse 加 POST /messages），只认这个版本号：它在 stdio 上、或者走 Streamable HTTP 时照样能用。
+
+### 15.3 两种连法
+
+**Streamable HTTP**：MineDeck 现有的本地 HTTP 服务上加 `/mcp`。
+
+- 只收 POST，每个请求回一个 JSON（不开 SSE 流）；GET、DELETE 回 405。
+- 只收本机的连接：开着局域网访问时 MineDeck 监听 0.0.0.0，`/mcp` 照样拒绝局域网的设备。
+- `Host` 必须是 127.0.0.1、localhost 或 [::1]；带了 `Origin` 的必须是本机的网页，`null` 和别的站点一律 403。这是规范要求的防 DNS 重绑定。
+- 要带 `Authorization: Bearer <MCP 令牌>`。网页的访问令牌（每次启动换一个）在这里不算数。
+- 旧版握手时发一个 `Mcp-Session-Id`，只用来记住客户端报的名字和谈好的版本。认不出的会话照常处理，不回 404：MineDeck 重启以后，客户端带着旧会话来也不出错，只是名字记不上（stdio 桥会另外带上名字）。
+- 端口就是 MineDeck 的端口（默认 27333，被占用时随机换一个，`-port` 可以指定）。端口变了，HTTP 方式的配置要跟着改，界面上写明。
+
+**stdio**：`MineDeck.exe -mcp`。MCP 客户端把它当子进程启动，它把标准输入输出转给同一目录下运行着的 MineDeck 的 `/mcp`。
+
+- 它不建窗口、不初始化数据目录、不弹对话框，出错只写标准错误。
+- 运行着的 MineDeck 打开 MCP 接口时，写 `<程序目录>/data/mcp/runtime.json`（`pid`、`port`、版本），关掉 MCP 或退出时删掉。
+- 桥每个请求都重读这个文件，并核对里面的进程还在、而且是同一目录下的程序。文件可能是上次崩溃留下的，端口也可能被别的程序占了，核对不过就不发令牌。
+- 令牌不写进这个文件：桥自己从 `secrets.json` 用 DPAPI 解出来，和 MineDeck 是同一个 Windows 用户才解得开；每次请求都重新读，重置令牌后 stdio 的配置不用改。
+- 旧版握手时，桥记住 `Mcp-Session-Id` 和谈好的版本，之后的请求都带上；2026-07-28 的请求，桥按请求体补上要求的镜像头。
+- stdio 上的取消通知（`notifications/cancelled`），桥直接断开那个 HTTP 请求，不再回它。
+- MineDeck 没运行、MCP 没打开、令牌不对时，每个请求回一个带原 id 的 JSON-RPC 错误（中文说明怎么办），同时写到标准错误。MineDeck 之后打开了，下一个请求就能通。
+- release 版用 `-H windowsgui` 编译（GUI 子系统）。客户端用管道启动它时，标准输入输出照常可用，在 wine 下实测过。Windows 给刚启动的 GUI 程序显示「后台运行」光标，桥调一次 `GetMessage` 把它关掉（推断，要在 Windows 上实测）。
+
+### 15.4 令牌
+
+- 第一次打开 MCP 接口时生成：32 字节随机数，写成 64 位十六进制。用 DPAPI 加密存进 `secrets.json`，键名 `mcp.token`；内存里只留它的 SHA-256，按定长比较。
+- 关掉 MCP 时令牌保留，再打开不用改配置。可以在界面上重置，HTTP 方式的客户端要换新令牌。
+- 解不开（换了电脑或 Windows 用户）时，界面提示重置。
+- 只有本机的界面能拿到明文（复制配置时），局域网的设备看不到。脱敏规则多认这个令牌：它原样出现在交给 AI 的内容里，就换成 `***`。
+
+### 15.5 工具
+
+- 工具来自操作层，和应用内助手给 AI 的一样：`Registry.Available` 去掉仅人工的，再去掉 `app.update.check`、`java.scan`、`ops.log`、`game.info`。映射的代码抽成了 `assistant.ToolOps`、`ToolDesc`、`FormatResult`，助手和 MCP 共用。
+- 工具名同助手（`instance_props_set`）。按版本给字段：2025-03-26 起带 `annotations`，读操作 `readOnlyHint`，危险操作 `destructiveHint`；2025-06-18 起带 `title`。顺序固定。
+- 来源是新的 `mcp`：操作记录里 `src: "mcp"`，`actor` 是客户端报的 `clientInfo.name`，去掉控制字符和零宽字符，最长 40 个字；不知道名字就写「MCP 客户端」。名字是客户端自己报的，只用来显示和记录，不当真。MCP 只收本机的连接，所以调用者算本机（`Local`）。
+- 读操作的结果和助手一样处理：先脱敏（Windows 用户名、程序目录、计算机名、局域网 IP、Key），外面加「以下是数据」的边界标记，超过 16 KB 截断（带 lines 的从最旧的行删起）。
+- 参数不对、执行失败，按工具的错误（`isError`）交回，外部 AI 能看到原因再改；没有这个工具才是协议错误（-32602）。
+- 多一个工具 `proposal_status`：查提案现在怎样了。不填 id 就列出最近一小时的提案；`wait` 最多等 30 秒，提案在这期间处理完就马上返回。它不是操作层的操作，只在 MCP 里有。
+
+### 15.6 提案和确认
+
+- 写操作和危险操作由操作层生成提案（§3.3）。工具结果告诉外部 AI 四件事：还没有执行、要做什么（改前改后、警告）、要用户在 MineDeck 的界面上确认、过一会儿用 `proposal_status` 查。
+- 确认只能在本机：局域网的设备看不到外部 AI 的提案，也确认不了（403）。确认后按存下的参数执行，操作记录里 `src` 是 mcp，`approvedBy` 是确认的人。
+- 处理结果（执行结果已脱敏、截断，拒绝的理由）留一个小时，给 `proposal_status` 查。
+- 同时等确认的 MCP 提案最多 10 个，免得外部 AI 一直提，把应用内助手的提案挤掉（操作层一共只留 100 个）。
+- 关掉 MCP 接口时，没处理的提案经操作层拒绝作废，各记一条。MineDeck 重启后提案都没了，`proposal_status` 会说明。
+
+### 15.7 界面
+
+- 「设置 → AI（可选）」在「应用内助手」后面加「MCP 接口」分组：
+  - 开关（即时生效）；
+  - 接口地址和「复制」，端口被占用、换了端口时写明 HTTP 方式的配置要改；
+  - 访问令牌（不显示，只说已生成）和「重置令牌」（先确认）；
+  - 「复制配置…」：选一个 AI 工具（Claude Desktop 用 stdio，Cherry Studio、Cursor、VS Code 用 HTTP，另有通用的 HTTP 和 stdio），弹窗写明粘贴到哪儿、预览配置。预览里令牌是占位，复制的是完整的；
+  - 本次启动以来连过的 AI 工具：名字、版本、stdio 或 HTTP、协议版本、调用工具的次数和时间。
+  局域网打开时只能看，开关禁用，没有令牌和复制配置。
+- 外部 AI 提出的操作：界面订阅 `/api/mcp/events`（SSE，只给本机）。
+  - 来了新提案，弹一条提示，点一下打开 AI 助手面板；
+  - 标题栏的「AI 助手」亮小方块（同助手有确认卡片等着时）；
+  - 面板顶上列出「外部 AI 的请求」，用和助手一样的确认卡片，写明是哪个 AI 工具提的。
+  这些不依赖 AI 有没有配好：没配 AI 时面板下面是引导，上面照样能处理。
+- 新加的文件是 `mcp.js`、`mcp.css`；`app.js` 只加了 3 处钩子，`toast` 返回它建的元素；`assistant.js` 加了面板顶上那一块和小方块。用到的字都在现有的字体子集里。
+
+### 15.8 隐私和安全
+
+- 外部 AI 能拿到的内容和应用内助手一样，都经同样的脱敏。玩家名保留。
+- 外部 AI 只能「提议」写操作，执行要人在 MineDeck 里确认；权限在操作层判断，不靠提示词（§10.4）。initialize 和 server/discover 的说明（instructions）里写了同助手系统提示的几条规矩。
+- 令牌只给本机的程序用。规范要求防 DNS 重绑定：HTTP 上校验 Host 和 Origin；浏览器里的网页也拿不到令牌，而且我们不回 CORS 头，浏览器读不到响应。
+- 令牌挡不住同一个 Windows 用户下的恶意程序：它可以自己解 DPAPI，也可以跑 `MineDeck.exe -mcp`。这和 §4.6 说的 DPAPI 的边界一样；写操作照样要人确认。
