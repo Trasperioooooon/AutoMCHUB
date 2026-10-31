@@ -26,6 +26,7 @@ type Options struct {
 	StatusEvery time.Duration // STATUS 的间隔，默认 2 秒；负数不发
 	IdleTimeout time.Duration // 多久没收到任何帧就发 END（心跳超时），默认 10 秒
 	TokenDelay  time.Duration // 令牌不对时等多久再回 ERROR 1，默认 0.3 秒
+	PongDelay   time.Duration // 收到 PING 后等多久再回 PONG（Windows 的时钟一跳 0.5～15.6 毫秒，本机往返太快会量成 0）
 	// Handle 不为 nil 时由它处理指令：返回要先发的事件和回复（回复里的 id 由这里补上）。返回 nil 的回复表示交给内置的处理。
 	Handle func(req map[string]any) (events []any, resp map[string]any)
 	// Welcome 改 WELCOME 的 JSON（在内置的基础上）。
@@ -374,7 +375,11 @@ func (m *FakeMod) handle(raw net.Conn) {
 			m.pings++
 			silent := m.silent
 			m.mu.Unlock()
-			if !silent {
+			switch {
+			case silent:
+			case m.o.PongDelay > 0:
+				time.AfterFunc(m.o.PongDelay, func() { _ = c.write(companion.TypePong, f.Payload) })
+			default:
 				_ = c.write(companion.TypePong, f.Payload)
 			}
 		case companion.TypeRequest:

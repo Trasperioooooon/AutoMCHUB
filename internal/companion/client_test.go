@@ -332,7 +332,7 @@ func TestBusyAndReconnectRules(t *testing.T) {
 // 心跳：MineDeck 每 2 秒（这里缩短了）发一次 PING；10 秒没收到模组的任何帧就断开重连；
 // MineDeck 不发 PING 时模组发 END（心跳超时）断开，MineDeck 重连。
 func TestHeartbeat(t *testing.T) {
-	m := startMod(t, companiontest.Options{StatusEvery: 30 * time.Millisecond, IdleTimeout: 300 * time.Millisecond})
+	m := startMod(t, companiontest.Options{StatusEvery: 30 * time.Millisecond, IdleTimeout: 300 * time.Millisecond, PongDelay: 20 * time.Millisecond})
 	dir := t.TempDir()
 	writeCfg(t, dir, m.Port(), token)
 	rec := &recorder{}
@@ -347,8 +347,8 @@ func TestHeartbeat(t *testing.T) {
 		defer rec.mu.Unlock()
 		return m.Pings() >= 3 && rec.statuses >= 3
 	})
-	if c.State().RTTMs <= 0 {
-		t.Error("应记下心跳的往返时间")
+	if rtt := c.State().RTTMs; rtt < 10 {
+		t.Errorf("应记下心跳的往返时间（模组 20 毫秒后才回 PONG）：%v 毫秒", rtt)
 	}
 	time.Sleep(400 * time.Millisecond) // 一直有 PING：模组不会断开
 	if !c.Live() || m.Accepts() != 1 {

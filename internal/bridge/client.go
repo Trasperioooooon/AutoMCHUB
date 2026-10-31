@@ -71,7 +71,7 @@ type State struct {
 	Addr       string    `json:"addr,omitempty"`       // 模组的地址
 	ModVersion string    `json:"modVersion,omitempty"` // 握手时模组报的版本
 	Status     *Status   `json:"status,omitempty"`     // 模组最近一次报的状态（这次连接）
-	RTTMs      float64   `json:"rttMs,omitempty"`      // 最近一次心跳的往返时间
+	RTTMs      float64   `json:"rttMs,omitempty"`      // 最近一次心跳的往返时间（Windows 上 Go 的时钟一跳 0.5～15.6 毫秒，本机连接常量成 0）
 	Sent       uint64    `json:"sent"`                 // 发出的 PCM 帧（累计）
 	Dropped    uint64    `json:"dropped"`              // 没连上、或者发不及丢掉的帧（累计）
 	Connects   int       `json:"connects"`             // 握手成功的次数

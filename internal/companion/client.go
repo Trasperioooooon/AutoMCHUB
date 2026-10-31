@@ -77,7 +77,7 @@ type State struct {
 	LastError string    `json:"lastError,omitempty"` // 最近一次连接失败或断线的原因
 	Busy      bool      `json:"busy,omitempty"`      // 最近一次被拒是因为已经有别的控制连接
 	Connects  int       `json:"connects"`            // 握手成功的次数
-	RTTMs     float64   `json:"rttMs,omitempty"`     // 最近一次心跳的往返时间
+	RTTMs     float64   `json:"rttMs,omitempty"`     // 最近一次心跳的往返时间（Windows 上 Go 的时钟一跳 0.5～15.6 毫秒，本机连接常量成 0）
 	Welcome   *Welcome  `json:"-"`                   // 最近一次握手时模组发来的
 }
 

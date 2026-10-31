@@ -1,6 +1,7 @@
 package secret
 
 import (
+	"encoding/base64"
 	"errors"
 	"os"
 	"path/filepath"
@@ -37,10 +38,17 @@ func TestUnsealFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	raw, err := base64.StdEncoding.DecodeString(s[len(prefix):])
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 改最后一个字节（DPAPI 的签名）一定解不开。前面的字段不一定在签名里：真 Windows 上
+	// 版本号和提供者 GUID 改了照样解得开，wine 的密文格式又不一样
+	raw[len(raw)-1] ^= 0x55
 	for name, bad := range map[string]string{
 		"不是 base64": "dpapi:@@@",
 		"截断":        s[:len(s)-12],
-		"改了一个字节":    s[:len(prefix)+20] + flip(s[len(prefix)+20]) + s[len(prefix)+21:],
+		"改了签名的一个字节": prefix + base64.StdEncoding.EncodeToString(raw),
 	} {
 		if _, err := Unseal(bad); !errors.Is(err, ErrUnreadable) {
 			t.Errorf("%s：应返回 ErrUnreadable，实际 %v", name, err)
@@ -53,13 +61,6 @@ func TestUnsealFailures(t *testing.T) {
 	if !errors.Is(err, ErrUnreadable) {
 		t.Errorf("附加口令不对也解开了：%v", err)
 	}
-}
-
-func flip(c byte) string {
-	if c == 'A' {
-		return "B"
-	}
-	return "A"
 }
 
 // Store：存进文件的是密文；空串删除；解不开的一项报「解不开」而不是当成有值。

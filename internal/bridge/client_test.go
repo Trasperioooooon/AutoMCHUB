@@ -24,6 +24,7 @@ type fakeMod struct {
 	silent   atomic.Bool  // 握手后什么都不回（不回 PONG、不发 STATUS），用来测心跳超时
 	noRead   atomic.Bool  // 握手后不读数据，用来测写超时
 	status   atomic.Bool  // 每 50 毫秒发一次 STATUS
+	pongWait atomic.Int64 // 收到 PING 后等这么多纳秒再回 PONG（Windows 的时钟一跳 0.5～15.6 毫秒，本机往返太快会量成 0）
 	accepted atomic.Int32
 
 	mu     sync.Mutex
@@ -160,7 +161,11 @@ func (m *fakeMod) handle(c net.Conn, id int) {
 			m.mu.Lock()
 			m.pings++
 			m.mu.Unlock()
-			if !m.silent.Load() {
+			switch d := time.Duration(m.pongWait.Load()); {
+			case m.silent.Load():
+			case d > 0:
+				time.AfterFunc(d, func() { send(TypePong, f.Payload) })
+			default:
 				send(TypePong, f.Payload)
 			}
 		case TypeEnd:
@@ -225,6 +230,7 @@ func frame(v int16) []int16 {
 func TestClientHandshakeFramesHeartbeat(t *testing.T) {
 	m := newFakeMod(t, tok)
 	m.status.Store(true)
+	m.pongWait.Store(int64(20 * time.Millisecond))
 	c := Start(fastOpts(instDir(t, m.port(), tok)))
 	waitFor(t, "连上", 3*time.Second, func() bool { return c.State().Phase == PhaseLive })
 	st := c.State()
@@ -241,7 +247,7 @@ func TestClientHandshakeFramesHeartbeat(t *testing.T) {
 	waitFor(t, "心跳和 STATUS", 2*time.Second, func() bool {
 		_, _, pings, _ := m.snapshot()
 		s := c.State()
-		return pings >= 2 && s.RTTMs > 0 && s.Status != nil && s.Status.Received == 5 && s.Status.Source == SourceBroadcast
+		return pings >= 2 && s.RTTMs >= 10 && s.Status != nil && s.Status.Received == 5 && s.Status.Source == SourceBroadcast
 	})
 	hellos, pcm, _, _ := m.snapshot()
 	if len(hellos) != 1 || hellos[0] != "房主" {
