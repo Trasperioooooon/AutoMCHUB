@@ -633,3 +633,26 @@ func TestRegisterRejectsBadOps(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+// AI 发起的写操作预览失败（比如重启一台没在运行的服务器）：Do 返回 nil 和错误，不能返回装着 nil *Proposal 的 any，
+// 否则调用方的类型断言会把它当成提案。
+func TestProposeErrorIsUntypedNil(t *testing.T) {
+	f := newFixture(t)
+	f.reg.Register(&Op{Name: "t.badpreview", Title: "预览会失败", Level: Danger,
+		Preview: func(context.Context, Caller, Args) (*Plan, error) {
+			return nil, Errorf(400, "服务器没有在运行")
+		},
+		Run: func(context.Context, Caller, Args) (any, error) { return "ran", nil }})
+	for _, c := range []Caller{aiLocal, mcp} {
+		res, err := f.reg.Do(context.Background(), c, "t.badpreview", nil)
+		if res != nil || err == nil || err.Error() != "服务器没有在运行" {
+			t.Errorf("%s：res=%#v err=%v", c.Source, res, err)
+		}
+		if _, ok := res.(*Proposal); ok {
+			t.Errorf("%s：预览失败时不能断言出提案", c.Source)
+		}
+	}
+	if n := len(f.reg.Pending("")); n != 0 {
+		t.Errorf("预览失败不留提案：%d", n)
+	}
+}

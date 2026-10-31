@@ -598,3 +598,26 @@ func TestSessionLimitAndDelete(t *testing.T) {
 		t.Errorf("清空：%d %v", n, err)
 	}
 }
+
+// 写操作的预览失败（比如重启一台没在运行的服务器）：不出确认卡片，这次调用按出错交回原因，AI 接着回复。
+// 以前操作层返回装着 nil 提案的 any，这里会显示成「等你确认」、交回空的错误。
+func TestPreviewFailureIsToolError(t *testing.T) {
+	f := newFixture(t)
+	f.reg.Register(&ops.Op{Name: "instance.restart", Title: "重启服务器", Level: ops.Danger,
+		Params: ops.Object(map[string]*ops.Schema{"inst": ops.String("实例名称")}, "inst"),
+		Preview: func(context.Context, ops.Caller, ops.Args) (*ops.Plan, error) {
+			return nil, ops.Errorf(400, "「生存服」没有在运行")
+		},
+		Run: f.run("instance.restart")})
+	id := f.open(local)
+	f.ai.queue(toolReply("", call{"c1", "instance_restart", `{"inst":"生存服"}`}), textReply("服务器没在运行，不用重启。"))
+	_ = f.as.Send(local, id, "重启一下", false)
+	v := f.wait(id, func(v *View) bool { return len(f.ai.requests()) == 2 })
+	tl := tool(v, "instance_restart")
+	if tl == nil || tl.Status != "error" || tl.Proposal != nil || !strings.Contains(tl.Error, "没有在运行") || v.Waiting {
+		t.Fatalf("预览失败：%s", dump(tl))
+	}
+	if body := string(f.ai.requests()[1]); !strings.Contains(body, "没有在运行") {
+		t.Errorf("原因要交回给 AI：%s", body)
+	}
+}

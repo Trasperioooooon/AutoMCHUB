@@ -161,6 +161,11 @@ func (f *fixture) register() {
 		Params: ops.Object(map[string]*ops.Schema{"name": ops.String("名称").Len(1, 40), "core": ops.String("核心"), "eula": ops.Boolean("同意 EULA"),
 			"root": ops.String("存放目录")}, "name"),
 		Run: f.run("instance.create")})
+	f.reg.Register(&ops.Op{Name: "instance.stop", Title: "停止服务器", Level: ops.Danger, Params: inst,
+		Preview: func(context.Context, ops.Caller, ops.Args) (*ops.Plan, error) {
+			return nil, ops.Errorf(400, "「生存服」没有在运行")
+		},
+		Run: f.run("instance.stop")})
 	f.reg.Register(&ops.Op{Name: "instance.console.tail", Title: "查看控制台输出", Level: ops.Read, Params: inst,
 		Run: func(context.Context, ops.Caller, ops.Args) (any, error) { return map[string]any{"lines": f.big}, nil }})
 }

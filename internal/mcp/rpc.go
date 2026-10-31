@@ -210,24 +210,49 @@ func (s *Service) one(raw json.RawMessage, in inbound, inBatch bool) (*reply, in
 			}
 		}
 	}
-	if req.method == "initialize" { // 旧版的握手（不管带没带 _meta）
-		return s.initialize(req, in)
-	}
 	ver, has, ok := req.metaString("io.modelcontextprotocol/protocolVersion")
-	switch {
-	case !ok:
+	if !ok {
 		return errReply(m.ID, codeInvalidParams, "_meta 的 io.modelcontextprotocol/protocolVersion 应为字符串", nil), http.StatusBadRequest, ""
+	}
+	if inBatch && has { // 批量是旧版的写法，里面的消息也没法各带各的请求头
+		return errReply(m.ID, codeInvalidRequest, "2026-07-28 不支持批量请求：一次只发一条", nil), http.StatusBadRequest, ""
+	}
+	// 请求体的 _meta 带了版本，或者 HTTP 头说是 2026-07-28 起的版本：头和请求体要一致（顺序同官方 SDK：先看头在不在，
+	// 再看 _meta 里有没有版本，再看两边是否一致），之后才看支不支持这个版本
+	if hv := in.header.Get("MCP-Protocol-Version"); in.header != nil && (has || (dateVersion(hv) && hv >= Modern)) {
+		switch {
+		case hv == "":
+			return errReply(m.ID, codeHeaderMismatch, "缺少 MCP-Protocol-Version 请求头（请求体的 _meta 里写了协议版本）", nil), http.StatusBadRequest, ""
+		case !has:
+			return errReply(m.ID, codeInvalidParams, fmt.Sprintf("缺少 _meta 的 io.modelcontextprotocol/protocolVersion（MCP-Protocol-Version 请求头是 %s，这个版本每个请求都要带）", hv), nil), http.StatusBadRequest, ""
+		case hv != ver:
+			return errReply(m.ID, codeHeaderMismatch, fmt.Sprintf("MCP-Protocol-Version 请求头是 %q，请求体的 _meta 里是 %q", hv, ver), nil), http.StatusBadRequest, ""
+		}
+	}
+	switch {
 	case has && !contains(Versions, ver):
 		return unsupported(m.ID, ver), http.StatusBadRequest, ""
 	case has && ver == Modern:
-		if inBatch {
-			return errReply(m.ID, codeInvalidRequest, "2026-07-28 不支持批量请求：一次只发一条", nil), http.StatusBadRequest, ""
-		}
 		return s.modern(req, in)
+	case req.method == "initialize": // 旧版的握手
+		return s.initialize(req, in)
 	case has: // _meta 里写的是旧版本：按那个版本无状态地处理
 		return s.legacy(req, in, ver)
 	}
 	return s.legacy(req, in, "")
+}
+
+// dateVersion 写法是 YYYY-MM-DD 的版本号。
+func dateVersion(v string) bool {
+	if len(v) != 10 || v[4] != '-' || v[7] != '-' {
+		return false
+	}
+	for i, c := range v {
+		if i != 4 && i != 7 && (c < '0' || c > '9') {
+			return false
+		}
+	}
+	return true
 }
 
 func unsupported(id json.RawMessage, requested string) *reply {
@@ -268,8 +293,8 @@ func (s *Service) modern(req *request, in inbound) (*reply, int, string) {
 			return &reply{JSONRPC: "2.0", ID: req.id, Error: rerr}, http.StatusOK, ""
 		}
 		return okReply(req.id, s.withMeta(res)), http.StatusOK, ""
-	case "ping": // 2026-07-28 去掉了 ping；客户端发了也照样回
-		return okReply(req.id, s.withMeta(map[string]any{"resultType": "complete"})), http.StatusOK, ""
+	case "initialize", "ping", "logging/setLevel", "resources/subscribe", "resources/unsubscribe":
+		return errReply(req.id, codeMethodNotFound, req.method+" 在 2026-07-28 里去掉了（带着 _meta 的请求按 2026-07-28 处理，不用握手）", nil), http.StatusNotFound, ""
 	}
 	return errReply(req.id, codeMethodNotFound, "MineDeck 不支持 "+req.method+"（只提供工具：tools/list、tools/call）", nil), http.StatusNotFound, ""
 }
@@ -285,16 +310,9 @@ func isObject(raw json.RawMessage) bool {
 	return len(raw) > 0 && raw[0] == '{' && json.Valid(raw)
 }
 
-// checkHeaders 2026-07-28 的 Streamable HTTP：MCP-Protocol-Version、Mcp-Method 必须和请求体一致，tools/call 还要 Mcp-Name。
-// 返回空串表示没问题。
+// checkHeaders 2026-07-28 的 Streamable HTTP：Mcp-Method 必须和请求体一致，tools/call 还要 Mcp-Name（MCP-Protocol-Version
+// 在 one 里已经核对过）。返回空串表示没问题。
 func checkHeaders(req *request, h http.Header) string {
-	ver, _, _ := req.metaString("io.modelcontextprotocol/protocolVersion")
-	switch pv := h.Get("MCP-Protocol-Version"); {
-	case pv == "":
-		return "缺少 MCP-Protocol-Version 请求头"
-	case pv != ver:
-		return fmt.Sprintf("MCP-Protocol-Version 请求头是 %q，请求体的 _meta 里是 %q", pv, ver)
-	}
 	switch mm := h.Get("Mcp-Method"); {
 	case mm == "":
 		return "缺少 Mcp-Method 请求头"
@@ -390,8 +408,6 @@ func (s *Service) legacy(req *request, in inbound, ver string) (*reply, int, str
 	}
 	if ver == "" && in.header != nil {
 		switch pv := in.header.Get("MCP-Protocol-Version"); {
-		case pv == Modern:
-			return errReply(req.id, codeHeaderMismatch, "MCP-Protocol-Version 请求头是 2026-07-28，请求体的 _meta 里却没有 io.modelcontextprotocol/protocolVersion", nil), http.StatusBadRequest, ""
 		case pv != "" && !legacyVersion(pv):
 			return unsupported(req.id, pv), http.StatusBadRequest, ""
 		case pv != "":
@@ -415,7 +431,7 @@ func (s *Service) legacy(req *request, in inbound, ver string) (*reply, int, str
 		}
 		return okReply(req.id, res), http.StatusOK, ""
 	case "server/discover":
-		return errReply(req.id, codeInvalidParams, "server/discover 要在 _meta 里带 io.modelcontextprotocol/protocolVersion 和 clientCapabilities", nil), http.StatusBadRequest, ""
+		return errReply(req.id, codeMethodNotFound, "server/discover 是 2026-07-28 才有的：请求的 _meta 里要带 io.modelcontextprotocol/protocolVersion 和 clientCapabilities", nil), http.StatusOK, ""
 	}
 	return errReply(req.id, codeMethodNotFound, "MineDeck 不支持 "+req.method+"（只提供工具：tools/list、tools/call）", nil), http.StatusOK, ""
 }

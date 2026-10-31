@@ -336,7 +336,11 @@ func (r *Registry) Do(ctx context.Context, c Caller, name string, a Args) (any, 
 		return nil, err
 	}
 	if propose {
-		return r.propose(ctx, c, op, args)
+		p, err := r.propose(ctx, c, op, args)
+		if err != nil {
+			return nil, err // 不能返回装着 nil *Proposal 的 any：调用方用类型断言认提案
+		}
+		return p, nil
 	}
 	return r.exec(ctx, c, op, args, "", "")
 }

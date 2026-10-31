@@ -426,3 +426,14 @@ func TestClientsLimit(t *testing.T) {
 		t.Fatalf("连过的客户端：%+v", cl)
 	}
 }
+
+// 写操作的预览失败（比如停一台没在运行的服务器）：不生成提案，按工具的错误交回原因（以前会因为 nil 的提案出错）。
+func TestPreviewFailure(t *testing.T) {
+	f := newFixture(t)
+	f.on()
+	_, sid := f.initialize("2025-06-18", "Cherry Studio")
+	text, isErr := f.call(sid, "instance_stop", map[string]any{"inst": "生存服"}).text()
+	if !isErr || !strings.Contains(text, "没有在运行") || len(f.svc.Pending()) != 0 || f.count("instance.stop") != 0 {
+		t.Fatalf("预览失败：%v %s", isErr, text)
+	}
+}

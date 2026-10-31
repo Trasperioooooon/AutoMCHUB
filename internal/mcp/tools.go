@@ -136,7 +136,7 @@ func (s *Service) callTool(ctx context.Context, id identity, ver string, params 
 		return toolResult(ver, fmt.Sprintf("已经有 %d 个提案在等用户在 MineDeck 里确认，先等用户处理完（可以用 proposal_status 查），再提新的。", maxPendingMCP), true), nil
 	}
 	out, err := s.reg.Do(ctx, caller(id), op.Name, ops.Args(args))
-	if p, ok := out.(*ops.Proposal); ok {
+	if p, ok := out.(*ops.Proposal); ok && p != nil && err == nil {
 		s.track(p)
 		return toolResult(ver, s.proposalText(p), false), nil
 	}

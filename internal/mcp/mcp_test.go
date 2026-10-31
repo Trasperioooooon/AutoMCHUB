@@ -262,13 +262,32 @@ func TestVersionNegotiation(t *testing.T) {
 	if r := f.post(legacyReq(3, "tools/list", nil), "MCP-Protocol-Version", "1999-01-01"); r.status != 400 || r.code() != codeUnsupported {
 		t.Fatalf("不支持的版本头：%d %s", r.status, r.raw)
 	}
-	// 版本头说是 2026-07-28，请求体里却没有 _meta：头和请求体对不上
-	if r := f.post(legacyReq(4, "tools/list", nil), "MCP-Protocol-Version", Modern); r.status != 400 || r.code() != codeHeaderMismatch {
-		t.Fatalf("头和请求体对不上：%d %s", r.status, r.raw)
+	// 版本头说是 2026-07-28，请求体的 _meta 里却没有版本：缺了必填的 _meta 字段（-32602）
+	if r := f.post(legacyReq(4, "tools/list", nil), "MCP-Protocol-Version", Modern); r.status != 400 || r.code() != codeInvalidParams {
+		t.Fatalf("缺 _meta 的版本：%d %s", r.status, r.raw)
 	}
-	// server/discover 不带 _meta
-	if r := f.post(legacyReq(5, "server/discover", nil)); r.status != 400 || r.code() != codeInvalidParams {
+	if r := f.post(legacyReq(4, "tools/list", map[string]any{"_meta": map[string]any{"io.modelcontextprotocol/clientCapabilities": map[string]any{}}}),
+		"MCP-Protocol-Version", Modern, "Mcp-Method", "tools/list"); r.status != 400 || r.code() != codeInvalidParams {
+		t.Fatalf("_meta 里没有版本：%d %s", r.status, r.raw)
+	}
+	// 头和请求体不一致，先报不一致，再看支不支持
+	meta["io.modelcontextprotocol/protocolVersion"] = "2030-01-01"
+	if r := f.post(legacyReq(4, "tools/list", map[string]any{"_meta": meta}), "MCP-Protocol-Version", Modern, "Mcp-Method", "tools/list"); r.status != 400 || r.code() != codeHeaderMismatch {
+		t.Fatalf("头和请求体不一致：%d %s", r.status, r.raw)
+	}
+	// server/discover 不带 _meta：按旧版处理，没有这个方法
+	if r := f.post(legacyReq(5, "server/discover", nil)); r.status != 200 || r.code() != codeMethodNotFound {
 		t.Fatalf("server/discover 不带 _meta：%d %s", r.status, r.raw)
+	}
+	// 2026-07-28 去掉了的方法：initialize、ping 带着 _meta 来就是 404
+	for _, m := range []string{"initialize", "ping"} {
+		if r := f.modern(6, m, nil); r.status != 404 || r.code() != codeMethodNotFound {
+			t.Fatalf("2026-07-28 的 %s：%d %s", m, r.status, r.raw)
+		}
+	}
+	// 版本头是乱写的（不是日期）：当旧版请求，报不支持的版本
+	if r := f.post(legacyReq(7, "tools/list", nil), "MCP-Protocol-Version", "latest"); r.status != 400 || r.code() != codeUnsupported {
+		t.Fatalf("乱写的版本头：%d %s", r.status, r.raw)
 	}
 	// 没带版本头、也认不出会话的旧版请求，按 2025-03-26 处理（工具没有 title）
 	r = f.post(legacyReq(6, "tools/list", nil))
