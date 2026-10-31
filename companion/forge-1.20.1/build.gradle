@@ -41,8 +41,10 @@ legacyForge {
     }
 }
 
-// 和 NeoForge 1.21.1 版共用的、只用 java.* 的代码（协议、控制端口、配置文件）
+// 和 NeoForge 1.21.1 版共用的代码：common 只用 java.*（协议、控制端口、配置文件），
+// shared 用到 Minecraft 和 PlayerEngine、两个版本写法相同的部分（指令、任务、禁挖区域、存档记录）
 sourceSets.main.java.srcDir '../common/src/main/java'
+sourceSets.main.java.srcDir '../shared/src/main/java'
 
 dependencies {
     // Forge 1.20.1 的模组 jar 是 SRG 名，modCompileOnly 会先把它们换成官方名再编译
@@ -71,5 +73,9 @@ tasks.withType(AbstractArchiveTask).configureEach {
 jar {
     from(rootProject.file('../LICENSE-NOTICE.md')) {
         into 'META-INF'
+    }
+    // Forge 1.20.1 从清单里的 MixinConfigs 找 mixin 配置（NeoForge 用 mods.toml 的 [[mixins]]）
+    manifest {
+        attributes 'MixinConfigs': 'minedeck_companion.mixins.json'
     }
 }

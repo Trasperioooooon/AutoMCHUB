@@ -905,9 +905,9 @@ function gcMockState(state, b) {
 // ================================ 第七阶段：AI 伙伴 ================================
 // 同 /api/instances/{name}/companion（GET）、/install、/settings（PUT）、/spawn、/despawn、/stop（见 web/companion.go、companion.View）。
 // 只有「机械动力整合包」（Forge 1.20.1）支持；开着伙伴、服务器运行中才算连着伙伴模组（link.state = live），刷出、停下、移除才可用。
-// 清单的数据照抄 internal/companion/jar/manifest.json 的 Forge 1.20.1 那一项（好友的客户端要装什么按 side 来：clientSide 可改成 server）。
+// 清单的数据照抄 internal/companion/jar/manifest.json 的 Forge 1.20.1 那一项（好友的客户端要装什么按 side 来：0.2.0 起两个依赖都是 server，clientSide 可改回 both 模拟老装法）。
 const CP_MANIFEST = {
-  ours: { id: "minedeck_companion", name: "MineDeck Companion", version: "0.1.0", file: "minedeck-companion-forge-1.20.1-0.1.0.jar", size: 44762, license: "MIT" },
+  ours: { id: "minedeck_companion", name: "MineDeck Companion", version: "0.2.0", file: "minedeck-companion-forge-1.20.1-0.2.0.jar", size: 117209, license: "MIT" },
   deps: [
     { id: "playerengine", name: "PlayerEngine", want: "1.20.1-1.4.0", range: "[1.20.1-1.4.0,1.20.1-1.5)", file: "playerengine-forge-1.20.1-1.4.0.jar", size: 4488694, license: "LGPL-3.0",
       page: "https://modrinth.com/mod/playerengine/version/wFlD9yTq" },
@@ -917,7 +917,7 @@ const CP_MANIFEST = {
 };
 const CP_DENY = ["minecraft:villager", "minecraft:wandering_trader", "minecraft:iron_golem", "minecraft:snow_golem", "minecraft:allay"];
 const CP_PACK = "机械动力整合包";
-function newCpState() { return { insts: {}, clientSide: "both", installs: [] }; }
+function newCpState() { return { insts: {}, clientSide: "server", installs: [] }; }
 function cpInst(state, name) {
   let c = state.cp.insts[name];
   if (!c) {
@@ -1026,7 +1026,7 @@ async function cpHandler(state, req, res, m, seg) {
   }
   return err(res, 404, "没有这个接口");
 }
-// cp：{ reset, clientSide: "server" 依赖改成只装服务端, inst: { 名称: { mods, settings, comps, events, restart, loaderWarn… } }, busy: 给第一个伙伴派个采集任务 }
+// cp：{ reset, clientSide: "both" 模拟老装法（依赖客户端也要装；默认 "server" 同 0.2.0 的清单）, inst: { 名称: { mods, settings, comps, events, restart, loaderWarn… } }, busy: 给第一个伙伴派个采集任务 }
 function cpMockState(state, b) {
   if (b.reset) state.cp = newCpState();
   if (b.clientSide) state.cp.clientSide = b.clientSide;

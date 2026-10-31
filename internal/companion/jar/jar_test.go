@@ -137,6 +137,67 @@ func TestJarContents(t *testing.T) {
 	}
 }
 
+// 客户端会加载的类（入口、只有外形的实体、渲染器、进服检查、PlayerEngine 实体类型的占位、mixin）一个都不引用
+// PlayerEngine 和 Architectury 的类：玩家的客户端只装伙伴模组本身时，这些类照样能加载。mixin 配置也接好了。
+func TestClientSafeClasses(t *testing.T) {
+	m, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientSide := regexp.MustCompile(`^minedeck/companion/(CompanionMod|CompanionEntity|Compat|JoinCheck(\$.*)?|PlaceholderEntity|client/.*|mixin/.*)\.class$`)
+	for _, j := range m.Jars {
+		b, err := j.Bytes()
+		if err != nil {
+			t.Fatal(err)
+		}
+		zr, err := zip.NewReader(bytes.NewReader(b), int64(len(b)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		checked := 0
+		files := map[string][]byte{}
+		for _, f := range zr.File {
+			rc, err := f.Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, _ := io.ReadAll(rc)
+			rc.Close()
+			files[f.Name] = data
+			if !clientSide.MatchString(f.Name) {
+				continue
+			}
+			checked++
+			for _, foreign := range []string{"com/player2/", "dev/architectury/", "minedeck/companion/ServerCompanion", "minedeck/companion/CompanionManager"} {
+				if bytes.Contains(data, []byte(foreign)) {
+					t.Errorf("%s 的 %s 引用了 %s（客户端没装 PlayerEngine 时会加载失败）", j.File, f.Name, foreign)
+				}
+			}
+		}
+		if checked < 8 {
+			t.Errorf("%s 只检查到 %d 个客户端会加载的类", j.File, checked)
+		}
+		if _, ok := files["minedeck_companion.mixins.json"]; !ok {
+			t.Errorf("%s 里缺 mixin 配置", j.File)
+		}
+		switch j.Loader {
+		case LoaderNeoForge:
+			if !strings.Contains(string(files["META-INF/neoforge.mods.toml"]), `config = "minedeck_companion.mixins.json"`) {
+				t.Errorf("%s 的 neoforge.mods.toml 没有登记 mixin 配置", j.File)
+			}
+		case LoaderForge:
+			if !strings.Contains(string(files["META-INF/MANIFEST.MF"]), "MixinConfigs: minedeck_companion.mixins.json") {
+				t.Errorf("%s 的 MANIFEST.MF 没有 MixinConfigs", j.File)
+			}
+		}
+		for _, d := range j.Dependencies {
+			if d.Side != SideServer {
+				t.Errorf("%s 的依赖 %s 应该只要求服务端装（side=server），现在是 %s", j.File, d.ModID, d.Side)
+			}
+		}
+	}
+}
+
 // 清单写错、文件对不上时 parse 报错，不会把坏的 jar 交出去。
 func TestParseRejects(t *testing.T) {
 	good := RawManifest()

@@ -1257,7 +1257,7 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
   const cpState = b => page.evaluate(x => fetch("/__mock/state", { method: "POST", body: JSON.stringify(x) }).then(r => r.json()).then(j => j.data), b);
   const cpPuts = since => reqs.slice(since).filter(x => x.m === "PUT" && decodeURIComponent(x.u).endsWith("/companion/settings")).map(x => JSON.parse(x.b || "{}"));
   const openCP = async () => { await page.goto(url("#/inst/" + encodeURIComponent(PACK) + "/companion")); await settle(900); };
-  const CP_INSTALLED = { minedeck_companion: { state: "ok", version: "0.1.0", files: [{ file: "minedeck-companion-forge-1.20.1-0.1.0.jar", version: "0.1.0", keep: true }] },
+  const CP_INSTALLED = { minedeck_companion: { state: "ok", version: "0.2.0", files: [{ file: "minedeck-companion-forge-1.20.1-0.2.0.jar", version: "0.2.0", keep: true }] },
     playerengine: { state: "ok", version: "1.20.1-1.4.0", files: [{ file: "playerengine-forge-1.20.1-1.4.0.jar", version: "1.20.1-1.4.0", keep: true }] } };
   const resetCP = () => cpState({ cp: { reset: true }, ai: { reset: true }, status: { [PACK]: "stopped" } });
 
@@ -1278,16 +1278,18 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
       const t0 = posts.length;
       await page.click("#cp-install-btn"); await settle(500);
       assert(postsTo(t0, "/companion/install").length === 1, "应发安装请求");
-      assert(await toastHas("已安装：minedeck-companion-forge-1.20.1-0.1.0.jar、playerengine-forge-1.20.1-1.4.0.jar"), "应提示装了什么");
+      assert(await toastHas("已安装：minedeck-companion-forge-1.20.1-0.2.0.jar、playerengine-forge-1.20.1-1.4.0.jar"), "应提示装了什么");
       assert((await page.textContent("#cp-install")).includes("三个都装好了") && !(await page.$("#cp-install-btn")), "装好以后不再给安装按钮");
-      // 好友的客户端：伙伴模组随 MineDeck 内置（打开 mods 目录发给好友），两个依赖附 Modrinth 链接
+      // 好友的客户端：0.2.0 起两个依赖只装服务端，好友只装伙伴模组（随 MineDeck 内置，打开 mods 目录发给好友）
       const cl = await page.$$eval("#cp-client [data-client]", rs => rs.map(r => r.dataset.client + ":" + r.querySelector(".tag").textContent));
-      assert(JSON.stringify(cl) === JSON.stringify(["minedeck_companion:要装", "playerengine:要装", "architectury:要装"]), "好友要装的：" + cl);
-      assert(await page.$("#cp-mods-dir") && await page.$('#cp-client a[href="https://modrinth.com/mod/architectury-api/version/1MKTLiiG"]'), "打开 mods 目录、下载页");
-      await cpState({ cp: { clientSide: "server" } });
+      assert(JSON.stringify(cl) === JSON.stringify(["minedeck_companion:要装", "playerengine:不用装", "architectury:不用装"]), "side 是 server 的依赖不用装：" + cl);
+      assert(await page.$("#cp-mods-dir"), "打开 mods 目录");
+      // 清单里依赖的 side 是 both 时（老装法），好友三个都要装，两个依赖附 Modrinth 链接
+      await cpState({ cp: { clientSide: "both" } });
       await openCP();
       const cl2 = await page.$$eval("#cp-client [data-client]", rs => rs.map(r => r.dataset.client + ":" + r.querySelector(".tag").textContent));
-      assert(JSON.stringify(cl2) === JSON.stringify(["minedeck_companion:要装", "playerengine:不用装", "architectury:不用装"]), "side 是 server 的依赖不用装：" + cl2);
+      assert(JSON.stringify(cl2) === JSON.stringify(["minedeck_companion:要装", "playerengine:要装", "architectury:要装"]), "好友要装的：" + cl2);
+      assert(await page.$('#cp-client a[href="https://modrinth.com/mod/architectury-api/version/1MKTLiiG"]'), "依赖附下载页");
       // 运行中要替换旧版本：先停服
       await cpState({ cp: { reset: true, inst: { [PACK]: { mods: { minedeck_companion: { state: "outdated", version: "0.0.9", files: [{ file: "minedeck-companion-forge-1.20.1-0.0.9.jar", version: "0.0.9", keep: false }] } } } } }, status: { [PACK]: "running" } });
       await openCP();

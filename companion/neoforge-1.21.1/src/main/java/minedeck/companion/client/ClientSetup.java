@@ -1,20 +1,24 @@
 package minedeck.companion.client;
 
 import minedeck.companion.CompanionMod;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
+import net.minecraft.client.renderer.entity.NoopRenderer;
+import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 
-/** 客户端才加载：给伙伴实体注册渲染器。专用服务器上 FML 不会加载这个类。 */
-@EventBusSubscriber(modid = CompanionMod.MODID, bus = EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
+/** 客户端才加载（CompanionMod 按 FMLEnvironment.dist 判断）：给伙伴实体注册渲染器。专用服务器上不加载这个类。 */
 public final class ClientSetup {
 
     private ClientSetup() {
     }
 
-    @SubscribeEvent
-    public static void onRegisterRenderers(EntityRenderersEvent.RegisterRenderers event) {
+    public static void init(IEventBus modBus) {
+        modBus.addListener(ClientSetup::onRegisterRenderers);
+    }
+
+    private static void onRegisterRenderers(EntityRenderersEvent.RegisterRenderers event) {
         event.registerEntityRenderer(CompanionMod.COMPANION.get(), CompanionRenderer::new);
+        if (CompanionMod.placeholderType() != null) {
+            event.registerEntityRenderer(CompanionMod.placeholderType(), NoopRenderer::new);
+        }
     }
 }

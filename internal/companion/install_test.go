@@ -267,7 +267,10 @@ func TestInstallTestedFirst(t *testing.T) {
 		v.Install.Ready || v.Install.Download != int64(len(e.jars.pe)+len(e.jars.arch)) || v.Install.Java != 21 {
 		t.Fatalf("装之前：%+v", v.Install)
 	}
-	if len(v.Client) != 3 || !v.Client[0].Required || v.Client[0].Page != "" || !v.Client[1].Required ||
+	// 依赖的客户端要不要装看清单的 side（0.2.0 起两个依赖都只装服务端，好友只装伙伴模组）
+	pe, arch := depOf(e.man, "playerengine"), depOf(e.man, "architectury")
+	if len(v.Client) != 3 || !v.Client[0].Required || v.Client[0].Page != "" ||
+		v.Client[1].Required != (pe.Side == companionjar.SideBoth) || v.Client[2].Required != (arch.Side == companionjar.SideBoth) ||
 		v.Client[1].Page != "https://modrinth.com/mod/playerengine/version/9cN9nlTk" || v.Client[2].Version != "13.0.11" {
 		t.Errorf("好友要装的：%+v", v.Client)
 	}
