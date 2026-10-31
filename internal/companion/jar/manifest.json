@@ -3,7 +3,7 @@
   "mod": {
     "id": "minedeck_companion",
     "name": "MineDeck Companion",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "license": "MIT",
     "protocol": 1
   },
@@ -15,9 +15,9 @@
       "testedLoader": "21.1.265",
       "java": 21,
       "file": "minedeck-companion-neoforge-1.21.1.jar",
-      "installName": "minedeck-companion-neoforge-1.21.1-0.2.0.jar",
-      "size": 118405,
-      "sha256": "567b9c7ee8e51d0539e59721426087b99e9566bd9b4bd8b06f6b48a5a1a3d434",
+      "installName": "minedeck-companion-neoforge-1.21.1-0.2.1.jar",
+      "size": 122991,
+      "sha256": "6ea730abf3616d0853ca07eedd6d3681c741e06f185d4bc5c9595cd5fe8c690e",
       "client": "required",
       "dependencies": [
         {
@@ -79,9 +79,9 @@
       "testedLoader": "47.4.28",
       "java": 17,
       "file": "minedeck-companion-forge-1.20.1.jar",
-      "installName": "minedeck-companion-forge-1.20.1-0.2.0.jar",
-      "size": 117209,
-      "sha256": "47bd5166325f413f7ddf1857e51b95fa1268b3dc583775ecd7a3ed2ad92146ce",
+      "installName": "minedeck-companion-forge-1.20.1-0.2.1.jar",
+      "size": 121733,
+      "sha256": "06449d8836017a8c2d4ee22a2bcb19b034c08db9877d029bf4f48c0d25014474",
       "client": "required",
       "dependencies": [
         {

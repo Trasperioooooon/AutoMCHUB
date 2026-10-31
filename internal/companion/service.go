@@ -783,7 +783,7 @@ func (s *Service) Act(ctx context.Context, name, op string, args map[string]any,
 // giveItem give 的物品名：原版物品去掉 minecraft: 命名空间。模组 0.2.0 把 item 原样拼进 PlayerEngine 的 `give <玩家> <物品> <数量>`，
 // PlayerEngine 1.4.0 的 GiveCommand 只认目录里的名字和 ItemHelper.stripItemName（原版物品是不带命名空间的 oak_log，模组物品是
 // create:brass_ingot）：写成 minecraft:oak_log 时它找不到这个物品，什么都没给就结束了，模组还报 done（given 为 0，两半联调时实测）。
-// collect（PlayerEngine 的 get）两种写法都认，不用改；模组物品照写命名空间。
+// collect（PlayerEngine 的 get）两种写法都认，不用改；模组物品照写命名空间。模组 0.2.1 起自己也去掉，这里留着给连着 0.2.0 的服。
 func giveItem(item string) string {
 	if rest, ok := strings.CutPrefix(strings.TrimSpace(item), "minecraft:"); ok && rest != "" {
 		return rest

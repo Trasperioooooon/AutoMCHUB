@@ -1,6 +1,6 @@
 # MineDeck 伙伴模组
 
-> 第 7 阶段第二步（正式版，模组 0.2.0）。「协议 v1」是 MineDeck 和模组之间的约定，MineDeck 一侧照它实现；内置进 MineDeck 的 jar 在 `internal/companion/jar/`（见「打进 MineDeck 的 jar」）。
+> 第 7 阶段第二步（正式版，模组 0.2.1；0.2.1 改了什么见「验证记录」末尾）。「协议 v1」是 MineDeck 和模组之间的约定，MineDeck 一侧照它实现；内置进 MineDeck 的 jar 在 `internal/companion/jar/`（见「打进 MineDeck 的 jar」）。
 
 PlayerEngine 做"身体"（寻路、挖掘采集、背包、跟随、打怪），MineDeck 做"大脑"：所有 LLM 调用都在 MineDeck 里，模组只认 MineDeck 通过本机连接发来的固定动作。模组不登录 Player2、不调用 `api.player2.game`，只把 PlayerEngine 1.4.x 当库用，不改它。
 
@@ -39,8 +39,8 @@ PlayerEngine 没有稳定的 API：1.1.x 到 1.4.0 之间 `Character` 的构造�
 ## 构建
 
 ```bash
-cd companion/neoforge-1.21.1 && ./gradlew build     # → build/libs/minedeck-companion-neoforge-1.21.1-0.2.0.jar
-cd companion/forge-1.20.1    && ./gradlew build     # → build/libs/minedeck-companion-forge-1.20.1-0.2.0.jar（已转成 SRG 名）
+cd companion/neoforge-1.21.1 && ./gradlew build     # → build/libs/minedeck-companion-neoforge-1.21.1-0.2.1.jar
+cd companion/forge-1.20.1    && ./gradlew build     # → build/libs/minedeck-companion-forge-1.20.1-0.2.1.jar（已转成 SRG 名）
 ./gradlew --stop                                    # 用完关掉 Gradle 守护进程
 ```
 
@@ -129,6 +129,7 @@ MineDeck 和伙伴模组之间的本机连接，第 7 阶段第二步定稿。Mi
 - 模组在 `127.0.0.1:<port>` 上监听，只接受本机连接；端口和令牌写在配置文件里（见下面「配置文件」）。服务器开好（`Done (…)` 之后）才打开端口，关服时先发 END 再关。
 - **同一时间只接受一个控制连接**，第二个连接收到 ERROR 3。
 - 连接断开、重连都不影响游戏里的伙伴和它们正在做的任务。断开期间的事件丢掉不补：重连后从 WELCOME 拿最新的状态，每个伙伴的 `lastResult` 是它最近一次结束的任务的结果。WELCOME 的 `session` 变了，说明服务器重启过（任务编号从 1 重新数）。
+- WELCOME 和事件之间没有缝（0.2.1 起）：WELCOME 在服务器主线程上生成，连接也在同一个主线程任务里变成「就绪」，而事件都在主线程上发。所以握手时发生的每件事（接管、刷出、任务结束……）要么已经体现在 WELCOME 里，要么作为事件跟在 WELCOME 后面发过来。0.2.0 在网络线程上读每 tick 末尾才刷新的快照，握手落在一个 tick 中间时，这个 tick 里的变化两头都没有，要等下一个 STATUS。
 - MineDeck 每次连接前都重读配置文件。刚改完配置时，模组最多要 2.2 秒才读到新内容，这期间连不上、ERROR 1、ERROR 5 都算「模组还没读到」，隔 0.5 秒重试，最多 10 秒。刚断开就重连遇到 ERROR 3 时同样隔 0.5 秒重试。
 
 ### 帧
@@ -183,7 +184,7 @@ MineDeck                                              模组
 | 2 | 协议版本不支持 |
 | 3 | 已经有一个控制连接 |
 | 4 | 协议错误（第一帧不是 HELLO、HELLO 格式不对、帧太长） |
-| 5 | 控制端口正在关闭（配置里刚改成 `enabled=false`，或者服务器正在关闭） |
+| 5 | 控制端口正在关闭（配置里刚改成 `enabled=false`，或者服务器正在关闭）；服务器主线程 4 秒都没空生成 WELCOME（服务器卡住了，0.2.1 起），同样回 5，稍后再连 |
 
 **WELCOME 的 JSON**：
 
@@ -191,7 +192,7 @@ MineDeck                                              模组
 {
   "protocol": 1,
   "session": "3f9c0a1b",
-  "mod": "0.2.0",
+  "mod": "0.2.1",
   "loader": "neoforge",
   "minecraft": "1.21.1",
   "playerEngine": "1.21.1-1.4.0",
@@ -237,7 +238,7 @@ RESPONSE：成功 `{"id": 1, "ok": true, ...}`；失败 `{"id": 1, "ok": false, 
 | `follow` | `player`（默认主人）、`timeout`（默认 0，一直跟） | 跟着某人走，直到被停下、被新任务替换、超时或那人下线 | `task` |
 | `goto` | `x`*、`z`*、`y`（不写就只管水平位置）、`timeout` | 走到某处，只在伙伴所在的维度里走 | `task` |
 | `attack` | `mob`*（生物种类 ID，如 `minecraft:zombie`，原版可省 `minecraft:`）、`count`（1–64）、`duration`（1–1800 秒）、`radius`（1–48 格，默认 16）、`timeout` | 打某种生物：只打以开始时伙伴的位置为中心、`radius` 以内的；打够 `count` 只、或者打满 `duration` 秒就结束（两个都写时先到的算；都不写就是 `count` = 1）。只给 `duration` 时是「守在这里，来一只打一只」 | `task` |
-| `give` | `item`*、`count`（默认 1）、`player`（默认主人）、`fetch`（默认 `false`：背包里不够就回 `not_enough`；`true`：不够就先去弄）、`timeout` | 把背包里的东西交给玩家：走到旁边朝他扔过去，扔出去的东西只有这个玩家捡得起来 | `task` |
+| `give` | `item`*（原版物品写不写 `minecraft:` 都行）、`count`（默认 1）、`player`（默认主人）、`fetch`（默认 `false`：背包里不够就回 `not_enough`；`true`：不够就先去弄）、`timeout` | 把背包里的东西交给玩家：走到旁边朝他扔过去，扔出去的东西只有这个玩家捡得起来。交出的少于 `count` 时结果是 `incomplete`，一个都没交出去是 `failed`，`detail` 写原因（玩家不在伙伴所在的维度、背包里不够也没弄到……） | `task` |
 | `stop` | `companion` 或 `"all": true` | 停下当前任务（连 PlayerEngine 的闲置动作一起停） | `stopped`（被停下的任务编号数组） |
 | `say` | `text`*（去掉 `§` 格式码和控制字符后 1–256 个字）、`to`（玩家名：只发给他一个人） | 以伙伴的名字在聊天栏说一句话 | — |
 
@@ -282,9 +283,9 @@ EVENT 的 JSON 都有 `event`（事件名），和伙伴有关的都有 `compani
 | `event` | 什么时候 | 其他字段 |
 |---|---|---|
 | `spawned` | `spawn` 刷出了伙伴 | `info`（伙伴对象） |
-| `adopted` | 存档里的伙伴被加载、接管了（服务器重启后；一般在 MineDeck 连上之前就接管完了，那时只体现在 WELCOME 里） | `info` |
+| `adopted` | 存档里的伙伴被加载、接管了（服务器重启后；一般在 MineDeck 连上之前就接管完了，那时只体现在 WELCOME 里；正好在握手时接管的，要么在 WELCOME 里、要么紧跟着收到这个事件，见「连接」） | `info` |
 | `task_started` | 任务开始 | `task` |
-| `task_finished` | 任务结束 | `task`（任务对象，不是编号）、`result`、`detail`（中文说明，可能没有）、`seconds`（用时）、`pos`（结束时伙伴的位置）；`collect` 还有 `have`（背包里共有几个）、`gained`（这次多了几个）、`want`；`attack` 还有 `killed`、`want`（只给 `duration` 时是 `null`）；`give` 还有 `given`（背包里少了几个）、`have` |
+| `task_finished` | 任务结束 | `task`（任务对象，不是编号）、`result`、`detail`（中文说明，可能没有）、`seconds`（用时）、`pos`（结束时伙伴的位置）；`collect` 还有 `have`（背包里共有几个）、`gained`（这次多了几个）、`want`；`attack` 还有 `killed`、`want`（只给 `duration` 时是 `null`）；`give` 还有 `given`（扔给玩家的个数）、`have`（背包里还剩几个）、`want`（0.2.1 起） |
 | `stuck` | 伙伴卡住了：任务进行中 30 秒几乎没动（`follow` 时离玩家 6 格以内不算，`attack` 时范围里没有目标不算），或者反复想拆、想放禁挖区域里的方块。因为禁挖区域改走不拆不放的路以后卡住的，`reason` 也是 `nodig` | `task`（这里是任务**编号**，没有任务时为 `null`）、`reason`（`no_progress` / `nodig`）、`detail`、`pos`。同一个伙伴同一种原因，动起来之前只报一次 |
 | `died` | 伙伴死了（背包里的东西掉在原地） | `uuid`、`name`、`cause`（死亡信息）、`pos`；随后还有一个 `removed` |
 | `removed` | 伙伴没了 | `uuid`、`name`、`reason`：`despawn`（MineDeck 移除的）、`died`、`discarded`（被命令或别的模组清掉了）、`lost`（重启后存档里找不到了） |
@@ -295,8 +296,8 @@ EVENT 的 JSON 都有 `event`（事件名），和伙伴有关的都有 `compani
 | `result` | 意思 |
 |---|---|
 | `done` | 做完了 |
-| `incomplete` | 结束了但没做够：`collect` 多出来的少于 `want`，`attack` 打到的少于 `count`（范围里 15 秒没有目标就算结束） |
-| `failed` | 失败：PlayerEngine 报错、找不到路、`follow` 的玩家下线了、伙伴换了维度 |
+| `incomplete` | 结束了但没做够：`collect` 多出来的少于 `want`，`attack` 打到的少于 `count`（范围里 15 秒没有目标就算结束），`give` 交出的少于 `count`（0.2.1 起；0.2.0 报的是 `done`） |
+| `failed` | 失败：PlayerEngine 报错、找不到路、`follow` 的玩家下线了、伙伴换了维度、`give` 一个都没交出去（0.2.1 起；0.2.0 报的是 `done`） |
 | `cancelled` | 被停下：`stop`、伙伴被移除或死了 |
 | `superseded` | 被新任务顶掉了 |
 | `timeout` | 超过了 `timeout` |
@@ -382,14 +383,16 @@ nodig.farm=minecraft:overworld 200,60,200 260,90,260
 - **关服**：PlayerEngine 的方块扫描跑在普通（非守护）线程上，扫描时要主线程替它取区块。关服时正好在扫的话，主线程不再处理这些请求，那个线程就一直等，Java 进程退不出去（实测 Forge 1.20.1 遇到过）。所以开始关服时先让每个伙伴的扫描停下（`BlockScanner.reset()`），同时替它们处理排着的区块请求，等扫描线程都结束（最多 5 秒）。
 - **进服检查**（`JoinCheck`）：本模组注册一个可选的网络通道 `minedeck_companion:hello`，客户端装了本模组就有。NeoForge：配置阶段的一个配置任务检查这个通道（原版客户端和装了 NeoForge 的客户端都走这里），mixin 把它插到注册表同步之前。Forge：登录阶段核对客户端的模组清单时检查（mixin 进 `HandshakeHandler`）；原版客户端不走这一步，进入游戏时（`PlayerLoggedInEvent`）再查。通道版本固定为 `1`：客户端部分只有实体外形，不同版本的伙伴模组之间互相兼容，不按模组版本卡人。
 - **配置热重读**（`Housekeeper`）：每 2 秒读一次配置文件，和上次应用的内容逐字节比较（见协议「配置文件」）。端口、令牌、开关的变化交给控制端口；关服时先停定时检查再关端口，不会刚关上又被它打开。
-- **线程**：网络线程只收发；指令用 `server.execute` 交给服务器主线程执行；STATUS 和 WELCOME 读主线程每秒更新一次的快照。PlayerEngine 的回调都排到下一个 tick 再处理，不在它的调用栈里改任务。
+- **线程**：网络线程只收发；指令用 `server.execute` 交给服务器主线程执行；STATUS 读主线程每秒更新一次的快照；WELCOME 在主线程上生成（先刷新快照），连接在同一个主线程任务里置成就绪，网络线程最多等 4 秒（见「连接」）。PlayerEngine 的回调都排到下一个 tick 再处理，不在它的调用栈里改任务。
+- **空闲时在水里浮上来**（`IdleFloat`，0.2.1 起）：PlayerEngine 1.4 防淹水靠 `WorldSurvivalChain`（在水里、气不够、没在寻路时按住跳），可它只在 `TaskRunner` 启用时才跑；`PlayerEngineController.stop()`（MineDeck 的 `stop`、换任务都会调）停用了 `TaskRunner`，刚建好的控制器在第一次接到任务之前也没启用，这时站在水底的伙伴没人管，淹死（读源码确认，两半联调时实测）。所以 `TaskRunner` 没在跑、也没在寻路时，伙伴照原版生物的 `FloatGoal`：水深过了 `getFluidJumpThreshold`、或者在岩浆里，就按住跳，浮上来以后松开（它正按着跳时不松）。只动「跳」，不走、不转身，不改 PlayerEngine 的状态，`stop` 的意思不变。
+- **`give` 的物品名和结果**（0.2.1 起）：交给 PlayerEngine 时原版物品去掉 `minecraft:`（PlayerEngine 1.4 的 `GiveCommand` 只认目录名和 `ItemHelper.stripItemName`：原版物品是 `oak_log`，模组物品是 `create:brass_ingot`；写成 `minecraft:oak_log` 时它找不到这个物品，什么都不给就结束了）。交出去的个数在伙伴扔东西时数（`spawnAtLocation`），不看背包少了几个（`fetch` 时要先弄来再扔，背包里是先多后少）；PlayerEngine 结束了、交出的却少于 `count`，报 `incomplete` 或 `failed`。
 
 ## 已知问题和限制
 
 - PlayerEngine 只认 1.4.x（见「依赖」）。
 - 服务器重启后伙伴被接管，但正在做的任务不恢复，`lastResult` 也清空。WELCOME 的 `session` 变了，MineDeck 就知道之前的任务都没了。
-- 伙伴只在 `attack` 任务里出手，做别的任务时被怪打不还手（怪物一般不主动打伙伴，它不是玩家）。伙伴会淹水、摔伤、被烧，死了背包掉在原地，MineDeck 收到 `died` 后可以重新 `spawn`。
-- `give` 是走到玩家旁边把东西扔给他：玩家背包满了，东西就留在地上（只有他捡得起来，5 分钟后消失）；`given` 是伙伴背包里少了几个，不保证玩家已经捡到。
+- 伙伴只在 `attack` 任务里出手，做别的任务时被怪打不还手（怪物一般不主动打伙伴，它不是玩家）。伙伴会淹水（0.2.1 起空闲时会浮上来，干活时由 PlayerEngine 管）、摔伤、被烧，死了背包掉在原地，MineDeck 收到 `died` 后可以重新 `spawn`。
+- `give` 是走到玩家旁边把东西扔给他：玩家背包满了，东西就留在地上（只有他捡得起来，5 分钟后消失）；`given` 是伙伴扔出去的个数，不保证玩家已经捡到。PlayerEngine 交东西实际上是「全给」或者「一个都不给」（够数了才去扔），所以 `incomplete` 很少见。
 - 伙伴不捡玩家扔的东西，也不捡伙伴扔的东西（免得跟着玩家时把他扔给朋友的东西抢走）。所以玩家没法靠往地上扔东西给伙伴送材料。
 - 禁挖区域只管伙伴，不管玩家；「只走路」时伙伴可能绕很远，绕不过去就报 `stuck`。
 - 管理员在开服之后用 `/forceload` 加的区块，如果正好是伙伴用过的，伙伴走开后会被放开（开服时就有的不受影响）。
@@ -441,11 +444,24 @@ nodig.farm=minecraft:overworld 200,60,200 260,90,260
 
 测试中发现、已经改掉的问题：PlayerEngine 同一种指令互相替换时把旧任务的结束报到新任务头上（见「实现要点」的「换任务」）；物品名不认识时没有回 `rejected`；强制加载的区块重启后丢了（原版 `setChunkForced` 的保存标记问题）；Forge 1.20.1 关服时 PlayerEngine 的扫描线程让 Java 进程退不出去；`give` 扔下的东西被跟着玩家的伙伴捡走、落在玩家够不着的地方。
 
+### 0.2.1（2026-10-31）
+
+两半联调（`tools/companione2e`：MineDeck 侧的真代码对真的无头服务器，见那里的 README）发现的三个模组问题，在 0.2.1 里改掉。协议仍是 v1：只多了一个可选字段（`give` 的 `task_finished` 带 `want`），`result` 用的是已有的值；客户端会加载的类没改，进服检查的通道版本还是 `1`。
+
+|  | 0.2.0 | 0.2.1 |
+|---|---|---|
+| 重启后，MineDeck 握手正好碰上接管 | WELCOME 里没有伙伴，`adopted` 也发不出去，要等下一个 STATUS（是竞态：两半联调时两个加载器每次重启都碰上，联调程序对比 0.2.0 跑了三轮，碰上两轮） | WELCOME 在主线程上生成：要么在 WELCOME 里（「现有 1 个伙伴」），要么紧跟着收到 `adopted`，两种都实测到了 |
+| `give` 写 `minecraft:oak_log` | PlayerEngine 收到 `give Steve minecraft:oak_log 1`，21 毫秒就结束，什么都没给，报 `done`（`given` 0） | 交给 PlayerEngine 的是 `give Steve oak_log 1`，交出 1 个，玩家背包里多了 1 个 |
+| `give` 一个都没交出去 | 报 `done` | 报 `failed`，`detail`：接东西的人在下界时「Alex 不在伙伴所在的维度」；背包里没有、也弄不到（`fetch` 要基岩）时「原来一个都没有，也没弄到」 |
+| 停下来的伙伴站在 3 格深的水里 | 半分钟左右淹死 | 浮在水面上（离水底 2.5–2.7 格），65 秒血量不变、不离开水箱、没开始任务 |
+
+做法：容器里的无头 NeoForge 21.1.265、Forge 47.4.28，入库的 0.2.1 jar（sha256 `6ea730ab…`、`06449d88…`，`update-embedded.sh --check` 通过）；联调程序 NeoForge 55 项全部通过，Forge 53 项没有失败（1 项跳过：Modrinth 上没有 Architectury 别的范围内版本）；多了上面这几项：H12、H13、W1、X1b、T0。同一个联调程序换上 0.2.0 的 jar（`-mod-jar`）在 NeoForge 上对比：55 项失败 6 项，就是这几项和模组版本号（C3），T0 是竞态、碰上时才失败（见交接说明「伙伴模组 0.2.1」）。`incomplete` 没有实测到：PlayerEngine 交东西是「全给」或者「一个都不给」（够数了才去扔），只给了一部分的情况造不出来，MineDeck 那边的通知文字由单元测试覆盖。
+
 ## 真客户端自测
 
 容器里用开发环境的客户端试过「只装伙伴模组」（见「验证记录」）。下面这些要在 Windows 上用启动器装的正式客户端再试（服务端放 3 个 jar，用 testctl 发指令），每个加载器各试一遍：
 
-1. **客户端只装伙伴模组**（mods 里只有 `minedeck-companion-<加载器>-<MC 版本>-0.2.0.jar`，没有 PlayerEngine、Architectury API）：
+1. **客户端只装伙伴模组**（mods 里只有 `minedeck-companion-<加载器>-<MC 版本>-0.2.1.jar`，没有 PlayerEngine、Architectury API）：
    - 游戏能启动，不报缺依赖；`logs/latest.log` 里没有 `com.player2`、`dev.architectury` 相关的 `ClassNotFoundException` / `NoClassDefFoundError`。
    - 能进服（服务端日志没有「拒绝没装伙伴模组的客户端进服」）。
    - 刷出伙伴后：看得见、是玩家模型、头上有名字；`collect`、`goto`、`follow`、`attack` 时走路、挥手、手上的工具和武器都正常显示，不掉线。

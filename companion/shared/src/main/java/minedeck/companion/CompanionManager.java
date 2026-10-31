@@ -381,7 +381,14 @@ public final class CompanionManager implements ControlServer.Handler, Housekeepe
     }
 
     @Override
+    public void onMainThread(Runnable task) {
+        server.execute(task);
+    }
+
+    /** 在主线程上调用（ControlServer 握手时经 onMainThread 安排）：先刷新快照，读的是这一刻的伙伴和任务。 */
+    @Override
     public String welcomeJson(int version) {
+        refreshSnapshotIfDirty();
         JsonObject o = new JsonObject();
         o.addProperty("protocol", version);
         o.addProperty("session", session);
@@ -732,7 +739,7 @@ public final class CompanionManager implements ControlServer.Handler, Housekeepe
         args.addProperty("item", item);
         args.addProperty("count", count);
         args.addProperty("fetch", fetch);
-        TaskRun t = newTask(st, "give", args, timeout, "give " + player + " " + item + " " + count);
+        TaskRun t = newTask(st, "give", args, timeout, "give " + player + " " + Args.engineItemName(item) + " " + count);
         t.item = item;
         t.want = count;
         t.before = have;
@@ -956,8 +963,19 @@ public final class CompanionManager implements ControlServer.Handler, Housekeepe
             }
         } else if ("give".equals(t.op) && e != null) {
             int have = countItem(e, t.item);
-            ev.addProperty("given", Math.max(0, t.before - have));
+            ev.addProperty("given", t.thrown);
             ev.addProperty("have", have);
+            ev.addProperty("want", t.want);
+            // PlayerEngine 交不出去（玩家不在附近、物品弄不到……）也只是结束任务，不算失败：按实际扔出去的个数判断。
+            // detail 只写原因，个数在 given / want 里
+            if ("done".equals(result) && t.thrown < t.want) {
+                result = t.thrown == 0 ? "failed" : "incomplete";
+                String why = giveShortfall(e, t, have);
+                if (detail != null && !detail.isBlank()) {
+                    why = why == null ? "PlayerEngine：" + clip(detail.trim(), 120) : why + "（PlayerEngine：" + clip(detail.trim(), 120) + "）";
+                }
+                detail = why != null ? why : t.thrown == 0 ? "PlayerEngine 没把东西交出去" : "PlayerEngine 没把剩下的交出去";
+            }
         } else if ("attack".equals(t.op) && t.attack != null) {
             ev.addProperty("killed", t.attack.killed);
             ev.add("want", t.want > 0 ? new JsonPrimitive(t.want) : JsonNull.INSTANCE);
@@ -1573,19 +1591,65 @@ public final class CompanionManager implements ControlServer.Handler, Housekeepe
         inv.add(o);
     }
 
-    /** 背包里有多少个 item：先当物品 ID（不带命名空间时补 minecraft:），不是物品就当物品标签（log → #minecraft:logs）。 */
-    static int countItem(ServerCompanion e, String item) {
+    /** 伙伴扔出了一些东西（主线程，spawnAtLocation 里调用）：正在 give 这种物品时记下扔了几个。 */
+    static void noteThrown(ServerCompanion e, ItemStack stack) {
+        CompanionManager m = instance;
+        CompanionState st = m == null ? null : m.byUuid.get(e.getUUID());
+        TaskRun t = st == null ? null : st.task;
+        if (t == null || t.done || !"give".equals(t.op) || stack.isEmpty()) {
+            return;
+        }
+        Predicate<ItemStack> match = itemMatcher(t.item);
+        if (match != null && match.test(stack)) {
+            t.thrown += stack.getCount();
+        }
+    }
+
+    /**
+     * give 没交够时的原因（中文，进 detail，跟在「交出了 N 个（要 M 个），背包里还有 K 个」后面）；看不出来时为 null。
+     * have 是结束时背包里的个数。
+     */
+    private String giveShortfall(ServerCompanion e, TaskRun t, int have) {
+        ServerPlayer p = t.player == null ? null : server.getPlayerList().getPlayerByName(t.player);
+        if (p == null) {
+            return t.player + " 不在线";
+        }
+        if (p.level() != e.level()) {
+            return t.player + " 不在伙伴所在的维度";
+        }
+        if (t.before < t.want) { // 只有 fetch 才会走到这里（不 fetch 时不够直接回 not_enough）
+            int before = Math.max(t.before, 0);
+            int got = t.thrown + Math.max(have, 0) - before; // 这次弄到的：扔出去的 + 剩下的 - 原有的
+            String had = before == 0 ? "原来一个都没有" : "原来只有 " + before + " 个";
+            return got > 0 ? had + "，只弄到了 " + got + " 个" : had + (before == 0 ? "，也没弄到" : "，也没弄到更多");
+        }
+        return null;
+    }
+
+    private static String clip(String s, int max) {
+        return s.length() <= max ? s : s.substring(0, max) + "…";
+    }
+
+    /** 物品的匹配：先当物品 ID（不带命名空间时补 minecraft:），不是物品就当物品标签（log → #minecraft:logs）；写法不对时为 null。 */
+    static Predicate<ItemStack> itemMatcher(String item) {
         ResourceLocation rl = Compat.tryParse(Args.withNamespace(item));
         Optional<Item> it = rl == null ? Optional.<Item>empty() : BuiltInRegistries.ITEM.getOptional(rl);
-        Predicate<ItemStack> match;
         if (it.isPresent() && it.get() != Items.AIR) {
             Item target = it.get();
-            match = s -> s.is(target);
-        } else if (rl != null) {
+            return s -> s.is(target);
+        }
+        if (rl != null) {
             String path = rl.getPath().endsWith("s") ? rl.getPath() : rl.getPath() + "s";
             TagKey<Item> tag = TagKey.create(Registries.ITEM, Compat.rl(rl.getNamespace(), path));
-            match = s -> s.is(tag);
-        } else {
+            return s -> s.is(tag);
+        }
+        return null;
+    }
+
+    /** 背包里有多少个 item（写法见 {@link #itemMatcher}）；写法不对时为 -1。 */
+    static int countItem(ServerCompanion e, String item) {
+        Predicate<ItemStack> match = itemMatcher(item);
+        if (match == null) {
             return -1;
         }
         LivingEntityInventory li = e.getLivingInventory();
