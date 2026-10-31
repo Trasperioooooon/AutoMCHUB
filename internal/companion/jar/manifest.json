@@ -3,7 +3,7 @@
   "mod": {
     "id": "minedeck_companion",
     "name": "MineDeck Companion",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "license": "MIT",
     "protocol": 1
   },
@@ -15,16 +15,16 @@
       "testedLoader": "21.1.265",
       "java": 21,
       "file": "minedeck-companion-neoforge-1.21.1.jar",
-      "installName": "minedeck-companion-neoforge-1.21.1-0.1.0.jar",
-      "size": 44328,
-      "sha256": "897b729b8f5f091f830d4d667d813df17cd2524e8992b2958c61ee05ae6a7883",
+      "installName": "minedeck-companion-neoforge-1.21.1-0.2.0.jar",
+      "size": 118405,
+      "sha256": "567b9c7ee8e51d0539e59721426087b99e9566bd9b4bd8b06f6b48a5a1a3d434",
       "client": "required",
       "dependencies": [
         {
           "modId": "playerengine",
           "name": "PlayerEngine",
           "versionRange": "[1.21.1-1.4.0,1.21.1-1.5)",
-          "side": "both",
+          "side": "server",
           "license": "LGPL-3.0",
           "modrinth": {
             "projectId": "nUOXthgN",
@@ -49,7 +49,7 @@
           "modId": "architectury",
           "name": "Architectury API",
           "versionRange": "[13.0.8,)",
-          "side": "both",
+          "side": "server",
           "license": "LGPL-3.0",
           "modrinth": {
             "projectId": "lhGA9TYQ",
@@ -79,16 +79,16 @@
       "testedLoader": "47.4.28",
       "java": 17,
       "file": "minedeck-companion-forge-1.20.1.jar",
-      "installName": "minedeck-companion-forge-1.20.1-0.1.0.jar",
-      "size": 44762,
-      "sha256": "3b5c23fdd98df13c7af11058160a95662b2fac31c814fe070b9c39d946ca44b0",
+      "installName": "minedeck-companion-forge-1.20.1-0.2.0.jar",
+      "size": 117209,
+      "sha256": "47bd5166325f413f7ddf1857e51b95fa1268b3dc583775ecd7a3ed2ad92146ce",
       "client": "required",
       "dependencies": [
         {
           "modId": "playerengine",
           "name": "PlayerEngine",
           "versionRange": "[1.20.1-1.4.0,1.20.1-1.5)",
-          "side": "both",
+          "side": "server",
           "license": "LGPL-3.0",
           "modrinth": {
             "projectId": "nUOXthgN",
@@ -113,7 +113,7 @@
           "modId": "architectury",
           "name": "Architectury API",
           "versionRange": "[9.2.14,)",
-          "side": "both",
+          "side": "server",
           "license": "LGPL-3.0",
           "modrinth": {
             "projectId": "lhGA9TYQ",

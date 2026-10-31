@@ -41,8 +41,10 @@ neoForge {
     }
 }
 
-// 和 Forge 1.20.1 版共用的、只用 java.* 的代码（协议、控制端口、配置文件）
+// 和 Forge 1.20.1 版共用的代码：common 只用 java.*（协议、控制端口、配置文件），
+// shared 用到 Minecraft 和 PlayerEngine、两个版本写法相同的部分（指令、任务、禁挖区域、存档记录）
 sourceSets.main.java.srcDir '../common/src/main/java'
+sourceSets.main.java.srcDir '../shared/src/main/java'
 
 dependencies {
     compileOnly "maven.modrinth:playerengine:${playerengine_version}"

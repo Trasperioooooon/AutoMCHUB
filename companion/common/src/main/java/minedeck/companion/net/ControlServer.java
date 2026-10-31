@@ -13,16 +13,23 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
 
 /**
- * 在 127.0.0.1 上监听 MineDeck（或 testctl）的控制连接。同一时间只接受一个控制连接。
+ * 在 127.0.0.1 上监听 MineDeck（或 testctl）的控制连接，协议见 companion/README.md 的「协议 v1」。
+ * 同一时间只接受一个控制连接。
  *
- * <p>网络线程只负责收发和握手：收到的指令交给 {@link Handler}，由它切到服务器主线程去执行；
- * 发给对方的帧都放进这个连接自己的发送队列，由发送线程去写，别的线程（主线程、状态线程）从不卡在 socket 上。
+ * <p>网络线程只负责收发和握手：收到的指令交给 {@link Handler}，由它切到服务器主线程去执行。发给对方的帧都放进这个连接
+ * 自己的发送队列，由它的发送线程去写，别的线程（主线程、定时检查线程）从不卡在 socket 上；对方一直不读数据、一次写入
+ * 卡住超过 5 秒，就断开这个连接。
+ *
+ * <p>端口按配置开关（{@link #apply}），配置变了随时调。{@link #close} 之后这个对象就作废了：再调 {@link #apply}、
+ * {@link #tick} 什么都不做，不会在关服之后又把端口打开（定时检查刚读完配置、服务器就开始关了，两边会撞在一起）。
  */
 public final class ControlServer {
 
@@ -31,216 +38,484 @@ public final class ControlServer {
         void onRequest(String json, Connection conn);
 
         /** WELCOME 里的 JSON。网络线程上调用，要线程安全（读快照）。 */
-        String welcomeJson();
+        String welcomeJson(int version);
 
-        /** 每 2 秒一次的 STATUS。状态线程上调用，要线程安全（读快照）。 */
+        /** 每 2 秒一次的 STATUS。定时检查线程上调用，要线程安全（读快照）。 */
         String statusJson();
     }
 
     static final int HANDSHAKE_TIMEOUT_MS = 5000;
     /** 10 秒没收到任何帧就认为对方掉线（MineDeck 每 2 秒发一次 PING）。 */
     static final int IDLE_TIMEOUT_MS = 10000;
-    static final int OUTBOX_FRAMES = 256;
-    static final long STATUS_INTERVAL_MS = 2000L;
+    static final int MAX_SOCKETS = 4;
+    static final long BIND_RETRY_MS = 10_000L;
+    static final int OUTBOX_FRAMES = 1024;
+    /** 一次写入卡住（对方不读数据，socket 写满）超过这么久就断开。 */
+    static final long WRITE_STALL_MS = 5000L;
+    /** 主动结束连接时，最多等 END 发出去这么久，然后不管发没发出去都断开。 */
+    static final long END_FLUSH_MS = 500L;
+    /** 令牌不对时等这么久再回 ERROR，免得被拿来猜令牌。 */
+    static final long BAD_TOKEN_DELAY_MS = 300L;
 
     private final Handler handler;
     private final Logger log;
-    private final AtomicReference<Connection> active = new AtomicReference<>();
-    private volatile ServerSocket socket;
+
+    private ServerSocket server;
+    private int boundPort = -1;
+    private int wantedPort = -1;
+    private long nextBindAttempt;
+    private int bindFailures;
     private volatile String token = "";
-    private volatile boolean closed;
-    private Thread statusThread;
+    /** 端口开着、还在接受新的控制连接。 */
+    private volatile boolean accepting;
+    /** close() 过了：之后什么都不再打开。 */
+    private boolean closed;
+
+    private final AtomicReference<Connection> active = new AtomicReference<Connection>();
+    private final AtomicInteger open = new AtomicInteger();
+    private final AtomicInteger counter = new AtomicInteger();
 
     public ControlServer(Handler handler, Logger log) {
         this.handler = handler;
         this.log = log;
     }
 
-    public synchronized void start(CompanionConfig config) throws IOException {
-        token = config.token;
-        ServerSocket s = new ServerSocket();
-        try {
-            s.bind(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), config.port), 4);
-        } catch (IOException e) {
-            s.close();
-            throw e;
+    /** 按配置开关端口。开服时和配置文件变了时调用。 */
+    public synchronized void apply(CompanionConfig config) {
+        if (closed) {
+            return;
         }
-        socket = s;
-        Thread accept = new Thread(this::acceptLoop, "MineDeck-Companion-Accept");
-        accept.setDaemon(true);
-        accept.start();
-        statusThread = new Thread(this::statusLoop, "MineDeck-Companion-Status");
-        statusThread.setDaemon(true);
-        statusThread.start();
-        log.info("伙伴控制端口已打开：127.0.0.1:{}（只接受本机连接，同一时间只接受一个控制连接）", config.port);
+        token = config.token;
+        if (!config.enabled || config.portProblem != null) {
+            if (config.enabled) {
+                log.warn("伙伴配置有问题，控制端口不打开：{}", config.portProblem);
+            }
+            wantedPort = -1;
+            if (server != null) {
+                closeServer();
+                log.info("伙伴控制端口已关闭（{}）", config.enabled ? "配置有问题" : "配置里 enabled=false");
+            }
+            Connection c = active.get();
+            if (c != null) {
+                c.end("伙伴控制端口已在配置里关闭");
+            }
+            return;
+        }
+        wantedPort = config.port;
+        if (server != null && boundPort == config.port) {
+            return;
+        }
+        if (server != null) {
+            closeServer();
+            Connection c = active.get();
+            if (c != null) {
+                c.end("端口改了，请重新连接");
+            }
+        }
+        nextBindAttempt = 0;
+        bindFailures = 0;
+        tryBind();
+    }
+
+    /** 每 2 秒调用（定时检查线程）：端口被占用时重试，给控制连接发 STATUS（只是放进发送队列，不会卡住）。 */
+    public void tick() {
+        synchronized (this) {
+            if (closed) {
+                return;
+            }
+            if (server == null && wantedPort > 0 && System.currentTimeMillis() >= nextBindAttempt) {
+                tryBind();
+            }
+        }
+        Connection c = active.get();
+        if (c != null && c.ready) {
+            if (c.stalled()) {
+                return;
+            }
+            try {
+                c.send(Protocol.STATUS, Protocol.utf8(handler.statusJson()));
+            } catch (RuntimeException e) {
+                log.warn("生成 STATUS 失败：{}", e.toString());
+            }
+        }
     }
 
     public synchronized void close(String reason) {
         closed = true;
-        ServerSocket s = socket;
-        socket = null;
-        if (s != null) {
-            try {
-                s.close();
-            } catch (IOException ignored) {
-                // 已经关了
-            }
-        }
-        if (statusThread != null) {
-            statusThread.interrupt();
-        }
+        wantedPort = -1;
+        closeServer();
         Connection c = active.get();
         if (c != null) {
             c.end(reason);
         }
     }
 
-    /** 给当前的控制连接发一个事件；没有连接时丢掉（MineDeck 重连后用 status 拿最新状态）。 */
+    /** 给当前的控制连接发一个事件；没有连接时丢掉（MineDeck 重连后从 WELCOME 拿最新状态）。 */
     public void event(String json) {
         Connection c = active.get();
-        if (c != null) {
+        if (c != null && c.ready) {
             c.send(Protocol.EVENT, Protocol.utf8(json));
         }
     }
 
     public boolean connected() {
-        return active.get() != null;
+        Connection c = active.get();
+        return c != null && c.ready;
     }
 
-    private void acceptLoop() {
-        ServerSocket s = socket;
-        while (s != null && !s.isClosed()) {
-            Socket sock;
+    public synchronized int boundPort() {
+        return boundPort;
+    }
+
+    private void tryBind() {
+        int port = wantedPort;
+        try {
+            ServerSocket s = new ServerSocket();
             try {
-                sock = s.accept();
+                s.bind(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), MAX_SOCKETS);
             } catch (IOException e) {
-                if (!s.isClosed()) {
-                    log.error("接受连接时出错", e);
-                }
-                return;
+                s.close();
+                throw e;
             }
-            Thread t = new Thread(() -> serve(sock), "MineDeck-Companion-Conn");
+            server = s;
+            boundPort = port;
+            accepting = true;
+            Thread t = new Thread(new Acceptor(s), "MineDeck-Companion-Accept");
             t.setDaemon(true);
             t.start();
+            log.info("伙伴控制端口已打开：127.0.0.1:{}（只接受本机连接，同一时间只接受一个控制连接）{}", port,
+                    bindFailures > 0 ? "，之前失败了 " + bindFailures + " 次" : "");
+            bindFailures = 0;
+        } catch (IOException e) {
+            nextBindAttempt = System.currentTimeMillis() + BIND_RETRY_MS;
+            // 第一次失败就说，之后每 5 分钟提醒一次，免得刷屏
+            if (bindFailures++ % 30 == 0) {
+                log.warn("打不开伙伴控制端口 127.0.0.1:{}（{}），每 10 秒重试一次。端口可能被别的程序占用了，一直失败的话请换一个端口。",
+                        port, e.getMessage());
+            }
         }
     }
 
-    private void statusLoop() {
-        while (!closed) {
+    private void closeServer() {
+        accepting = false;
+        if (server != null) {
             try {
-                Thread.sleep(STATUS_INTERVAL_MS);
-            } catch (InterruptedException e) {
-                return;
+                server.close();
+            } catch (IOException ignored) {
+                // 已经关了
             }
-            Connection c = active.get();
-            if (c != null) {
+        }
+        server = null;
+        boundPort = -1;
+    }
+
+    private final class Acceptor implements Runnable {
+        private final ServerSocket socket;
+
+        Acceptor(ServerSocket socket) {
+            this.socket = socket;
+        }
+
+        @Override
+        public void run() {
+            while (!socket.isClosed()) {
+                Socket s;
                 try {
-                    c.send(Protocol.STATUS, Protocol.utf8(handler.statusJson()));
-                } catch (RuntimeException e) {
-                    log.warn("生成 STATUS 失败：{}", e.toString());
+                    s = socket.accept();
+                } catch (IOException e) {
+                    if (!socket.isClosed()) {
+                        log.error("接受连接时出错", e);
+                    }
+                    return;
+                }
+                if (open.incrementAndGet() > MAX_SOCKETS) {
+                    open.decrementAndGet();
+                    closeQuietly(s);
+                    continue;
+                }
+                Connection c = new Connection(s, counter.incrementAndGet());
+                Thread t = new Thread(c, "MineDeck-Companion-Conn-" + c.id);
+                t.setDaemon(true);
+                t.start();
+            }
+        }
+    }
+
+    /** 一个 TCP 连接：先握手，成为控制连接后不停地读帧；发出去的帧由它自己的发送线程写。 */
+    public final class Connection implements Runnable {
+        final Socket socket;
+        final int id;
+        private OutputStream out;
+        private String client = "";
+        /** 握手完成、是当前的控制连接。 */
+        volatile boolean ready;
+        private volatile boolean controlling;
+        private volatile String endReason;
+        private boolean warnedUnknown;
+
+        /** 发送队列；CLOSE 表示发完前面的帧就断开。 */
+        private final BlockingQueue<byte[]> outbox = new ArrayBlockingQueue<byte[]>(OUTBOX_FRAMES + 2);
+        private final CountDownLatch flushed = new CountDownLatch(1);
+        private volatile Thread sender;
+        /** 发送线程正在写的那一帧是什么时候开始写的（System.nanoTime）；没在写时为 0。 */
+        private volatile long writingSince;
+
+        Connection(Socket socket, int id) {
+            this.socket = socket;
+            this.id = id;
+        }
+
+        public String client() {
+            return client;
+        }
+
+        /** 回一条 RESPONSE（主线程上调用，只放进发送队列）。 */
+        public void response(String json) {
+            send(Protocol.RESPONSE, Protocol.utf8(json));
+        }
+
+        @Override
+        public void run() {
+            String reason = "对方关闭了连接";
+            try {
+                socket.setSoTimeout(HANDSHAKE_TIMEOUT_MS);
+                socket.setTcpNoDelay(true);
+                InputStream in = new BufferedInputStream(socket.getInputStream());
+                out = socket.getOutputStream();
+                startSender();
+                if (!handshake(in)) {
+                    return;
+                }
+                socket.setSoTimeout(IDLE_TIMEOUT_MS);
+                reason = readLoop(in);
+            } catch (SocketTimeoutException e) {
+                if (controlling) {
+                    reason = "心跳超时（" + IDLE_TIMEOUT_MS / 1000 + " 秒没收到任何帧）";
+                    end(reason);
+                } else {
+                    reason = "握手超时";
+                }
+            } catch (Protocol.ProtocolException e) {
+                reason = "协议错误：" + e.getMessage();
+                sendLast(Protocol.ERROR, Protocol.error(Protocol.E_PROTOCOL, e.getMessage()));
+            } catch (IOException e) {
+                reason = endReason != null ? endReason : "连接断开（" + e.getMessage() + "）";
+            } catch (Throwable t) {
+                reason = "内部错误：" + t;
+                log.error("处理控制连接时出错", t);
+            } finally {
+                closeQuietly(socket);
+                Thread t = sender;
+                if (t != null) {
+                    t.interrupt();
+                }
+                open.decrementAndGet();
+                if (controlling) {
+                    ready = false;
+                    // 先让出"当前连接"的位置，MineDeck 马上重连时不会被当成"已经有一个控制连接"
+                    active.compareAndSet(this, null);
+                    log.info("控制连接已断开：{}，原因：{}", displayName(), reason);
                 }
             }
         }
-    }
 
-    private void serve(Socket sock) {
-        Connection conn = null;
-        try {
-            sock.setTcpNoDelay(true);
-            sock.setSoTimeout(HANDSHAKE_TIMEOUT_MS);
-            InputStream in = new BufferedInputStream(sock.getInputStream());
-            OutputStream out = sock.getOutputStream();
+        private boolean handshake(InputStream in) throws IOException {
             Protocol.Frame hello = Protocol.read(in);
             if (hello == null) {
-                return;
+                return false;
             }
-            if (hello.type != Protocol.HELLO || hello.payload.length < 3) {
-                reject(out, Protocol.E_PROTOCOL, "第一帧必须是 HELLO");
-                return;
+            if (hello.type != Protocol.HELLO) {
+                sendLast(Protocol.ERROR, Protocol.error(Protocol.E_PROTOCOL, "第一帧必须是 HELLO"));
+                return false;
             }
-            int version = Protocol.u16(hello.payload, 0);
-            if (version != Protocol.VERSION) {
-                reject(out, Protocol.E_VERSION, "不支持协议版本 " + version + "，模组是第 " + Protocol.VERSION + " 版");
-                return;
+            byte[] p = hello.payload;
+            if (p.length < 3 || p.length < 3 + (p[2] & 0xFF)) {
+                sendLast(Protocol.ERROR, Protocol.error(Protocol.E_PROTOCOL, "HELLO 的格式不对"));
+                return false;
             }
-            int tokenLen = hello.payload[2] & 0xFF;
-            if (3 + tokenLen > hello.payload.length) {
-                reject(out, Protocol.E_PROTOCOL, "HELLO 的令牌长度不对");
-                return;
+            int version = Protocol.u16(p, 0);
+            int tokenLength = p[2] & 0xFF;
+            byte[] presented = new byte[tokenLength];
+            System.arraycopy(p, 3, presented, 0, tokenLength);
+            client = new String(p, 3 + tokenLength, p.length - 3 - tokenLength, StandardCharsets.UTF_8).trim();
+            int use = Math.min(version, Protocol.VERSION);
+            if (use < Protocol.MIN_VERSION) {
+                sendLast(Protocol.ERROR, Protocol.error(Protocol.E_VERSION, "协议版本不支持：收到 " + version + "，模组支持 "
+                        + Protocol.MIN_VERSION + "–" + Protocol.VERSION));
+                log.warn("拒绝控制连接 #{}（{}）：协议版本 {} 不支持", id, displayName(), version);
+                return false;
             }
-            byte[] got = new byte[tokenLen];
-            System.arraycopy(hello.payload, 3, got, 0, tokenLen);
-            if (!MessageDigest.isEqual(got, token.getBytes(StandardCharsets.UTF_8))) {
-                reject(out, Protocol.E_BAD_TOKEN, "令牌不对");
-                return;
+            String expected = token;
+            if (expected.isEmpty() || !MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), presented)) {
+                sleepQuietly(BAD_TOKEN_DELAY_MS);
+                sendLast(Protocol.ERROR, Protocol.error(Protocol.E_BAD_TOKEN, "令牌不对"));
+                log.warn("拒绝控制连接 #{}（{}）：令牌不对", id, displayName());
+                return false;
             }
-            String client = new String(hello.payload, 3 + tokenLen, hello.payload.length - 3 - tokenLen,
-                    StandardCharsets.UTF_8);
-            conn = new Connection(sock, out, client);
-            if (!active.compareAndSet(null, conn)) {
-                reject(out, Protocol.E_BUSY, "已经有一个控制连接");
-                return;
+            if (!accepting) {
+                sendLast(Protocol.ERROR, Protocol.error(Protocol.E_DISABLED, "伙伴控制端口正在关闭"));
+                return false;
             }
-            conn.startWriter();
-            conn.send(Protocol.WELCOME, Protocol.versionAnd(handler.welcomeJson()));
-            log.info("控制连接已建立（{}，{}）", client.isEmpty() ? "未署名" : client, sock.getRemoteSocketAddress());
-            sock.setSoTimeout(IDLE_TIMEOUT_MS);
-            while (!conn.closed) {
-                Protocol.Frame f;
-                try {
-                    f = Protocol.read(in);
-                } catch (SocketTimeoutException e) {
-                    log.warn("控制连接 {} 秒没有消息，断开", IDLE_TIMEOUT_MS / 1000);
-                    conn.end("心跳超时");
-                    break;
-                }
+            if (!active.compareAndSet(null, this)) {
+                Connection other = active.get();
+                sendLast(Protocol.ERROR, Protocol.error(Protocol.E_BUSY, "已经有一个控制连接："
+                        + (other != null ? other.displayName() : "未知") + "，请等它结束"));
+                log.warn("拒绝控制连接 #{}（{}）：已经有一个控制连接", id, displayName());
+                return false;
+            }
+            controlling = true;
+            String welcome;
+            try {
+                welcome = handler.welcomeJson(use);
+            } catch (RuntimeException e) {
+                log.error("生成 WELCOME 失败", e);
+                welcome = "{}";
+            }
+            if (!outbox.offer(Protocol.encode(Protocol.WELCOME, Protocol.versionAnd(use, welcome)))) {
+                throw new IOException("发送队列满了");
+            }
+            ready = true;
+            log.info("控制连接已建立：{}（#{}，来自 {}，协议版本 {}）", displayName(), id, socket.getRemoteSocketAddress(), use);
+            return true;
+        }
+
+        private String readLoop(InputStream in) throws IOException {
+            while (true) {
+                Protocol.Frame f = Protocol.read(in);
                 if (f == null) {
-                    break;
+                    return endReason != null ? endReason : "对方关闭了连接";
                 }
                 switch (f.type) {
                     case Protocol.PING:
-                        conn.send(Protocol.PONG, f.payload);
+                        pong(f.payload);
                         break;
                     case Protocol.REQUEST:
-                        handler.onRequest(f.text(), conn);
+                        handler.onRequest(f.text(), this);
                         break;
                     case Protocol.END:
-                        log.info("MineDeck 结束了控制连接：{}", f.text());
-                        conn.closed = true;
-                        break;
+                        String why = f.text().trim();
+                        return "MineDeck 结束了连接" + (why.isEmpty() ? "" : "（" + why + "）");
                     default:
-                        conn.send(Protocol.ERROR, Protocol.error(Protocol.E_PROTOCOL, "不认识的帧类型 " + f.type));
-                        conn.end("协议错误");
+                        if (!warnedUnknown) {
+                            warnedUnknown = true;
+                            log.warn("控制连接发来了不认识的帧类型 0x{}，已忽略", Integer.toHexString(f.type));
+                        }
                         break;
                 }
             }
-        } catch (Protocol.ProtocolException e) {
-            log.warn("控制连接协议错误：{}", e.getMessage());
-        } catch (IOException e) {
-            if (conn == null || !conn.closed) {
-                log.info("控制连接断开：{}", e.toString());
+        }
+
+        /** 放进发送队列；排不进（对方很久没读数据）就断开。可以在任意线程上调用，不会卡住。 */
+        void send(int type, byte[] payload) {
+            if (!ready && type != Protocol.ERROR) {
+                return;
             }
-        } finally {
-            if (conn != null) {
-                // 先让出"当前连接"的位置，MineDeck 马上重连时不会被当成"已经有一个控制连接"
-                if (active.compareAndSet(conn, null)) {
-                    log.info("控制连接已关闭");
+            byte[] frame;
+            try {
+                frame = Protocol.encode(type, payload);
+            } catch (IllegalArgumentException e) {
+                log.warn("要发的帧太长（{} 字节），丢掉", payload.length);
+                return;
+            }
+            if (!outbox.offer(frame)) {
+                if (endReason == null) {
+                    endReason = "发送队列满了（对方一直不读数据），断开";
+                    log.warn("控制连接 {} 的发送队列满了（对方一直不读数据？），断开", displayName());
                 }
-                conn.finish();
-            } else {
-                closeQuietly(sock);
+                closeQuietly(socket);
             }
+        }
+
+        /** 主动结束这个连接（关服、关掉端口、改端口、心跳超时）：END 排进发送队列，最多等 0.5 秒让它发出去，然后断开。 */
+        void end(String reason) {
+            if (endReason == null) {
+                endReason = reason;
+            }
+            sendLast(Protocol.END, Protocol.utf8(reason));
+        }
+
+        /** 发最后一帧然后断开：排进发送队列（排不进就算了），最多等 0.5 秒让它发出去。 */
+        private void sendLast(int type, byte[] payload) {
+            ready = false;
+            outbox.offer(Protocol.encode(type, payload));
+            outbox.offer(CLOSE);
+            try {
+                flushed.await(END_FLUSH_MS, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            closeQuietly(socket);
+        }
+
+        /** 回 PONG：只会阻塞这个连接自己的线程；5 秒都排不进队列说明对方一直不读数据。 */
+        private void pong(byte[] payload) throws IOException {
+            boolean queued;
+            try {
+                queued = outbox.offer(Protocol.encode(Protocol.PONG, payload), WRITE_STALL_MS, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("连接线程被中断");
+            }
+            if (!queued) {
+                if (endReason == null) {
+                    endReason = "对方 " + WRITE_STALL_MS / 1000 + " 秒没读数据，断开";
+                }
+                closeQuietly(socket);
+                throw new IOException(endReason);
+            }
+        }
+
+        /** 发送线程是不是卡在一次写入上超过 5 秒了（对方不读数据）；是的话断开。 */
+        boolean stalled() {
+            long since = writingSince;
+            if (since != 0 && System.nanoTime() - since > TimeUnit.MILLISECONDS.toNanos(WRITE_STALL_MS)) {
+                if (endReason == null) {
+                    endReason = "对方 " + WRITE_STALL_MS / 1000 + " 秒没读数据，断开";
+                    log.warn("控制连接 {}：{}", displayName(), endReason);
+                }
+                closeQuietly(socket);
+                return true;
+            }
+            return false;
+        }
+
+        private void startSender() {
+            Thread t = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        while (true) {
+                            byte[] f = outbox.take();
+                            if (f == CLOSE) {
+                                break;
+                            }
+                            writingSince = System.nanoTime() | 1; // 0 留给「没在写」
+                            out.write(f);
+                            out.flush();
+                            writingSince = 0;
+                        }
+                    } catch (IOException e) {
+                        // 连接断了；读的那一边也会发现
+                    } catch (InterruptedException e) {
+                        // 连接结束
+                    } finally {
+                        flushed.countDown();
+                        closeQuietly(socket);
+                    }
+                }
+            }, "MineDeck-Companion-Send-" + id);
+            t.setDaemon(true);
+            sender = t;
+            t.start();
+        }
+
+        String displayName() {
+            return client.isEmpty() ? "未署名的客户端" : "「" + client + "」";
         }
     }
 
-    private void reject(OutputStream out, int code, String message) {
-        log.warn("拒绝控制连接：{}", message);
-        try {
-            Protocol.write(out, Protocol.ERROR, Protocol.error(code, message));
-        } catch (IOException ignored) {
-            // 对方已经断开
-        }
-    }
+    /** 发送队列里的「发完就断开」标记（按引用比较）。 */
+    private static final byte[] CLOSE = new byte[0];
 
     static void closeQuietly(Socket s) {
         try {
@@ -250,93 +525,11 @@ public final class ControlServer {
         }
     }
 
-    /** 一个控制连接。{@link #send} 只往发送队列里放，由发送线程去写。 */
-    public final class Connection {
-        private final Socket sock;
-        private final OutputStream out;
-        private final String client;
-        private final BlockingQueue<Protocol.Frame> outbox = new ArrayBlockingQueue<>(OUTBOX_FRAMES);
-        volatile boolean closed;
-
-        Connection(Socket sock, OutputStream out, String client) {
-            this.sock = sock;
-            this.out = out;
-            this.client = client;
-        }
-
-        public String client() {
-            return client;
-        }
-
-        public void response(String json) {
-            send(Protocol.RESPONSE, Protocol.utf8(json));
-        }
-
-        private Thread writer;
-
-        void startWriter() {
-            writer = new Thread(this::writeLoop, "MineDeck-Companion-Send");
-            writer.setDaemon(true);
-            writer.start();
-        }
-
-        /** 读线程退出时调用：最多等 0.5 秒把队列里剩下的帧（比如 END）发出去，再关 socket。 */
-        void finish() {
-            closed = true;
-            if (writer != null && writer != Thread.currentThread()) {
-                try {
-                    writer.join(500);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-            shutdown();
-        }
-
-        void send(int type, byte[] payload) {
-            if (closed) {
-                return;
-            }
-            if (payload.length > Protocol.MAX_PAYLOAD) {
-                log.warn("要发的帧太长（{} 字节），丢掉", payload.length);
-                return;
-            }
-            if (!outbox.offer(new Protocol.Frame(type, payload))) {
-                log.warn("发送队列满了（对方不读数据？），断开控制连接");
-                shutdown();
-            }
-        }
-
-        void end(String reason) {
-            send(Protocol.END, Protocol.utf8(reason == null ? "" : reason));
-            closed = true;
-        }
-
-        private void writeLoop() {
-            try {
-                while (true) {
-                    Protocol.Frame f = outbox.poll(100, TimeUnit.MILLISECONDS);
-                    if (f == null) {
-                        if (closed) {
-                            break;
-                        }
-                        continue;
-                    }
-                    Protocol.write(out, f.type, f.payload);
-                    if (f.type == Protocol.END || f.type == Protocol.ERROR) {
-                        break;
-                    }
-                }
-            } catch (InterruptedException | IOException e) {
-                // 连接断了
-            } finally {
-                shutdown();
-            }
-        }
-
-        void shutdown() {
-            closed = true;
-            closeQuietly(sock);
+    private static void sleepQuietly(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 }
