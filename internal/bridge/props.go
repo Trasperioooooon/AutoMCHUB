@@ -21,6 +21,9 @@ type Props struct {
 	bom   bool
 }
 
+// NewProps 一份空的 .properties；crlf 为 true 时用 Windows 换行（用记事本打开也正常）。
+func NewProps(crlf bool) *Props { return &Props{crlf: crlf} }
+
 // ParseProps 解析 .properties 的内容。
 func ParseProps(data []byte) *Props {
 	p := &Props{}
@@ -228,6 +231,32 @@ func (p *Props) Set(key, value string) bool {
 		p.lines = append(p.lines[:e.first:e.first], append(repl, p.lines[e.last+1:]...)...)
 	}
 	return true
+}
+
+// Keys 全部键，按第一次出现的顺序，重复的只算一个。
+func (p *Props) Keys() []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, e := range p.entries() {
+		if !seen[e.key] {
+			seen[e.key] = true
+			out = append(out, e.key)
+		}
+	}
+	return out
+}
+
+// Delete 删掉一个键（出现几次都删，续行一起删），注释和别的行原样保留。返回有没有删。
+func (p *Props) Delete(key string) bool {
+	es := p.entries()
+	found := false
+	for i := len(es) - 1; i >= 0; i-- {
+		if e := es[i]; e.key == key {
+			p.lines = append(p.lines[:e.first:e.first], p.lines[e.last+1:]...)
+			found = true
+		}
+	}
+	return found
 }
 
 func (p *Props) count(key string) int {

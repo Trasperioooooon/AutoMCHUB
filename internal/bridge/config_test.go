@@ -39,6 +39,17 @@ func TestPropsReadWrite(t *testing.T) {
 	if v, _ := again.Get("added"); v != " lead\\x" {
 		t.Errorf("转义读回：%q", v)
 	}
+	// 列出键、删掉键（续行一起删，注释和别的行不动）
+	if keys := strings.Join(again.Keys(), ","); keys != "voice_host,key with space,multi,empty,uni,port,added" {
+		t.Errorf("Keys：%s", keys)
+	}
+	r := ParseProps([]byte("# c\nz=1\nlong=a\\\n  b\nz=2\nkeep=x\n"))
+	if !r.Delete("z") || !r.Delete("long") || r.Delete("nope") {
+		t.Error("Delete 的返回值不对")
+	}
+	if string(r.Bytes()) != "# c\nkeep=x\n" {
+		t.Errorf("删掉以后：%q", r.Bytes())
+	}
 	// 空文件、只有 LF 的文件
 	q := ParseProps(nil)
 	q.Set("a", "1")
