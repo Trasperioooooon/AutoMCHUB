@@ -188,6 +188,7 @@ type record struct {
 	outcome              ops.Outcome
 	text                 string // 处理完交给外部 AI 的说法（执行结果已脱敏、截断）
 	done                 time.Time
+	seq                  uint64 // 第几个提出的：列表按它排先后（Windows 上前后脚提出的两个 created 常常一样，见 Client.seq）
 }
 
 func (s *Service) track(p *ops.Proposal) {
@@ -198,7 +199,8 @@ func (s *Service) track(p *ops.Proposal) {
 			delete(s.props, id)
 		}
 	}
-	s.props[p.ID] = &record{id: p.ID, op: p.Op, title: p.Title, actor: p.Caller.Actor, level: p.Level, created: p.Created, expires: p.Expires}
+	s.seq++
+	s.props[p.ID] = &record{id: p.ID, op: p.Op, title: p.Title, actor: p.Caller.Actor, level: p.Level, created: p.Created, expires: p.Expires, seq: s.seq}
 	s.mu.Unlock()
 	s.publish()
 	// 过期时再通知一次界面（操作层不会为过期发通知）：卡片按时消失
@@ -322,7 +324,7 @@ func (s *Service) listText() string {
 	if len(recs) == 0 {
 		return "最近一小时没有经 MCP 提出的提案。"
 	}
-	sort.Slice(recs, func(i, j int) bool { return recs[i].created.After(recs[j].created) })
+	sort.Slice(recs, func(i, j int) bool { return recs[i].seq > recs[j].seq })
 	if len(recs) > 20 {
 		recs = recs[:20]
 	}

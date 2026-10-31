@@ -101,7 +101,7 @@ type Service struct {
 	sum      []byte // 令牌的 SHA-256：内存里不留明文；nil 表示没有可用的令牌
 	broken   bool   // 存着的令牌解不开（换了电脑或 Windows 用户）
 	clients  []*Client
-	seq      uint64 // 客户端来访的序号（Client.seq）
+	seq      uint64 // 递增的序号：客户端来访（Client.seq）和提出提案（record.seq）共用
 	sessions map[string]*session
 	props    map[string]*record // MCP 提出的提案（处理结果留一个小时，给 proposal_status 查）
 	changed  chan struct{}      // 提案有变化时关闭、再换一个新的（proposal_status 的 wait 等它）
