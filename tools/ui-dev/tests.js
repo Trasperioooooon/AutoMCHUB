@@ -1359,6 +1359,10 @@ const assert = (c, msg) => { if (!c) throw new Error(msg); };
       await openCP();
       assert((await page.textContent("#cp-link")).includes("等服务器开好") && await page.$eval("#cp-spawn", b => b.disabled), "服务器没开时不能刷出");
       assert((await page.textContent("#cp-gate")).includes("游戏内 AI"), "游戏内 AI 没开时提醒");
+      // 关服时模组先发 END 断开，MineDeck 不再重连（两半联调）：连接是 waiting，说明「正在关闭」，不说「还在启动」
+      await cpState({ status: { [PACK]: "stopping" } });
+      await openCP();
+      assert((await page.textContent("#cp-link")).includes("服务器正在关闭"), "关服时：" + await page.textContent("#cp-link"));
       await cpState({ status: { [PACK]: "running" } });
       await openCP();
       assert((await page.textContent("#cp-link")).includes("已连上") && (await page.textContent("#cp-list")).includes("还没有伙伴"), "连上以后：" + await page.textContent("#cp-link"));

@@ -259,6 +259,16 @@ func (m *FakeMod) SendEnd(reason string) {
 
 // Finish 让一个任务结束：发 task_finished（extra 里是 have、gained、want、detail……），伙伴回到空闲，记下 lastResult。
 func (m *FakeMod) Finish(taskID int64, result string, extra map[string]any) error {
+	return m.finish(taskID, result, extra, true)
+}
+
+// FinishLost 同 Finish，但 task_finished 丢了：只改伙伴的状态和 lastResult（之后的 STATUS、WELCOME 里看得到）。
+// 真模组的 WELCOME 读的是每 tick 末尾才刷新的快照，握手正好落在任务结束的那个 tick 里时就是这样（两半联调时实测到过同样的接管事件）。
+func (m *FakeMod) FinishLost(taskID int64, result string, extra map[string]any) error {
+	return m.finish(taskID, result, extra, false)
+}
+
+func (m *FakeMod) finish(taskID int64, result string, extra map[string]any, send bool) error {
 	m.mu.Lock()
 	t := m.tasks[taskID]
 	if t == nil {
@@ -280,6 +290,9 @@ func (m *FakeMod) Finish(taskID int64, result string, extra map[string]any) erro
 		c["task"], c["state"], c["lastResult"] = nil, companion.StateIdle, lr
 	}
 	m.mu.Unlock()
+	if !send {
+		return nil
+	}
 	return m.SendEvent(ev)
 }
 

@@ -581,13 +581,19 @@ func withJVMFlags(args, flags []string) []string {
 	return out
 }
 
+// consoleUTF8 让服务器的控制台输出（MineDeck 从管道里读）一律是 UTF-8。Java 17 及以前 System.out 跟着 file.encoding 走；
+// Java 18 起 file.encoding 本来就是 UTF-8，System.out 却按 stdout.encoding，没设时用系统编码（中文 Windows 上是 GBK，
+// 英文 Windows 上是 cp1252：中文全变成「?」）。GBK 的输出有时恰好也是合法的 UTF-8（比如「@小木 停」），MineDeck 按 UTF-8
+// 解出来就是乱码，游戏内 AI 认不出聊天里的伙伴名字。旧版 Java 不认 stdout.encoding，原样忽略。
+var consoleUTF8 = []string{"-Dfile.encoding=UTF-8", "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8"}
+
 // launchArgs 构造 JVM 启动参数（进程托管与 run.bat 共用同一套逻辑）。
 func launchArgs(i *Instance) []string {
 	args := []string{
 		fmt.Sprintf("-Xms%dM", i.XmsMB),
 		fmt.Sprintf("-Xmx%dM", i.XmxMB),
-		"-Dfile.encoding=UTF-8",
 	}
+	args = append(args, consoleUTF8...)
 	args = append(args, i.ExtraJVM...)
 	if rest, ok := strings.CutPrefix(i.LaunchTarget, "args:"); ok {
 		args = append(args, "@"+filepath.FromSlash(rest), "nogui")
