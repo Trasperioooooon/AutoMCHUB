@@ -135,8 +135,35 @@ var (
 	coreJarRe   = regexp.MustCompile(`(?i)^(forge|neoforge|fmlloader|fmlcore|javafmllanguage|lowcodelanguage|mclanguage|server|minecraft|loader|securejarhandler|bootstraplauncher|modlauncher|mixin|sponge-mixin)[-.]`)
 )
 
+// mixinMissRe mixin 找不到目标类、跳过了这个 mixin：「@Mixin target <类> was not found <配置>.json:<mixin>」。
+var mixinMissRe = regexp.MustCompile(`@Mixin target (\S+) was not found (\S+\.json):`)
+
+// harmlessMixinTarget 唯一的例外：PlayerEngine（AI 伙伴的「身体」）的 mixin playerengine.mixins.json 里有一个只给客户端用的
+// （ClientBlockBreakMixin，目标是 net.minecraft.client.multiplayer.MultiPlayerGameMode），在专用服务器上加载器会先打一行
+// 「Attempted to load class … for invalid dist DEDICATED_SERVER」的 ERROR、mixin 再打一行带同样原文的 WARN，
+// 随后说明目标没找到、跳过了，服务器照常启动（companion/README.md「已知问题」，NeoForge 21.1.265、Forge 47.4.28 实测）。
+// 只放过这种组合：类在 net/minecraft/client/ 下，而且紧跟着 5 行以内就是 playerengine.mixins.json 对同一个类的「was not found」。
+// 别的模组、别的写法（比如带堆栈的加载失败）照常算客户端模组放进了服务端。
+func harmlessMixinTarget(c *ruleCtx, i int, cls string) bool {
+	if !strings.HasPrefix(cls, "net/minecraft/client/") {
+		return false
+	}
+	dotted := strings.ReplaceAll(cls, "/", ".")
+	for j := i + 1; j < len(c.ls) && j <= i+5; j++ {
+		if m := mixinMissRe.FindStringSubmatch(c.ls[j].text); m != nil && m[1] == dotted && m[2] == "playerengine.mixins.json" {
+			return true
+		}
+	}
+	return false
+}
+
 func ruleClientOnly(c *ruleCtx) *Finding {
-	idx := c.find(distRe)
+	var idx []int
+	for _, i := range c.find(distRe) {
+		if !harmlessMixinTarget(c, i, distRe.FindStringSubmatch(c.ls[i].text)[1]) {
+			idx = append(idx, i)
+		}
+	}
 	if len(idx) == 0 {
 		return nil
 	}

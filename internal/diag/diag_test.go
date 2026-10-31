@@ -297,3 +297,42 @@ func TestLineLevel(t *testing.T) {
 		}
 	}
 }
+
+// PlayerEngine（AI 伙伴的身体）在专用服务器上启动时打的那一行 dist 报错不算「客户端模组放进了服务端」：例外只认
+// net/minecraft/client/ 下的类、紧跟着 playerengine.mixins.json 对同一个类的「was not found」。真正的客户端模组照样认出来，
+// 和 PlayerEngine 那几行同时出现时，结论里也只有那个客户端模组。
+func TestPlayerEngineDistException(t *testing.T) {
+	f := find(Analyze(input(t, "testdata/positive/client-only@neoforge-1.21.1-playerengine.log")), "client-only")
+	if f == nil || !slices.Equal(f.Files, []string{"journeymap-neoforge-1.21.1-6.0.0-beta.33.jar"}) || !slices.Equal(f.Mods, []string{"journeymap"}) ||
+		strings.Contains(strings.Join(f.Evidence, "\n"), "MultiPlayerGameMode") || !strings.Contains(f.Summary, "net.minecraft.client.KeyMapping") {
+		t.Fatalf("同时有 PlayerEngine 的那几行和真正的客户端模组：%+v", f)
+	}
+	head := "[MineDeck] 启动: java -Xmx6144M @libraries/net/neoforged/neoforge/21.1.265/win_args.txt nogui\n"
+	dist := "[11:51:05.506] [main/ERROR] [common.asm.RuntimeDistCleaner/DISTXFORM]: Attempted to load class net/minecraft/client/multiplayer/MultiPlayerGameMode for invalid dist DEDICATED_SERVER\n"
+	warn := "[11:51:05.523] [main/WARN] [mixin/]: Error loading class: net/minecraft/client/multiplayer/MultiPlayerGameMode (java.lang.RuntimeException: Attempted to load class net/minecraft/client/multiplayer/MultiPlayerGameMode for invalid dist DEDICATED_SERVER)\n"
+	miss := func(class, cfg string) string {
+		return "[11:51:05.524] [main/WARN] [mixin/]: @Mixin target " + class + " was not found " + cfg + ":ClientBlockBreakMixin from mod playerengine\n"
+	}
+	run := func(log string) []string {
+		return rulesOf(Analyze(Input{Lines: strings.Split(strings.TrimRight(head+log, "\n"), "\n"), Core: "neoforge"}))
+	}
+	cases := []struct {
+		name string
+		log  string
+		want []string
+	}{
+		{"PlayerEngine 原样的三行", dist + warn + miss("net.minecraft.client.multiplayer.MultiPlayerGameMode", "playerengine.mixins.json"), nil},
+		{"中间隔了几行也认", dist + "[11:51:05.510] [main/INFO] [mixin/]: x\n" + warn + miss("net.minecraft.client.multiplayer.MultiPlayerGameMode", "playerengine.mixins.json"), nil},
+		{"没有 was not found 那一行", dist + warn, []string{"client-only"}},
+		{"别的模组的 mixin", dist + warn + miss("net.minecraft.client.multiplayer.MultiPlayerGameMode", "xaerominimap.mixins.json"), []string{"client-only"}},
+		{"was not found 说的是别的类", dist + warn + miss("net.minecraft.client.gui.screens.Screen", "playerengine.mixins.json"), []string{"client-only"}},
+		{"隔得太远", dist + strings.Repeat("[11:51:05.510] [main/INFO] [mixin/]: x\n", 6) + miss("net.minecraft.client.multiplayer.MultiPlayerGameMode", "playerengine.mixins.json"), []string{"client-only"}},
+		{"不是 net/minecraft/client 下的类", "[11:51:05.506] [main/ERROR] [common.asm.RuntimeDistCleaner/DISTXFORM]: Attempted to load class com/example/ClientOnly for invalid dist DEDICATED_SERVER\n" +
+			miss("com.example.ClientOnly", "playerengine.mixins.json"), []string{"client-only"}},
+	}
+	for _, c := range cases {
+		if got := run(c.log); !slices.Equal(got, c.want) {
+			t.Errorf("%s：认出 %v，应为 %v", c.name, got, c.want)
+		}
+	}
+}
