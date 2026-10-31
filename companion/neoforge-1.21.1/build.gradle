@@ -1,0 +1,74 @@
+plugins {
+    id 'java'
+    id 'net.neoforged.moddev' version '2.0.148'
+}
+
+version = mod_version
+group = 'minedeck'
+base {
+    archivesName = 'minedeck-companion-neoforge-1.21.1'
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
+}
+
+repositories {
+    // PlayerEngine、Architectury API 都从 Modrinth 的 Maven 取，只用于编译
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = 'Modrinth'
+                url = 'https://api.modrinth.com/maven'
+            }
+        }
+        filter {
+            includeGroup 'maven.modrinth'
+        }
+    }
+}
+
+neoForge {
+    enable {
+        version = neoforge_version
+        // 不反编译 Minecraft：只编译，省时间也省内存
+        disableRecompilation = true
+    }
+    mods {
+        minedeck_companion {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+// 和 Forge 1.20.1 版共用的、只用 java.* 的代码（协议、控制端口、配置文件）
+sourceSets.main.java.srcDir '../common/src/main/java'
+
+dependencies {
+    compileOnly "maven.modrinth:playerengine:${playerengine_version}"
+    compileOnly "maven.modrinth:architectury-api:${architectury_version}"
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 21
+}
+
+processResources {
+    def props = [version: mod_version]
+    inputs.properties props
+    filesMatching('META-INF/neoforge.mods.toml') {
+        expand props
+    }
+}
+
+tasks.withType(AbstractArchiveTask).configureEach {
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
+jar {
+    from(rootProject.file('../LICENSE-NOTICE.md')) {
+        into 'META-INF'
+    }
+}
