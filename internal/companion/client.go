@@ -190,6 +190,12 @@ func (c *Client) Nudge() {
 
 // Stop 停止：连着的话先给模组发 END（带上原因）再断开；等后台的协程都退出后返回。可以重复调用。
 func (c *Client) Stop(reason string) {
+	c.halt(reason)
+	<-c.done
+}
+
+// halt 同 Stop，但不等后台的协程退出：可以在回调（OnDown）里调用，这次断开以后就不再重连。
+func (c *Client) halt(reason string) {
 	c.once.Do(func() {
 		c.mu.Lock()
 		c.reason = reason
@@ -201,7 +207,6 @@ func (c *Client) Stop(reason string) {
 			conn.Close()
 		}
 	})
-	<-c.done
 }
 
 func (c *Client) stopping() bool {

@@ -332,7 +332,7 @@ func (s *Service) runLink(name, dir string, l *link) {
 		OnWelcome: func(w Welcome) { s.onWelcome(name, w) },
 		OnEvent:   func(e Event) { s.onEvent(name, e) },
 		OnStatus:  func(st Status) { s.onStatus(name, st) },
-		OnDown:    func(err error) { s.onDown(name, err) },
+		OnDown:    func(err error) { s.onDown(name, l, err) },
 		Logf:      func(f string, a ...any) { s.logf("[%s] "+f, append([]any{name}, a...)...) },
 	}
 	if s.d.clientOpts != nil {
@@ -351,6 +351,21 @@ func (s *Service) runLink(name, dir string, l *link) {
 		}
 		<-l.stop
 	}
+}
+
+// dropLink 只断开 l 这一个连接（期间已经换成了新的连接就不动），不清这次开服的状态。
+func (s *Service) dropLink(name string, l *link, reason string) {
+	s.mu.Lock()
+	r := s.rooms[name]
+	if r == nil || l == nil || r.link != l {
+		s.mu.Unlock()
+		return
+	}
+	r.link = nil
+	s.mu.Unlock()
+	l.reason = reason
+	close(l.stop)
+	<-l.done
 }
 
 // drop 断开实例的连接（给模组发 END，带上原因）；cleared 为 true 时连这次开服的状态（伙伴、任务、谁发起的）一起清掉。
@@ -405,18 +420,31 @@ func (s *Service) onWelcome(name string, w Welcome) {
 			Text: fmt.Sprintf("连上了伙伴模组 %s（PlayerEngine %s），现有 %d 个伙伴", w.Mod, w.PlayerEngine, len(w.Companions))})
 	}
 	// 断开期间的事件不补（README「连接」）：有人发起的任务要是在这期间结束了，从伙伴的 lastResult 里认出来，照样通知
-	for _, c := range w.Companions {
+	s.settleLocked(name, r, w.Companions, "（断开期间结束的）")
+	s.mu.Unlock()
+}
+
+// settleLocked 伙伴对象的 lastResult 是有人发起、还没通知过的任务：照样通知（WELCOME 里是断开期间结束的；STATUS 里是
+// 事件丢了的：模组的 WELCOME 读的是每 tick 末尾才刷新的快照，握手正好落在任务结束的那个 tick 里时，task_finished 发在
+// 连接就绪之前被丢掉，WELCOME 里也还没有这次的 lastResult，要等下一个 STATUS 才看得到）。调用方持有 s.mu。
+func (s *Service) settleLocked(name string, r *room, list []Companion, note string) {
+	for _, c := range list {
 		if c.LastResult == nil || c.LastResult.Task == nil {
 			continue
 		}
-		if o, ok := r.origins[c.LastResult.Task.ID]; ok {
-			delete(r.origins, c.LastResult.Task.ID)
-			e := resultEvent(c.ID, *c.LastResult)
-			r.addEvent(EventView{Event: EvTaskFinished, Companion: c.ID, Name: c.Name, Level: "info", Text: "「" + c.Name + "」" + ResultText(e) + "（断开期间结束的）"})
-			s.finishLocked(name, c.Name, o, e)
+		o, ok := r.origins[c.LastResult.Task.ID]
+		if !ok {
+			continue
 		}
+		delete(r.origins, c.LastResult.Task.ID)
+		e := resultEvent(c.ID, *c.LastResult)
+		ev := EventView{Event: EvTaskFinished, Companion: c.ID, Name: c.Name, Level: "info", Text: "「" + c.Name + "」" + ResultText(e) + note}
+		if k := KnownResult(e.Result); k == ResultFailed || k == ResultTimeout || k == ResultIncomplete {
+			ev.Level = "warn"
+		}
+		r.addEvent(ev)
+		s.finishLocked(name, c.Name, o, e)
 	}
-	s.mu.Unlock()
 }
 
 // resultEvent 把伙伴对象的 lastResult 还原成 task_finished 事件。
@@ -425,12 +453,32 @@ func resultEvent(companion int, r Result) Event {
 		Have: r.Have, Gained: r.Gained, Want: r.Want, Killed: r.Killed, Given: r.Given}
 }
 
-func (s *Service) onDown(name string, err error) {
+// onDown 连接断了。服务器正在关（或者已经关了）时这是正常的：模组关服时先发 END「服务器正在关闭」再关端口
+// （README「连接」），这时不报「断开了、会自动重连」，也不再重连，等下次开服（instance.start）再连。
+func (s *Service) onDown(name string, l *link, err error) {
+	closing, why := false, ""
+	if info, e := s.d.Instances.Info(name); e == nil && (info.Status == "stopping" || info.Status == "stopped") {
+		closing, why = true, map[string]string{"stopping": "服务器正在关闭", "stopped": "服务器已经停了"}[info.Status]
+	}
 	s.mu.Lock()
 	r := s.roomLocked(name)
 	r.down = err.Error()
-	r.addEvent(EventView{Event: "disconnected", Level: "warn", Text: "和伙伴模组的连接断开了：" + err.Error() + "（伙伴和任务还在游戏里，会自动重连）"})
+	var c *Client
+	if l != nil {
+		c = l.c
+	}
+	if closing {
+		r.addEvent(EventView{Event: "disconnected", Level: "info", Text: why + "，和伙伴模组的连接断开了（伙伴留在存档里，下次开服自动接管）"})
+	} else {
+		r.addEvent(EventView{Event: "disconnected", Level: "warn", Text: "和伙伴模组的连接断开了：" + err.Error() + "（伙伴和任务还在游戏里，会自动重连）"})
+	}
 	s.mu.Unlock()
+	if closing {
+		if c != nil {
+			c.halt(why) // 在客户端自己的协程里：只叫它别再重连，不等它退出
+		}
+		go s.dropLink(name, l, why)
+	}
 }
 
 func (s *Service) onStatus(name string, st Status) {
@@ -441,6 +489,7 @@ func (s *Service) onStatus(name string, st Status) {
 		next[c.ID] = c
 	}
 	r.comps = next
+	s.settleLocked(name, r, st.Companions, "")
 	s.mu.Unlock()
 }
 
@@ -691,6 +740,9 @@ func (s *Service) Act(ctx context.Context, name, op string, args map[string]any,
 			sent[k] = v
 		}
 	}
+	if item, ok := sent["item"].(string); ok && op == "give" {
+		sent["item"] = giveItem(item)
+	}
 	var target *Companion
 	if all, _ := sent["all"].(bool); !all || op != "stop" {
 		delete(sent, "all")
@@ -726,6 +778,17 @@ func (s *Service) Act(ctx context.Context, name, op string, args map[string]any,
 		}
 	}
 	return res, nil
+}
+
+// giveItem give 的物品名：原版物品去掉 minecraft: 命名空间。模组 0.2.0 把 item 原样拼进 PlayerEngine 的 `give <玩家> <物品> <数量>`，
+// PlayerEngine 1.4.0 的 GiveCommand 只认目录里的名字和 ItemHelper.stripItemName（原版物品是不带命名空间的 oak_log，模组物品是
+// create:brass_ingot）：写成 minecraft:oak_log 时它找不到这个物品，什么都没给就结束了，模组还报 done（given 为 0，两半联调时实测）。
+// collect（PlayerEngine 的 get）两种写法都认，不用改；模组物品照写命名空间。
+func giveItem(item string) string {
+	if rest, ok := strings.CutPrefix(strings.TrimSpace(item), "minecraft:"); ok && rest != "" {
+		return rest
+	}
+	return item
 }
 
 // resolve 找出动作落在哪个伙伴身上。

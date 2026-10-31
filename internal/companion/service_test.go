@@ -291,6 +291,123 @@ func TestServiceActAndFinish(t *testing.T) {
 	}
 }
 
+// 关服时是模组先发 END「服务器正在关闭」再关端口（两半联调时实测）：服务器正在关的时候这是正常的，不报「断开了、会自动重连」，
+// 也不再重连（端口已经关了），等下次开服再连。服务器开着时模组发 END（比如改了端口）照旧报出来、自动重连。
+func TestServiceServerClosing(t *testing.T) {
+	e := newSvcEnv(t)
+	e.enable(t)
+	e.start()
+	e.live(t)
+	accepts := e.mod.Accepts()
+	e.in.setStatus("模组服", "stopping") // inst.Manager.Stop：先改状态，再往控制台写 stop
+	e.mod.SendEnd("服务器正在关闭")
+	waitFor(t, "断开", func() bool { v, _ := e.s.Status("模组服"); return v.Link.State == "waiting" })
+	time.Sleep(150 * time.Millisecond) // FastRetry 下 20 毫秒就会重连：这么久都没连说明真的不连了
+	v, _ := e.s.Status("模组服")
+	if n := e.mod.Accepts(); n != accepts || len(e.mod.Hellos()) != accepts {
+		t.Errorf("服务器正在关时不该再重连：握手 %d → %d，HELLO %d", accepts, n, len(e.mod.Hellos()))
+	}
+	if ev := v.Events[0]; ev.Event != "disconnected" || ev.Level != "info" || !strings.Contains(ev.Text, "服务器正在关闭") || strings.Contains(ev.Text, "会自动重连") {
+		t.Errorf("事件：%+v", ev)
+	}
+	// 进程退出：连接早就没了，不用再发 END
+	e.in.setStatus("模组服", "stopped")
+	e.handle(events.Event{Type: "instance.stop", Data: map[string]any{"instance": "模组服"}})
+	time.Sleep(50 * time.Millisecond)
+	if ends := e.mod.Ends(); len(ends) != 0 {
+		t.Errorf("模组已经断开了，不该再收到 END：%v", ends)
+	}
+	// 下次开服照常连上
+	e.start()
+	e.live(t)
+	// 服务器开着时模组发了 END：照旧报「会自动重连」，重连
+	accepts = e.mod.Accepts()
+	e.mod.SendEnd("端口改了，请重新连接")
+	waitFor(t, "重连", func() bool { return e.mod.Accepts() > accepts })
+	e.live(t)
+	v, _ = e.s.Status("模组服")
+	var warned bool
+	for _, ev := range v.Events {
+		warned = warned || (ev.Event == "disconnected" && ev.Level == "warn" && strings.Contains(ev.Text, "端口改了") && strings.Contains(ev.Text, "会自动重连"))
+	}
+	if !warned {
+		t.Errorf("开着时断开应报出来：%+v", v.Events)
+	}
+}
+
+// task_finished 丢了（模组的 WELCOME 读的是每 tick 末尾才刷新的快照：握手正好落在任务结束的那个 tick 里时，事件发在连接就绪之前，
+// WELCOME 里也还没有这次的 lastResult）：之后的 STATUS 里伙伴的 lastResult 是有人发起、还没通知过的任务，照样通知，只通知一次。
+func TestServiceStatusCatchesLostFinish(t *testing.T) {
+	e := newSvcEnv(t)
+	e.enable(t)
+	e.start()
+	e.live(t)
+	ctx := context.Background()
+	if _, err := e.s.Spawn(ctx, "模组服", companion.SpawnReq{Name: "小木", Owner: "Steve"}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := e.s.Act(ctx, "模组服", "collect", map[string]any{"item": "minecraft:oak_log", "count": 3}, companion.Origin{Player: "Steve", Companion: "小木"})
+	if err != nil || !r.OK || r.Task == nil {
+		t.Fatalf("collect：%+v %v", r, err)
+	}
+	if err := e.mod.FinishLost(r.Task.ID, companion.ResultDone, map[string]any{"have": 3, "gained": 3, "want": 3}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "从 STATUS 认出来的通知", func() bool { return len(e.finishedList()) == 1 })
+	if f := e.finishedList()[0]; f.Origin.Player != "Steve" || f.Companion != "小木" || f.TaskID != r.Task.ID || f.Text != "采集 oak_log ×3 做完了：这次拿到 3 个（要 3 个），背包里共 3 个，用时 10 秒。" {
+		t.Errorf("通知：%+v", f)
+	}
+	time.Sleep(200 * time.Millisecond) // 之后的 STATUS 里还是这个 lastResult：不再通知
+	if n := len(e.finishedList()); n != 1 {
+		t.Errorf("只通知一次：%d 条", n)
+	}
+	v, _ := e.s.Status("模组服")
+	var seen bool
+	for _, ev := range v.Events {
+		seen = seen || (ev.Event == companion.EvTaskFinished && strings.Contains(ev.Text, "「小木」采集 oak_log ×3 做完了"))
+	}
+	if !seen {
+		t.Errorf("最近的事件里应有这个任务的结果：%+v", v.Events)
+	}
+	// 没人发起的任务（不是经 Act 开始的）在 STATUS 里有 lastResult：不通知
+	if _, err := e.s.StopTasks(ctx, "模组服", companion.StopReq{All: true}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if n := len(e.finishedList()); n != 1 {
+		t.Errorf("没人发起的不通知：%d 条", n)
+	}
+}
+
+// give 的物品名：原版物品去掉 minecraft:（PlayerEngine 1.4.0 的 give 只认 oak_log 这种写法，写成 minecraft:oak_log 时什么都不给就结束，
+// 模组还报 done，两半联调时实测）；模组物品照写命名空间；collect 两种写法 PlayerEngine 都认，原样发。
+func TestActGiveItemName(t *testing.T) {
+	e := newSvcEnv(t)
+	e.enable(t)
+	e.start()
+	e.live(t)
+	ctx := context.Background()
+	if _, err := e.s.Spawn(ctx, "模组服", companion.SpawnReq{Name: "小木", Owner: "Steve"}); err != nil {
+		t.Fatal(err)
+	}
+	last := func() map[string]any { r := e.mod.Requests(); return r[len(r)-1] }
+	for _, c := range []struct{ op, item, want string }{
+		{"give", "minecraft:oak_log", "oak_log"},
+		{"give", " minecraft:bread", "bread"},
+		{"give", "oak_log", "oak_log"},
+		{"give", "create:brass_ingot", "create:brass_ingot"},
+		{"collect", "minecraft:oak_log", "minecraft:oak_log"},
+	} {
+		r, err := e.s.Act(ctx, "模组服", c.op, map[string]any{"item": c.item, "player": "Steve"}, companion.Origin{Player: "Steve"})
+		if err != nil || !r.OK {
+			t.Fatalf("%s %s：%+v %v", c.op, c.item, r, err)
+		}
+		if got := last(); got["op"] != c.op || got["item"] != c.want || r.Sent["item"] != c.want {
+			t.Errorf("%s %q：发给模组的 item 是 %v（记下的 %v），应为 %q", c.op, c.item, got["item"], r.Sent["item"], c.want)
+		}
+	}
+}
+
 // r0 某个伙伴现在的任务编号（从模组那边看）。
 func r0(t *testing.T, e *svcEnv, id int) int64 {
 	t.Helper()
