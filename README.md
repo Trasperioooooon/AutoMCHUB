@@ -8,6 +8,8 @@ Windows 上的**我的世界（Minecraft Java 版）一键开服工具**：单�
 
 > 异地联机：在「内网穿透」页添加樱花穿透、OpenFrp 或自定义 frps 的隧道，跟随服务器自动启动，公网地址一键复制给好友。
 
+<p align="center"><img src="docs/images/01-servers.png" width="860" alt="MineDeck 主界面：我的世界服务器列表，显示每台服务器的核心、版本、运行状态、在线人数和启动按钮"></p>
+
 ---
 
 ## ✨ 功能一览
@@ -41,6 +43,16 @@ Windows 上的**我的世界（Minecraft Java 版）一键开服工具**：单�
 | **音乐共享** | 把房主电脑上音乐软件的声音经 Simple Voice Chat 广播给服里的人，每人可在语音设置里单独调小或静音；Windows 11 按程序录音，不录游戏声和语音；桥接模组内置，一键安装 |
 | **AI 伙伴** | NeoForge 1.21.1 / Forge 1.20.1 服里放 AI 伙伴（基于 PlayerEngine）：聊天里说「@伙伴名 跟着我」「砍 10 个橡木原木」「打附近的僵尸」；禁挖区域、不许打的生物可配；好友的客户端只装一个伙伴模组 |
 | **安全防呆** | 老版本自动启用 log4shell 官方缓解方案；清除 `JAVA_HOME`/`_JAVA_OPTIONS` 等环境污染；下载文件哈希校验；本地 API 带随机令牌 |
+
+## 📸 截图
+
+| **AI 开服助手**：先查模组清单再找原因，要改东西先给确认卡片 | **报错横幅**：不用 AI 也能指出少装前置、客户端模组进了服务端 |
+|---|---|
+| <img src="docs/images/03-assistant.png" alt="AI 助手面板：AI 读了模组清单，找出小地图模组是客户端模组，提出禁用它的确认卡片"> | <img src="docs/images/02-console-banner.png" alt="控制台顶部的报错横幅：缺少前置模组 geckolib，客户端模组放进了服务端，附修复办法和「让 AI 分析」按钮"> |
+| **游戏内 AI**：聊天里 @AI 提问，授权的玩家能让它执行白名单里的命令 | **AI 伙伴**：刷出伙伴、看它在干什么，禁挖区域保护你的建筑 |
+| <img src="docs/images/04-gameai-log.png" alt="游戏内 AI 的问答和执行记录：执行了 weather clear，拒绝了 op"> | <img src="docs/images/05-companion.png" alt="伙伴标签：已连上伙伴模组，小方正在采集橡木原木，阿土空闲，两个禁挖区域"> |
+| **音乐共享**：选一个音乐软件，经 Simple Voice Chat 放给全服听 | **接入 AI**：七个预设，填 Key、测试连接、设每日额度 |
+| <img src="docs/images/06-music.png" alt="音乐共享标签：选网易云音乐作音源，检查清单全部通过"> | <img src="docs/images/07-settings-ai.png" alt="设置里的 AI 分区：已启用 DeepSeek，测试连接正常、能调用工具"> |
 
 ## 🚀 使用
 
@@ -139,6 +151,7 @@ internal/
 └── themes/    配色方案对比度测试（go test ./internal/themes/，校验 themes.css）
 tools/ui-dev/  前端仿真后端 + 交互回归测试 + 截图（Node + Playwright，不需要 Windows，见其 README）
 tools/fonts/   内嵌字体的子集生成脚本（Python + fontTools，手动运行，产物入库）
+tools/promo/   README 截图和社交预览图的生成脚本（在仿真后端上拍真实界面，用法见脚本开头）
 bridge/voicechat/  音乐共享的 SVC 桥接模组源码（javac 构建，产物入库在 internal/bridge/jar，见其 README）
 companion/     AI 伙伴模组源码（NeoForge 1.21.1 / Forge 1.20.1，Gradle 构建，产物入库在 internal/companion/jar，见其 README）
 assets/        应用图标 icon.ico（像素画逐尺寸绘制）；界面设计规范见 design-system/MASTER.md

@@ -17,3 +17,6 @@
 # 编辑器
 .idea/
 .vscode/
+
+# 宣传图的输出（tools/promo/shoot.js）
+/tools/promo/out/
