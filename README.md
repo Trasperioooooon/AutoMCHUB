@@ -2,7 +2,7 @@
 
 [![Release](https://img.shields.io/github/v/release/Trasperioooooon/MineDeck?color=6fd24b)](https://github.com/Trasperioooooon/MineDeck/releases/latest) [![Downloads](https://img.shields.io/github/downloads/Trasperioooooon/MineDeck/total?color=6fd24b)](https://github.com/Trasperioooooon/MineDeck/releases) [![License](https://img.shields.io/github/license/Trasperioooooon/MineDeck?color=6fd24b)](LICENSE) ![Platform](https://img.shields.io/badge/platform-Windows-2b6cb0) ![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)
 
-Windows 本地运行的 **MC 多人联机服务器自动部署工具**（单文件 `MineDeck.exe`，约 10.5 MB，零依赖）。
+Windows 本地运行的 **MC 多人联机服务器自动部署工具**（单文件 `MineDeck.exe`，约 13 MB，零依赖）。
 
 选好版本点创建，自动完成：**匹配并下载便携式 Java → 下载服务端核心 → 运行安装器 → 同意 EULA → 生成配置与启动脚本 → 图形界面管理开服**。全程使用国内镜像加速（BMCLAPI / 清华 TUNA），官方源自动兜底。
 
@@ -35,6 +35,11 @@ Windows 本地运行的 **MC 多人联机服务器自动部署工具**（单文�
 | **自动更新** | 检查 GitHub Releases（国内加速镜像兜底），一键换血重启 |
 | **配置全量目录** | 约 60 项 `server.properties` 数据化呈现（分 7 组 + 搜索 + 中文说明 + 范围校验 + 「需重启」标注），**按 MC 版本自动显隐**（1.21.9+ 已迁移项转为 `/gamerule` 控件即时生效）；正版验证默认关、允许飞行默认开 |
 | **进程托管** | 一键启停、`stop` 优雅关服（30 秒超时强杀）、启动前端口占用预检、程序退出自动停服、Job Object 兜底防止孤儿 java 进程 |
+| **AI 接入（可选）** | 填自己的 API Key：OpenAI 兼容和 Claude 两种协议，内置 DeepSeek / 通义千问 / Kimi / 智谱 / OpenAI / Claude / Ollama（本机）七个预设和自定义地址；按 LiteLLM 公开价格估算费用，每个功能可设每日额度；Key 经 Windows DPAPI 加密保存；**不配置不联网** |
+| **应用内 AI 助手** | 标题栏「AI 助手」：先查日志、配置、崩溃报告再回答；改配置、换 Java、重启服务器先出确认卡片，人点了才执行；发给 AI 的内容先脱敏，随时可看原文。控制台顶部的**报错横幅**用本地规则认出 13 类常见错误（少前置、客户端模组进了服务端、端口被占、Java 不对等），不需要 AI |
+| **游戏内 AI** | 玩家在聊天里说 `@AI 问题`，默认全服可见；`/私` 只回自己、`/问` 只答不做、`/额度`、`/帮助`；面板里勾选的玩家可以让 AI 执行白名单里的命令（按模板逐个参数校验，op、execute 等写死禁止），搭配一键开启白名单 |
+| **音乐共享** | 把房主电脑上音乐软件的声音经 Simple Voice Chat 广播给服里的人，每人可在语音设置里单独调小或静音；Windows 11 按程序录音，不录游戏声和语音；桥接模组内置，一键安装 |
+| **AI 伙伴** | NeoForge 1.21.1 / Forge 1.20.1 服里放 AI 伙伴（基于 PlayerEngine）：聊天里说「@伙伴名 跟着我」「砍 10 个橡木原木」「打附近的僵尸」；禁挖区域、不许打的生物可配；好友的客户端只装一个伙伴模组 |
 | **安全防呆** | 老版本自动启用 log4shell 官方缓解方案；清除 `JAVA_HOME`/`_JAVA_OPTIONS` 等环境污染；下载文件哈希校验；本地 API 带随机令牌 |
 
 ## 🚀 使用
@@ -79,13 +84,24 @@ internal/
 ├── inst/      实例：创建流水线、安装器托管、run.bat 生成、server.properties
 │              保序读写、进程状态机、控制台环形缓冲 + 订阅、备份/策略/玩家
 ├── modpack/   整合包解析（Modrinth .mrpack / CurseForge zip）
-├── tunnel/    内网穿透（OpenFrp / 樱花frp / 自定义 frps，frpc 托管）
+├── tunnel/    内网穿透（OpenFrp / 樱花frp / 自定义 frps，frpc 托管；游戏 TCP / 语音 UDP）
+├── ops/       操作层：所有界面和 AI 发起的操作统一经这里（参数说明、风险等级、提案与确认、操作记录）；具体操作在 ops/catalog
+├── secret/    DPAPI 加密保存密钥（CurseForge Key、穿透凭据、AI Key）
+├── mclog/     服务器日志解析（进服、退服、聊天，防伪造）
+├── ai/        AI 接入层：OpenAI 兼容 / Claude 协议（自己发 HTTP、解析 SSE）、预设、价格、记账与额度
+├── assistant/ 应用内 AI 助手（会话、工具映射、提案流程、上下文打包与脱敏）
+├── diag/ modinfo/  报错规则（报错横幅的数据来源）、jar 里的模组信息解析
+├── chatai/    游戏内 AI（认聊天、提问选项、命令白名单、tellraw 回复）
+├── music/ musicshare/ bridge/   音乐共享：WASAPI 采集、广播与检查清单、SVC 桥接模组的协议客户端和内置 jar
+├── companion/ AI 伙伴：伙伴模组的协议客户端、安装（Modrinth，sha512 校验）、管理器和内置 jar
 ├── tasks/     后台任务进度 + 结构化告警（供前端轮询）
 ├── events/ webhook/ update/   事件总线、Webhook 推送、GitHub 自动更新
 ├── web/       REST API + SSE 控制台流 + go:embed 前端（ui/ 多配色 SPA，配色令牌见 themes.css，内嵌字体在 ui/fonts/）
 └── themes/    配色方案对比度测试（go test ./internal/themes/，校验 themes.css）
 tools/ui-dev/  前端仿真后端 + 交互回归测试 + 截图（Node + Playwright，不需要 Windows，见其 README）
 tools/fonts/   内嵌字体的子集生成脚本（Python + fontTools，手动运行，产物入库）
+bridge/voicechat/  音乐共享的 SVC 桥接模组源码（javac 构建，产物入库在 internal/bridge/jar，见其 README）
+companion/     AI 伙伴模组源码（NeoForge 1.21.1 / Forge 1.20.1，Gradle 构建，产物入库在 internal/companion/jar，见其 README）
 assets/        应用图标 icon.ico（像素画逐尺寸绘制）；界面设计规范见 design-system/MASTER.md
 ```
 
