@@ -89,7 +89,8 @@ func fetchChecksum(ctx context.Context, url, filename string) string {
 	return ""
 }
 
-// newer 比较 "v1.2.3" 风格版本号。
+// newer 比较 "v1.2.3" 风格版本号。数字相同时，正式版比带后缀的预发布版新
+// （2.9.0 比 2.9.0-beta.1 新），装了测试版的人才能收到同号正式版的更新。
 func newer(tag, current string) bool {
 	pa := verParts(tag)
 	pb := verParts(current)
@@ -98,8 +99,11 @@ func newer(tag, current string) bool {
 			return pa[i] > pb[i]
 		}
 	}
-	return false
+	return !isPre(tag) && isPre(current)
 }
+
+// isPre 报告版本号是否带预发布后缀（如 "2.9.0-beta.1"）。
+func isPre(v string) bool { return strings.Contains(strings.TrimSpace(v), "-") }
 
 func verParts(v string) [3]int {
 	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
