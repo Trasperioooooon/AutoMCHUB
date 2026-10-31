@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"minedeck/internal/mcp"
 	"minedeck/internal/ops"
 )
 
@@ -167,12 +168,20 @@ func (s *Server) handleAssistantEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// canDecide 这个人能不能处理这个提案：助手的规则（局域网只能处理局域网会话里的），外部 AI（MCP）提出的只能在本机处理。
+func (s *Server) canDecide(who ops.Caller, p *ops.Proposal) error {
+	if err := s.asst.CanDecide(who, p); err != nil {
+		return err
+	}
+	return mcp.CanDecide(who, p)
+}
+
 // handleProposals GET /api/ops/proposals?session= 还在等确认的提案（只列这个人能处理的）。
 func (s *Server) handleProposals(w http.ResponseWriter, r *http.Request) {
 	who := callerOf(r)
 	out := []*ops.Proposal{}
 	for _, p := range s.ops.Pending(r.URL.Query().Get("session")) {
-		if s.asst.CanDecide(who, p) == nil {
+		if s.canDecide(who, p) == nil {
 			out = append(out, p)
 		}
 	}
@@ -192,7 +201,7 @@ func (s *Server) handleProposalConfirm(w http.ResponseWriter, r *http.Request) {
 	}
 	who := callerOf(r)
 	if p := s.ops.Proposal(r.PathValue("id")); p != nil {
-		if err := s.asst.CanDecide(who, p); err != nil {
+		if err := s.canDecide(who, p); err != nil {
 			reply(w, nil, err)
 			return
 		}
@@ -212,7 +221,7 @@ func (s *Server) handleProposalReject(w http.ResponseWriter, r *http.Request) {
 	}
 	who := callerOf(r)
 	if p := s.ops.Proposal(r.PathValue("id")); p != nil {
-		if err := s.asst.CanDecide(who, p); err != nil {
+		if err := s.canDecide(who, p); err != nil {
 			reply(w, nil, err)
 			return
 		}

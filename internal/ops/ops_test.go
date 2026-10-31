@@ -99,6 +99,7 @@ var (
 	gamechat  = Caller{Source: SrcGameChat, Actor: "Steve"}
 	companion = Caller{Source: SrcCompanion, Actor: "伙伴"}
 	schedule  = Caller{Source: SrcSchedule, Actor: "定时任务", Local: true}
+	mcp       = Caller{Source: SrcMCP, Actor: "Claude Desktop", Local: true} // MCP 接口只收本机的连接
 )
 
 // 权限矩阵：调用来源 × 风险等级 × 仅本机。
@@ -108,16 +109,16 @@ func TestPermissionMatrix(t *testing.T) {
 	callers := []struct {
 		name string
 		c    Caller
-	}{{"ui", ui}, {"api", api}, {"lan", lan}, {"ai本机", aiLocal}, {"ai局域网", aiLAN}, {"游戏内", gamechat}, {"伙伴", companion}, {"定时", schedule}}
+	}{{"ui", ui}, {"api", api}, {"lan", lan}, {"ai本机", aiLocal}, {"ai局域网", aiLAN}, {"游戏内", gamechat}, {"伙伴", companion}, {"定时", schedule}, {"mcp", mcp}}
 	want := map[string][]string{
-		//            ui   api  lan   ai本机 ai局域网 游戏内 伙伴  定时
-		"t.read":   {run, run, run, run, run, deny, deny, run},
-		"t.ingame": {run, run, run, run, run, run, run, run},
-		"t.write":  {run, run, run, prop, prop, deny, deny, run},
-		"t.danger": {run, run, run, prop, prop, deny, deny, run},
-		"t.human":  {run, run, run, deny, deny, deny, deny, deny},
-		"t.local":  {run, run, deny, deny, deny, deny, deny, deny},
-		"t.localw": {run, run, deny, prop, deny, deny, deny, run},
+		//            ui   api  lan   ai本机 ai局域网 游戏内 伙伴  定时  mcp
+		"t.read":   {run, run, run, run, run, deny, deny, run, run},
+		"t.ingame": {run, run, run, run, run, run, run, run, run},
+		"t.write":  {run, run, run, prop, prop, deny, deny, run, prop},
+		"t.danger": {run, run, run, prop, prop, deny, deny, run, prop},
+		"t.human":  {run, run, run, deny, deny, deny, deny, deny, deny},
+		"t.local":  {run, run, deny, deny, deny, deny, deny, deny, deny},
+		"t.localw": {run, run, deny, prop, deny, deny, deny, run, prop},
 	}
 	args := map[string]Args{"t.write": Args(`{"inst":"生存服"}`)}
 	for op, row := range want {
@@ -174,6 +175,12 @@ func TestAvailable(t *testing.T) {
 	}
 	if got := names(gamechat); got != "t.ingame" {
 		t.Errorf("游戏内 AI 的工具：%s", got)
+	}
+	if got := names(mcp); got != "t.read,t.ingame,t.write,t.danger,t.localw,t.fail" {
+		t.Errorf("MCP 接口的工具（同本机助手）：%s", got)
+	}
+	if !SrcMCP.AI() || SrcMCP.Human() {
+		t.Error("MCP 接口算 AI 发起，不算人")
 	}
 	if ToolName("instance.props.set") != "instance_props_set" {
 		t.Error("ToolName 不对")
@@ -624,5 +631,28 @@ func TestRegisterRejectsBadOps(t *testing.T) {
 	// 没有操作记录时照常执行
 	if _, err := r.Do(context.Background(), ui, "a", nil); err != nil {
 		t.Error(err)
+	}
+}
+
+// AI 发起的写操作预览失败（比如重启一台没在运行的服务器）：Do 返回 nil 和错误，不能返回装着 nil *Proposal 的 any，
+// 否则调用方的类型断言会把它当成提案。
+func TestProposeErrorIsUntypedNil(t *testing.T) {
+	f := newFixture(t)
+	f.reg.Register(&Op{Name: "t.badpreview", Title: "预览会失败", Level: Danger,
+		Preview: func(context.Context, Caller, Args) (*Plan, error) {
+			return nil, Errorf(400, "服务器没有在运行")
+		},
+		Run: func(context.Context, Caller, Args) (any, error) { return "ran", nil }})
+	for _, c := range []Caller{aiLocal, mcp} {
+		res, err := f.reg.Do(context.Background(), c, "t.badpreview", nil)
+		if res != nil || err == nil || err.Error() != "服务器没有在运行" {
+			t.Errorf("%s：res=%#v err=%v", c.Source, res, err)
+		}
+		if _, ok := res.(*Proposal); ok {
+			t.Errorf("%s：预览失败时不能断言出提案", c.Source)
+		}
+	}
+	if n := len(f.reg.Pending("")); n != 0 {
+		t.Errorf("预览失败不留提案：%d", n)
 	}
 }

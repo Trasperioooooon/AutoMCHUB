@@ -19,6 +19,7 @@ import (
 	"minedeck/internal/app"
 	"minedeck/internal/assistant"
 	"minedeck/internal/inst"
+	"minedeck/internal/mcp"
 	"minedeck/internal/ops"
 	"minedeck/internal/tunnel"
 )
@@ -31,11 +32,21 @@ type Server struct {
 	tun  *tunnel.Manager
 	ops  *ops.Registry
 	asst *assistant.Service
+	mcp  *mcp.Service // MCP 接口；nil 时没有 /mcp 和 /api/mcp*
 }
 
+// Option New 的可选项。
+type Option func(*Server)
+
+// WithMCP 接上 MCP 接口（设计文档 §15）：/mcp 和 /api/mcp*，见 mcp.go。
+func WithMCP(m *mcp.Service) Option { return func(s *Server) { s.mcp = m } }
+
 // New 建好路由。reg 是操作层的注册表，asst 是应用内助手，都在 main 里建好：两者共用同一个注册表（提案存在里面）。
-func New(mgr *inst.Manager, tun *tunnel.Manager, reg *ops.Registry, asst *assistant.Service) http.Handler {
+func New(mgr *inst.Manager, tun *tunnel.Manager, reg *ops.Registry, asst *assistant.Service, opts ...Option) http.Handler {
 	s := &Server{mgr: mgr, tun: tun, ops: reg, asst: asst}
+	for _, o := range opts {
+		o(s)
+	}
 	mux := http.NewServeMux()
 
 	sub, _ := fs.Sub(uiFS, "ui")
@@ -113,6 +124,7 @@ func New(mgr *inst.Manager, tun *tunnel.Manager, reg *ops.Registry, asst *assist
 	// 第三阶段：应用内 AI 助手、提案的确认接口、排错和修复用的实例接口（见 assistant.go）
 	s.assistantRoutes(mux)
 	s.troubleshootRoutes(mux)
+	s.mcpRoutes(mux) // MCP 接口，见 mcp.go
 
 	return secure(mux)
 }

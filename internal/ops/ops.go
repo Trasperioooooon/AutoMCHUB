@@ -53,18 +53,21 @@ const (
 	SrcGameChat  Source = "gamechat"  // 游戏内聊天 AI
 	SrcCompanion Source = "companion" // AI 伙伴
 	SrcSchedule  Source = "schedule"  // 定时任务、崩溃自动重启
+	SrcMCP       Source = "mcp"       // 这台电脑上的其他 AI 工具经 MCP 接口调用（actor 是客户端报的名字）
 )
 
 // Human 是不是人直接发起的（在界面上点了按钮，或者自己写程序调接口）。
 func (s Source) Human() bool { return s == SrcUI || s == SrcAPI || s == SrcLAN }
 
 // AI 是不是 AI 发起的。
-func (s Source) AI() bool { return s == SrcAssistant || s == SrcGameChat || s == SrcCompanion }
+func (s Source) AI() bool {
+	return s == SrcAssistant || s == SrcGameChat || s == SrcCompanion || s == SrcMCP
+}
 
 // Caller 谁在调用。
 type Caller struct {
 	Source  Source `json:"src"`
-	Actor   string `json:"actor,omitempty"`   // "本机"、局域网设备的地址、玩家名、"定时任务"
+	Actor   string `json:"actor,omitempty"`   // "本机"、局域网设备的地址、玩家名、"定时任务"、MCP 客户端报的名字
 	Session string `json:"session,omitempty"` // 助手会话编号等
 	Local   bool   `json:"-"`                 // 发起的人就在这台电脑上：「仅本机」的操作只认这个
 }
@@ -285,7 +288,7 @@ func allow(c Caller, op *Op) (propose bool, err error) {
 			return false, Errorf(403, "「%s」只能由人操作", op.Title)
 		}
 		return false, nil
-	case c.Source == SrcAssistant:
+	case c.Source == SrcAssistant || c.Source == SrcMCP: // MCP 接口的外部 AI 和应用内助手一样：读直接执行，写和危险只生成提案
 		switch op.Level {
 		case Read:
 			return false, nil
@@ -333,7 +336,11 @@ func (r *Registry) Do(ctx context.Context, c Caller, name string, a Args) (any, 
 		return nil, err
 	}
 	if propose {
-		return r.propose(ctx, c, op, args)
+		p, err := r.propose(ctx, c, op, args)
+		if err != nil {
+			return nil, err // 不能返回装着 nil *Proposal 的 any：调用方用类型断言认提案
+		}
+		return p, nil
 	}
 	return r.exec(ctx, c, op, args, "", "")
 }

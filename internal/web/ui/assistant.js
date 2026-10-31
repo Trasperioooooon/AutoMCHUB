@@ -1,6 +1,7 @@
 /* MineDeck 应用内 AI 助手（第三阶段）：标题栏入口、助手面板（会话列表、对话、确认卡片、发送预览）、
    控制台的报错横幅，以及「设置 → AI」里的助手设置。
    app.js 只在几处调这里：启动后 MDAssist.init()；控制台标签里 banner() / consoleLine()；设置 → AI 里 settings()。
+   外部 AI（MCP 接口，mcp.js）提出的操作也在面板顶上用同一种确认卡片显示：mcp.js 有变化时调 ext()。
    用到的 app.js 工具（api、esc、icon、toast、dismiss、riRow……）都在调用时才取，所以本文件先于 app.js 加载。
    AI 的回复用自己写的 Markdown 小渲染器显示：先整体转义 HTML，再认几种常用写法；链接只放行 http(s)，不加载任何外部库。 */
 "use strict";
@@ -63,7 +64,10 @@ window.MDAssist = (() => {
     b.hidden = !A.st || (!A.st.local && !A.st.allowed);
     b.classList.toggle("on", !!A.panel);
     b.setAttribute("aria-expanded", A.panel ? "true" : "false");
-    b.querySelector(".tb-dot").hidden = !(A.sess && A.sess.waiting && !A.panel);
+    const n = extList().length; // 外部 AI 等你确认的操作
+    b.querySelector(".tb-dot").hidden = !!A.panel || !((A.sess && A.sess.waiting) || n);
+    b.title = n ? `AI 助手（外部 AI 有 ${n} 个操作等你确认）` : "AI 助手";
+    b.setAttribute("aria-label", b.title);
   }
 
   /* ---------- 面板 ---------- */
@@ -79,6 +83,7 @@ window.MDAssist = (() => {
         <button class="btn ghost sm" id="ap-new" aria-haspopup="menu">${icon("plus")}<span>新会话</span></button>
         <button class="btn ghost sm icon-only" id="ap-close" title="关闭（Esc）" aria-label="关闭 AI 助手">${icon("x")}</button>
       </header>
+      <div class="ap-ext" id="ap-ext" hidden></div>
       <div class="ap-body" id="ap-body" role="log"></div>
       <div class="ap-foot" id="ap-foot" hidden></div>`;
     document.body.appendChild(p);
@@ -89,8 +94,38 @@ window.MDAssist = (() => {
     q("#ap-new").onclick = e => newMenu(e.currentTarget);
     clearInterval(A.timer);
     A.timer = setInterval(tick, 1000);
+    paintExt();
     paintBtn();
   }
+
+  /* ---------- 外部 AI（MCP 接口）提出的操作：面板顶上的确认卡片（只在本机有，数据来自 mcp.js 的事件流） ---------- */
+
+  const extList = () => (window.MDMcp ? MDMcp.pending() : []);
+
+  // 按编号增删卡片，不整块重画：别的卡片上勾了的框、写了一半的拒绝理由都留着
+  function paintExt() {
+    if (!A.panel) return;
+    const box = q("#ap-ext"), list = extList();
+    box.hidden = !list.length;
+    if (!list.length) { box.innerHTML = ""; return; }
+    if (!box.querySelector(".ax-head")) box.innerHTML = `<div class="ax-head">${icon("plug")}<b>外部 AI 的请求</b><span class="tag" id="ax-n"></span>
+      <span class="grow"></span><span class="ax-note">这台电脑上经 MCP 连进来的 AI 工具</span></div><div class="ax-list" id="ax-list"></div>`;
+    q("#ax-n").textContent = String(list.length);
+    const ids = new Set(list.map(p => p.id));
+    box.querySelectorAll(".ax-item").forEach(el => { if (!ids.has(el.dataset.ext)) el.remove(); });
+    const wrap = q("#ax-list");
+    for (const p of list) {
+      if (wrap.querySelector(`.ax-item[data-ext="${CSS.escape(p.id)}"]`)) continue;
+      const t = document.createElement("div");
+      t.className = "ax-item" + (reducedMotion() ? "" : " item-enter");
+      t.dataset.ext = p.id;
+      t.innerHTML = `<div class="ax-from">${icon("sparkle")}<span>${esc(p.actor)} · ${esc(when(p.created))}</span></div>` + cardHTML({ status: "pending", proposal: p });
+      wrap.appendChild(t);
+      wire(t);
+    }
+  }
+
+  function ext() { paintExt(); paintBtn(); }
 
   async function open(id) {
     if (!A.panel) mount();
@@ -526,12 +561,16 @@ window.MDAssist = (() => {
     btns.forEach(b => b.disabled = true);
     const okBtn = card.querySelector('[data-x="ok"]');
     if (ok) okBtn.textContent = "执行中…";
-    try { await api(`/api/ops/proposals/${enc(pid)}/${ok ? "confirm" : "reject"}`, { method: "POST", body }); }
-    catch (e) {
+    const ext = !!card.closest("#ap-ext");
+    try {
+      await api(`/api/ops/proposals/${enc(pid)}/${ok ? "confirm" : "reject"}`, { method: "POST", body });
+      // 外部 AI 的：卡片拿掉，告诉一声（外部 AI 用 proposal_status 查得到结果）
+      if (ext) { toast(ok ? "已确认，已经执行；外部 AI 查得到结果" : "已拒绝，外部 AI 查得到你的理由"); window.MDMcp?.drop(pid); }
+    } catch (e) {
       toast(e.message, true);
       if (card.isConnected) { btns.forEach(b => b.disabled = false); okBtn.textContent = card.classList.contains("danger") ? "确认执行" : "确认"; okBtn.disabled = [...card.querySelectorAll(".pc-check input")].some(c => !c.checked); }
     }
-    // 结果经事件流回来（卡片变成「已确认」「已拒绝」，AI 接着回复）
+    // 助手的：结果经事件流回来（卡片变成「已确认」「已拒绝」，AI 接着回复）
   }
 
   /* 确认卡片的有效期（5 分钟）。只用来提示：过没过期以服务端为准（本机时钟可能不准） */
@@ -872,5 +911,5 @@ window.MDAssist = (() => {
     return d.toDateString() === new Date().toDateString() ? hm : `${p(d.getMonth() + 1)}-${p(d.getDate())} ${hm}`;
   }
 
-  return { init, refresh, open, close, banner, consoleLine, settings, analyze, md };
+  return { init, refresh, open, close, banner, consoleLine, settings, analyze, md, ext };
 })();

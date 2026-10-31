@@ -543,16 +543,19 @@ func proposalView(p *ops.Proposal) *ProposalView {
 	return &ProposalView{ID: p.ID, Op: p.Op, Title: p.Title, Level: p.Level.String(), Args: p.Args, Plan: p.Plan, Consent: p.Consent, Expires: p.Expires}
 }
 
-// content 工具结果交还给 AI 的样子：脱敏后的紧凑 JSON，外面加上边界标记，超过 16 KB 截断并注明。
-// 带 lines 的结果（控制台、日志的末尾）从最旧的行删起，留下最新的；其余的截掉后面的部分。
-func (s *Service) content(v any) string {
+// content 工具结果交还给 AI 的样子，见 FormatResult。
+func (s *Service) content(v any) string { return FormatResult(s.redact, v) }
+
+// FormatResult 操作的结果交给 AI 的样子：脱敏后的紧凑 JSON（字符串原样脱敏），外面加上边界标记，超过 16 KB 截断并注明。
+// 带 lines 的结果（控制台、日志的末尾）从最旧的行删起，留下最新的；其余的截掉后面的部分。应用内助手和 MCP 接口共用。
+func FormatResult(red *Redactor, v any) string {
 	var body string
 	if str, ok := v.(string); ok {
-		body = s.redact.Text(str)
+		body = red.Text(str)
 	} else {
-		body = s.redact.JSON(v)
+		body = red.JSON(v)
 		if len(body) > maxResult {
-			body = s.trimLines(v, body)
+			body = trimLines(red, v, body)
 		}
 	}
 	if len(body) > maxResult {
@@ -566,7 +569,7 @@ func (s *Service) content(v any) string {
 }
 
 // trimLines 结果里有 lines 数组时，从前面删行直到装得下，并写明删了几行。
-func (s *Service) trimLines(v any, body string) string {
+func trimLines(red *Redactor, v any, body string) string {
 	var m map[string]any
 	if decode(v, &m) != nil {
 		return body
@@ -579,14 +582,14 @@ func (s *Service) trimLines(v any, body string) string {
 	for lo < hi {
 		mid := (lo + hi) / 2
 		m["lines"], m["omitted"] = lines[mid:], fmt.Sprintf("太长了，前面 %d 行没有给出", mid)
-		if len(s.redact.JSON(m)) <= maxResult {
+		if len(red.JSON(m)) <= maxResult {
 			hi = mid
 		} else {
 			lo = mid + 1
 		}
 	}
 	m["lines"], m["omitted"] = lines[lo:], fmt.Sprintf("太长了，前面 %d 行没有给出", lo)
-	return s.redact.JSON(m)
+	return red.JSON(m)
 }
 
 // ---------- 提案处理完 ----------

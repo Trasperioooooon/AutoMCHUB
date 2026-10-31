@@ -8,6 +8,7 @@ import (
 	"minedeck/internal/ai"
 	"minedeck/internal/app"
 	"minedeck/internal/assistant"
+	"minedeck/internal/mcp"
 	"minedeck/internal/ops"
 )
 
@@ -17,16 +18,18 @@ func NewAssistant(reg *ops.Registry, aiSvc *ai.Service, token string) *assistant
 	return assistant.New(assistant.Options{Ops: reg, AI: aiSvc, Dir: filepath.Join(app.Base, "data", "ai", "sessions"), Redact: NewRedactor(token)})
 }
 
-// NewRedactor 发给 AI 之前的脱敏（设计文档 §5.3、§10.1），应用内助手和游戏内 AI 共用：路径里的 Windows 用户名、程序目录、
-// 用户目录、计算机名和本机各网卡的地址换成占位符；MineDeck 的令牌（token）、CurseForge 和 AI 的 Key、访问密码的哈希
-// 原样出现就换成 ***。
+// NewRedactor 发给 AI 之前的脱敏（设计文档 §5.3、§10.1），应用内助手、游戏内 AI 和 MCP 接口共用：路径里的 Windows 用户名、
+// 程序目录、用户目录、计算机名和本机各网卡的地址换成占位符；MineDeck 的令牌（token）、CurseForge 和 AI 的 Key、
+// MCP 令牌、访问密码的哈希原样出现就换成 ***。
 func NewRedactor(token string) *assistant.Redactor {
 	home, _ := os.UserHomeDir()
 	return &assistant.Redactor{Base: app.Base, Home: home, User: os.Getenv("USERNAME"), Computer: os.Getenv("COMPUTERNAME"), IPs: allIPs(),
 		Secrets: func() []string {
 			out := []string{token, app.CFKey(), app.GetConfig().AccessPasswordHash}
-			if k, err := app.Secrets().Get(ai.KeyName); err == nil {
-				out = append(out, k)
+			for _, name := range []string{ai.KeyName, mcp.KeyName} {
+				if k, err := app.Secrets().Get(name); err == nil {
+					out = append(out, k)
+				}
 			}
 			return out
 		}}
