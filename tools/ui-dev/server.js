@@ -1104,7 +1104,7 @@ function handler(state, ui, portOf) {
       if (b.gc) gcMockState(state, b.gc); // 第四阶段
       if (b.cp) cpMockState(state, b.cp); // 第七阶段
       if (b.asst) { if (b.asst.reset) { for (const x of state.asst.sessions) for (const r of x.subs) r.end(); state.asst = newAsstState(); } const { reset, ...rest } = b.asst; Object.assign(state.asst, rest); } // 第三阶段
-      if (b.status) for (const [n, st] of Object.entries(b.status)) { const i = state.instances.find(x => x.name === n); if (i) { i.status = st; i.uptimeSec = st === "stopped" ? 0 : st === "starting" ? 9 : i.uptimeSec; i.onlineCount = st === "running" ? i.onlineCount : 0; } }
+      if (b.status) for (const [n, st] of Object.entries(b.status)) { const i = state.instances.find(x => x.name === n); if (i) { i.status = st; i.uptimeSec = st === "stopped" ? 0 : st === "starting" ? 9 : Math.max(i.uptimeSec, 7980); i.onlineCount = st === "running" ? (i.onlineCount || 3) : 0; } }
       return ok(res, state);
     }
     // ---- 静态 ----
@@ -1119,7 +1119,7 @@ function handler(state, ui, portOf) {
     const insts = () => state.empty ? [] : state.instances;
     const seg = p.split("/").map(decodeURIComponent); // ["", "api", "instances", name, sub...]
     try {
-      if (p === "/api/app") return ok(res, { version: "2.6.1", base: "D:\\MineDeck", ramMb: 16384, availRamMb: 9216, port: portOf(), serversRoot: "D:\\MineDeck\\servers", backupsRoot: "D:\\MineDeck\\backups", config: state.config, lanSet: false, cfKeySet: !!state.cfKey && !state.cfKeyBroken, cfKeyBroken: state.cfKeyBroken, autoStart: state.autoStart, ips: ["172.22.48.1", "192.168.1.23", "10.0.0.5"] });
+      if (p === "/api/app") return ok(res, { version: "2.9.0-beta.1", base: "D:\\MineDeck", ramMb: 16384, availRamMb: 9216, port: portOf(), serversRoot: "D:\\MineDeck\\servers", backupsRoot: "D:\\MineDeck\\backups", config: state.config, lanSet: false, cfKeySet: !!state.cfKey && !state.cfKeyBroken, cfKeyBroken: state.cfKeyBroken, autoStart: state.autoStart, ips: ["172.22.48.1", "192.168.1.23", "10.0.0.5"] });
       if (p === "/api/bg") return ok(res, { images: [] });
       if (p === "/api/ops/log") {
         const q = u.searchParams, lim = Math.min(+q.get("limit") || 100, 1000);
@@ -1152,7 +1152,7 @@ function handler(state, ui, portOf) {
       if (p === "/api/javas") return ok(res, { portable: [{ major: 21 }, { major: 17 }], scanned: [{ major: 21, version: "21.0.4", path: "C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.4.7-hotspot\\bin\\java.exe" }, { major: 8, version: "1.8.0_421", path: "C:\\Program Files\\Java\\jre1.8.0_421\\bin\\java.exe" }] });
       if (p === "/api/javas/scan") return ok(res, [1, 2]);
       if (p === "/api/pickdir") return ok(res, { path: "E:\\MCServers" });
-      if (p === "/api/update/check") return ok(res, { hasUpdate: false, current: "2.6.1" });
+      if (p === "/api/update/check") return ok(res, { hasUpdate: false, current: "2.9.0-beta.1" });
       if (p.startsWith("/api/tasks/")) {
         const st = state.taskStage;
         const names = ["下载 Java 21 运行时", "下载 Paper 1.21.4 核心", "同意 EULA 并生成配置", "生成启动脚本"];
