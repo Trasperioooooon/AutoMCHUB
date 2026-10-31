@@ -15,7 +15,8 @@ import (
 )
 
 // fakeAI 假的 AI 服务（OpenAI 兼容、流式），按玩家的话决定调哪个伙伴工具：
-//   - 「跟着我」→ companion_follow；「给我」→ companion_give（minecraft:oak_log ×1）；「去 X Z」→ companion_goto；
+//   - 「跟着我」→ companion_follow；「给 <玩家> N 个原木」→ companion_give（给别人）；「基岩」→ companion_give（minecraft:bedrock，
+//     fetch：背包里没有、也弄不到）；「给我」→ companion_give（minecraft:oak_log ×1）；「去 X Z」→ companion_goto；
 //     「招呼」→ companion_say（文字里故意带 § 格式码和换行）；「砍 N 个原木」→ companion_collect（minecraft:oak_log ×N）；
 //     「停下」→ companion_stop；「状态」→ companion_status；「打村民」→ companion_attack（minecraft:villager）；别的直接回一句话。
 //   - 请求里没有这个工具（没授权、带了 /问）时照样调用，模拟不听话的模型：MineDeck 必须在代码里拦住。
@@ -86,8 +87,9 @@ func (m oaMsg) text() string {
 }
 
 var (
-	countRe = regexp.MustCompile(`(\d+)\s*个`)
-	gotoRe  = regexp.MustCompile(`去\s*(-?\d+)\s+(-?\d+)`)
+	countRe  = regexp.MustCompile(`(\d+)\s*个`)
+	gotoRe   = regexp.MustCompile(`去\s*(-?\d+)\s+(-?\d+)`)
+	giveToRe = regexp.MustCompile(`给\s*([A-Za-z0-9_]{1,16})\s*(\d+)\s*个原木`)
 )
 
 func (f *fakeAI) serve(w http.ResponseWriter, r *http.Request) {
@@ -153,6 +155,11 @@ func (f *fakeAI) serve(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(q, "跟着我"):
 			name, args = "companion_follow", `{}`
+		case giveToRe.MatchString(q):
+			m := giveToRe.FindStringSubmatch(q)
+			name, args = "companion_give", `{"item":"minecraft:oak_log","count":`+m[2]+`,"player":"`+m[1]+`"}`
+		case strings.Contains(q, "基岩"):
+			name, args = "companion_give", `{"item":"minecraft:bedrock","count":1,"fetch":true}`
 		case strings.Contains(q, "给我"):
 			name, args = "companion_give", `{"item":"minecraft:oak_log","count":1}`
 		case gotoRe.MatchString(q):
