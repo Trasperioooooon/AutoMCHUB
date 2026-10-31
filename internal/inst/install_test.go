@@ -56,6 +56,15 @@ func TestLaunchArgsConsoleUTF8(t *testing.T) {
 			t.Errorf("run.bat 里没有 %s：\n%s", f, bat)
 		}
 	}
+
+	// 控制台编码手动选了 GBK：只留 file.encoding，输出还是系统编码，按 GBK 解才对得上
+	i.ConsoleEncoding = "gbk"
+	got = launchArgs(i)
+	want = []string{"-Xms1024M", "-Xmx4096M", "-Dfile.encoding=UTF-8", "-XX:+UseG1GC",
+		"@" + filepath.FromSlash("libraries/net/neoforged/neoforge/21.1.265/win_args.txt"), "nogui"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("GBK 时 launchArgs = %q\nwant %q", got, want)
+	}
 }
 
 // 保存 JVM 参数（套用预设 / 清空 / 手改）后，老版本的 log4shell 缓解参数必须仍在 instance.json、run.bat 与托管启动参数里；
